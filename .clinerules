@@ -1,0 +1,59 @@
+# Form Force 2.0 - Claude Configuration
+
+## Project Context
+This is a Flutter/Dart full-stack platform transforming forms into intelligent processes with AI-enhanced data capture.
+
+## Architecture
+- Multi-platform Flutter app (Web, iOS, Android)
+- Monorepo structure with apps and shared packages
+- Dart backend with REST API and WebSocket support
+- PostgreSQL database with Supabase
+- AI integration via OpenAI
+
+## Code Style & Conventions
+- Use null-safety and strong typing throughout
+- Follow official Flutter/Dart style guide
+- Use dependency injection via get_it
+- State management with Riverpod
+- Implement offline-first architecture
+- Always write unit and widget tests for new features
+
+## Project Structure
+```
+/apps/mobile - Flutter app (iOS, Android, Web)
+/packages/backend - Dart REST API server
+/packages/shared - Shared models and utilities
+/packages/ai_service - AI validation and enhancement
+/supabase - Database schemas and migrations
+```
+
+## Development Guidelines
+1. Always maintain backward compatibility with existing APIs
+2. Use meaningful commit messages following conventional commits
+3. Test changes locally before committing
+4. Update documentation when adding new features
+5. Keep dependencies up to date
+6. Follow security best practices (encryption, authentication)
+7. Optimize for performance and offline usage
+
+## Key Technologies
+- Flutter 3.x
+- Dart 3.x
+- PostgreSQL + Supabase
+- Firebase (push notifications)
+- OpenAI API
+- Docker (deployment)
+
+## Testing Strategy
+- Unit tests for business logic
+- Widget tests for UI components
+- Integration tests for critical flows
+- E2E tests for major user journeys
+
+## When Making Changes
+- Check existing patterns in the codebase first
+- Reuse shared components from /packages/shared
+- Maintain consistency with existing code style
+- Consider offline scenarios
+- Think about multi-platform compatibility
+- Update relevant documentation files
