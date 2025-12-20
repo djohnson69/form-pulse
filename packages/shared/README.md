@@ -11,29 +11,37 @@ and the Flutter guide for
 [developing packages and plugins](https://flutter.dev/to/develop-packages). 
 -->
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+
+## Form Force Shared Package
+
+This package contains shared models, utilities, and constants for the Form Force 2.0 platform. It is used by both the mobile/web app and backend for consistent data structures and business logic.
+
 
 ## Features
+- Shared data models (forms, users, orgs, submissions)
+- Common utilities and helpers
+- Constants for validation and field types
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
 
 ## Getting started
+Add this package as a dependency in your Dart/Flutter project:
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
-
-## Usage
-
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder. 
-
-```dart
-const like = 'sample';
+```yaml
+dependencies:
+	shared:
+		path: ../shared
 ```
 
-## Additional information
 
-TODO: Tell users more about the package: where to find more information, how to 
-contribute to the package, how to file issues, what response they can expect 
-from the package authors, and more.
+## Usage
+Import shared models and utilities:
+
+```dart
+import 'package:shared/shared.dart';
+
+final form = FormModel(...);
+```
+
+
+## Additional information
+See the main project README for more details. Contributions welcome!

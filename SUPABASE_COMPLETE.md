@@ -15,7 +15,7 @@
 
 ### 2. Code Configuration
 - ✅ Mobile app initialized in [main.dart](apps/mobile/lib/main.dart)
-- ✅ Web app initialized in [main.dart](apps/web/lib/main.dart)
+- ✅ Web app runs from unified [main.dart](apps/mobile/lib/main.dart)
 - ✅ Environment variable support with `String.fromEnvironment()`
 - ✅ Dart-define support for SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_BUCKET
 - ✅ Default values set for development (your Supabase project)

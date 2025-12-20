@@ -12,6 +12,8 @@ class Employee {
   final String? employeeNumber;
   final String? department;
   final String? position;
+  final String? jobSiteId;
+  final String? jobSiteName;
   final DateTime hireDate;
   final DateTime? terminationDate;
   final bool isActive;
@@ -31,6 +33,8 @@ class Employee {
     this.employeeNumber,
     this.department,
     this.position,
+    this.jobSiteId,
+    this.jobSiteName,
     required this.hireDate,
     this.terminationDate,
     this.isActive = true,
@@ -41,6 +45,12 @@ class Employee {
   });
 
   String get fullName => '$firstName $lastName';
+
+  String get initials {
+    final firstInitial = firstName.isNotEmpty ? firstName[0] : '';
+    final lastInitial = lastName.isNotEmpty ? lastName[0] : '';
+    return '$firstInitial$lastInitial'.toUpperCase();
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -54,6 +64,8 @@ class Employee {
       'employeeNumber': employeeNumber,
       'department': department,
       'position': position,
+      'jobSiteId': jobSiteId,
+      'jobSiteName': jobSiteName,
       'hireDate': hireDate.toIso8601String(),
       'terminationDate': terminationDate?.toIso8601String(),
       'isActive': isActive,
@@ -76,6 +88,8 @@ class Employee {
       employeeNumber: json['employeeNumber'] as String?,
       department: json['department'] as String?,
       position: json['position'] as String?,
+      jobSiteId: json['jobSiteId'] as String?,
+      jobSiteName: json['jobSiteName'] as String?,
       hireDate: DateTime.parse(json['hireDate'] as String),
       terminationDate: json['terminationDate'] != null
           ? DateTime.parse(json['terminationDate'] as String)
@@ -104,6 +118,14 @@ class Training {
   final double? score;
   final String? certificateUrl;
   final DateTime? nextRecertificationDate;
+  final String? location;
+  final double? ceuCredits;
+  final List<String>? materials;
+  final List<String>? documents;
+  final String? assignedRole;
+  final String? assignedJob;
+  final String? assignedSite;
+  final int? assignedTenureDays;
   final Map<String, dynamic>? metadata;
 
   Training({
@@ -118,6 +140,14 @@ class Training {
     this.score,
     this.certificateUrl,
     this.nextRecertificationDate,
+    this.location,
+    this.ceuCredits,
+    this.materials,
+    this.documents,
+    this.assignedRole,
+    this.assignedJob,
+    this.assignedSite,
+    this.assignedTenureDays,
     this.metadata,
   });
 
@@ -146,6 +176,14 @@ class Training {
       'score': score,
       'certificateUrl': certificateUrl,
       'nextRecertificationDate': nextRecertificationDate?.toIso8601String(),
+      'location': location,
+      'ceuCredits': ceuCredits,
+      'materials': materials,
+      'documents': documents,
+      'assignedRole': assignedRole,
+      'assignedJob': assignedJob,
+      'assignedSite': assignedSite,
+      'assignedTenureDays': assignedTenureDays,
       'metadata': metadata,
     };
   }
@@ -169,6 +207,16 @@ class Training {
       nextRecertificationDate: json['nextRecertificationDate'] != null
           ? DateTime.parse(json['nextRecertificationDate'] as String)
           : null,
+      location: json['location'] as String?,
+      ceuCredits: _parseNullableDouble(json['ceuCredits']),
+      materials: (json['materials'] as List?)?.cast<String>(),
+      documents: (json['documents'] as List?)?.cast<String>(),
+      assignedRole: json['assignedRole'] as String?,
+      assignedJob: json['assignedJob'] as String?,
+      assignedSite: json['assignedSite'] as String?,
+      assignedTenureDays: json['assignedTenureDays'] is int
+          ? json['assignedTenureDays'] as int
+          : int.tryParse(json['assignedTenureDays']?.toString() ?? ''),
       metadata: json['metadata'] as Map<String, dynamic>?,
     );
   }

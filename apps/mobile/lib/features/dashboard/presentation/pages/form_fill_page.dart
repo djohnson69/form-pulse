@@ -8,12 +8,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:crypto/crypto.dart';
+import 'package:record/record.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared/shared.dart' as shared;
 
 import '../../data/dashboard_provider.dart';
 import '../../data/pending_queue.dart';
 import '../../data/user_profile_provider.dart';
+import '../../../../core/utils/file_bytes_loader.dart';
+import 'photo_annotator_page.dart';
+import 'signature_pad_page.dart';
 
 const _supabaseBucket =
     String.fromEnvironment('SUPABASE_BUCKET', defaultValue: 'formbridge-attachments');
@@ -41,8 +49,14 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
   final Map<String, dynamic> _values = {};
   final List<_AttachmentItem> _attachments = [];
   final SupabaseClient _supabase = Supabase.instance.client;
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  final SpeechToText _speechToText = SpeechToText();
   Map<String, dynamic>? _locationData;
   bool _submitting = false;
+  bool _isRecordingAudio = false;
+  bool _isDictating = false;
+  String? _dictationFieldId;
+  String? _pendingAudioLabel;
   String? _orgId;
 
   @override
@@ -66,6 +80,8 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
     for (final controller in _controllers.values) {
       controller.dispose();
     }
+    _audioRecorder.dispose();
+    _speechToText.stop();
     super.dispose();
   }
 
@@ -155,12 +171,13 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
       case shared.FormFieldType.computed:
         return _buildComputed(field);
       case shared.FormFieldType.signature:
-        return _buildTextField(
-          field,
-          hint: 'Type your name as a digital signature',
-        );
+        return _buildSignatureField(field);
       case shared.FormFieldType.video:
         return _buildVideoPrompt(field);
+      case shared.FormFieldType.audio:
+        return _buildAudioPrompt(field);
+      case shared.FormFieldType.voiceNote:
+        return _buildVoiceNoteField(field);
       case shared.FormFieldType.sectionHeader:
       case shared.FormFieldType.infoText:
         return Padding(
@@ -439,6 +456,55 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
     );
   }
 
+  Widget _buildAudioPrompt(shared.FormField field) {
+    final isRecording = _isRecordingAudio;
+    return Card(
+      child: ListTile(
+        leading: Icon(
+          Icons.mic_none,
+          color: isRecording ? Colors.red : null,
+        ),
+        title: Text(field.label),
+        subtitle: Text(
+          isRecording ? 'Recording... tap to stop' : 'Capture an audio note',
+        ),
+        trailing: IconButton(
+          icon: Icon(isRecording ? Icons.stop_circle : Icons.mic),
+          onPressed:
+              _submitting ? null : () => _toggleAudioRecording(label: field.label),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVoiceNoteField(shared.FormField field) {
+    final controller = _controllerFor(field.id);
+    final dictating = _isDictating && _dictationFieldId == field.id;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        maxLines: 3,
+        decoration: InputDecoration(
+          labelText: field.label,
+          hintText: field.placeholder ?? 'Tap the mic to dictate',
+          suffixIcon: IconButton(
+            icon: Icon(dictating ? Icons.stop_circle : Icons.mic),
+            onPressed: _submitting ? null : () => _toggleDictation(field.id),
+          ),
+        ),
+        validator: (value) {
+          if (field.isRequired && (value == null || value.isEmpty)) {
+            return 'Required';
+          }
+          return null;
+        },
+        onChanged: (value) => setState(() => _values[field.id] = value),
+        onSaved: (value) => _values[field.id] = value ?? '',
+      ),
+    );
+  }
+
   Widget _buildDocumentPrompt(shared.FormField field) {
     return Card(
       child: ListTile(
@@ -560,17 +626,33 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
             if (_attachments.isEmpty)
               const Text('No attachments yet. Add photos, scans, or videos.')
             else
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
+              Column(
                 children: _attachments.map((att) {
-                  return Chip(
-                    label: Text(att.label),
-                    avatar: Icon(_attachmentIcon(att.type)),
-                    deleteIcon: const Icon(Icons.close),
-                    onDeleted: () {
-                      setState(() => _attachments.remove(att));
-                    },
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: Icon(_attachmentIcon(att.type)),
+                      title: Text(att.label),
+                      subtitle: Text(att.type),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (att.type == 'photo')
+                            IconButton(
+                              tooltip: 'Annotate',
+                              icon: const Icon(Icons.edit),
+                              onPressed: () => _annotatePhoto(att),
+                            ),
+                          IconButton(
+                            tooltip: 'Remove',
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              setState(() => _attachments.remove(att));
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
                   );
                 }).toList(),
               ),
@@ -587,6 +669,14 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
                   icon: const Icon(Icons.image_outlined),
                   label: const Text('Gallery'),
                   onPressed: () => _addPhoto(fromCamera: false),
+                ),
+                OutlinedButton.icon(
+                  icon: Icon(
+                    _isRecordingAudio ? Icons.stop_circle : Icons.mic,
+                  ),
+                  label: Text(_isRecordingAudio ? 'Stop' : 'Audio'),
+                  onPressed:
+                      _submitting ? null : () => _toggleAudioRecording(),
                 ),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.upload_file),
@@ -801,6 +891,58 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
     );
   }
 
+  Widget _buildSignatureField(shared.FormField field) {
+    final attachment = _signatureAttachmentFor(field.id);
+    final signedAt = attachment?.metadata?['signedAt'] as String?;
+    final signerName = attachment?.metadata?['signerName'] as String?;
+    return Card(
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.border_color),
+            title: Text(field.label),
+            subtitle: Text(
+              attachment == null
+                  ? 'Capture signature'
+                  : 'Signed${signedAt != null ? ' • $signedAt' : ''}',
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: _submitting ? null : () => _captureSignature(field),
+            ),
+          ),
+          if (signerName != null && signerName.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 16, bottom: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Signer: $signerName'),
+              ),
+            ),
+          if (attachment?.bytes != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
+              child: Image.memory(
+                attachment!.bytes!,
+                height: 120,
+                fit: BoxFit.contain,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  _AttachmentItem? _signatureAttachmentFor(String fieldId) {
+    for (final att in _attachments) {
+      if (att.type == 'signature' &&
+          att.metadata?['signatureFieldId'] == fieldId) {
+        return att;
+      }
+    }
+    return null;
+  }
+
   Widget _buildInlineField({
     required String parentId,
     required int rowIndex,
@@ -820,6 +962,174 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
           });
         },
       ),
+    );
+  }
+
+  Future<void> _captureSignature(shared.FormField field) async {
+    final result = await Navigator.of(context).push<SignatureResult>(
+      MaterialPageRoute(
+        builder: (_) => SignaturePadPage(title: field.label),
+      ),
+    );
+    if (result == null) return;
+    final signedAt = DateTime.now().toIso8601String();
+    final attachment = _AttachmentItem(
+      id: 'signature-${DateTime.now().microsecondsSinceEpoch}',
+      type: 'signature',
+      label: result.name?.isNotEmpty == true
+          ? 'Signature • ${result.name}'
+          : 'Signature',
+      bytes: result.bytes,
+      metadata: {
+        'signatureFieldId': field.id,
+        'signedAt': signedAt,
+        if (result.name != null) 'signerName': result.name,
+      },
+    );
+
+    setState(() {
+      final index = _attachments.indexWhere(
+        (a) =>
+            a.type == 'signature' &&
+            a.metadata?['signatureFieldId'] == field.id,
+      );
+      if (index >= 0) {
+        _attachments[index] = attachment;
+      } else {
+        _attachments.add(attachment);
+      }
+      _values[field.id] = {
+        'signatureId': attachment.id,
+        'signedAt': signedAt,
+        if (result.name != null) 'signerName': result.name,
+      };
+    });
+  }
+
+  Future<void> _toggleAudioRecording({String? label}) async {
+    if (_isRecordingAudio) {
+      await _stopAudioRecording();
+      return;
+    }
+    await _startAudioRecording(label: label);
+  }
+
+  Future<void> _startAudioRecording({String? label}) async {
+    final hasPermission = await _audioRecorder.hasPermission();
+    if (!hasPermission) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission denied')),
+      );
+      return;
+    }
+
+    final dir = await getTemporaryDirectory();
+    final safeLabel = (label ?? 'audio')
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    final fileName =
+        '${safeLabel.isEmpty ? 'audio' : safeLabel}_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final path = p.join(dir.path, fileName);
+
+    _pendingAudioLabel = label ?? 'Audio note';
+    await _audioRecorder.start(
+      const RecordConfig(encoder: AudioEncoder.aacLc),
+      path: path,
+    );
+
+    if (!mounted) return;
+    setState(() => _isRecordingAudio = true);
+  }
+
+  Future<void> _stopAudioRecording() async {
+    final path = await _audioRecorder.stop();
+    if (!mounted) return;
+    setState(() => _isRecordingAudio = false);
+
+    if (path == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Audio recording failed to save')),
+      );
+      return;
+    }
+
+    final label = _pendingAudioLabel ?? 'Audio note';
+    _pendingAudioLabel = null;
+
+    setState(() {
+      _attachments.add(
+        _AttachmentItem(
+          id: 'audio-${DateTime.now().microsecondsSinceEpoch}',
+          type: 'audio',
+          label: label,
+          path: path,
+          metadata: {'source': label},
+        ),
+      );
+    });
+  }
+
+  Future<void> _toggleDictation(String fieldId) async {
+    if (_isDictating && _dictationFieldId == fieldId) {
+      await _speechToText.stop();
+      if (!mounted) return;
+      setState(() {
+        _isDictating = false;
+        _dictationFieldId = null;
+      });
+      return;
+    }
+
+    if (_isDictating) {
+      await _speechToText.stop();
+    }
+
+    final available = await _speechToText.initialize(
+      onStatus: (status) {
+        if (!mounted) return;
+        if (status == 'done' || status == 'notListening') {
+          setState(() {
+            _isDictating = false;
+            _dictationFieldId = null;
+          });
+        }
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() {
+          _isDictating = false;
+          _dictationFieldId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Dictation error: ${error.errorMsg}')),
+        );
+      },
+    );
+
+    if (!available) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Speech recognition unavailable')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isDictating = true;
+      _dictationFieldId = fieldId;
+    });
+
+    _speechToText.listen(
+      onResult: (SpeechRecognitionResult result) {
+        if (!mounted) return;
+        final text = result.recognizedWords;
+        setState(() {
+          _controllerFor(fieldId).text = text;
+          _values[fieldId] = text;
+        });
+      },
     );
   }
 
@@ -851,6 +1161,48 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to add photo: $e')));
     }
+  }
+
+  Future<void> _annotatePhoto(_AttachmentItem item) async {
+    final bytes = item.bytes ??
+        (item.path != null ? await loadFileBytes(item.path!) : null);
+    if (bytes == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo data not available')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final annotated = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(
+        builder: (_) => PhotoAnnotatorPage(
+          imageBytes: bytes,
+          title: 'Annotate ${item.label}',
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (annotated == null) return;
+
+    setState(() {
+      final index = _attachments.indexOf(item);
+      if (index == -1) return;
+      _attachments[index] = _AttachmentItem(
+        id: item.id,
+        type: item.type,
+        label: item.label,
+        bytes: annotated,
+        path: item.path,
+        metadata: {
+          ...?item.metadata,
+          'annotated': true,
+          'annotatedAt': DateTime.now().toIso8601String(),
+        },
+        url: null,
+        hash: null,
+      );
+    });
   }
 
   Future<void> _addVideo() async {
@@ -996,6 +1348,10 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
         return Icons.photo;
       case 'video':
         return Icons.videocam;
+      case 'audio':
+        return Icons.mic_none;
+      case 'signature':
+        return Icons.border_color;
       default:
         return Icons.insert_drive_file;
     }
@@ -1039,6 +1395,17 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
     if (formState == null) return;
     if (!formState.validate()) return;
     formState.save();
+
+    for (final field in widget.form.fields) {
+      if (field.type == shared.FormFieldType.signature && field.isRequired) {
+        if (_signatureAttachmentFor(field.id) == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Signature required for ${field.label}')),
+          );
+          return;
+        }
+      }
+    }
 
     setState(() => _submitting = true);
 
@@ -1092,7 +1459,15 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
   ) async {
     final results = <_AttachmentItem>[];
     for (final item in items) {
-      if (item.url != null || item.bytes == null) {
+      if (item.url != null) {
+        results.add(item);
+        continue;
+      }
+      var bytes = item.bytes;
+      if (bytes == null && item.path != null) {
+        bytes = await loadFileBytes(item.path!);
+      }
+      if (bytes == null) {
         results.add(item);
         continue;
       }
@@ -1100,17 +1475,34 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
         final prefix = _orgId != null ? 'org-$_orgId' : 'public';
         final path =
             '$prefix/submissions/${DateTime.now().microsecondsSinceEpoch}_${item.label}';
-      await _supabase.storage
-          .from(_supabaseBucket)
-          .uploadBinary(path, item.bytes!, fileOptions: const FileOptions(upsert: true));
-      final publicUrl = _supabase.storage.from(_supabaseBucket).getPublicUrl(path);
-      if (!mounted) return results;
-      results.add(item.copyWith(url: publicUrl, hash: _hashBytes(item.bytes!)));
-    } catch (e) {
-      // Keep original item on failure to avoid data loss.
-      results.add(item);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload failed for ${item.label}: $e')),
+        await _supabase.storage
+            .from(_supabaseBucket)
+            .uploadBinary(
+              path,
+              bytes,
+              fileOptions: const FileOptions(upsert: true),
+            );
+        final publicUrl =
+            _supabase.storage.from(_supabaseBucket).getPublicUrl(path);
+        if (!mounted) return results;
+        final nextMetadata = {
+          ...?item.metadata,
+          'storagePath': path,
+          'bucket': _supabaseBucket,
+        };
+        results.add(
+          item.copyWith(
+            url: publicUrl,
+            hash: _hashBytes(bytes),
+            metadata: nextMetadata,
+          ),
+        );
+      } catch (e) {
+        // Keep original item on failure to avoid data loss.
+        results.add(item);
+        if (!mounted) return results;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed for ${item.label}: $e')),
         );
       }
     }
@@ -1134,7 +1526,7 @@ class _AttachmentItem {
   });
 
   final String id;
-  final String type; // photo, file, video
+  final String type; // photo, file, video, audio, signature
   final String label;
   final Uint8List? bytes;
   final String? path;
@@ -1150,8 +1542,12 @@ class _AttachmentItem {
       'filename': label,
       'mimeType': type == 'photo'
           ? 'image/jpeg'
+          : type == 'signature'
+          ? 'image/png'
           : type == 'video'
           ? 'video/mp4'
+          : type == 'audio'
+          ? 'audio/m4a'
           : 'application/octet-stream',
       'capturedAt': DateTime.now().toIso8601String(),
       'metadata': {
@@ -1177,6 +1573,7 @@ class _AttachmentItem {
   _AttachmentItem copyWith({
     String? url,
     String? hash,
+    Map<String, dynamic>? metadata,
   }) {
     return _AttachmentItem(
       id: id,
@@ -1184,7 +1581,7 @@ class _AttachmentItem {
       label: label,
       bytes: bytes,
       path: path,
-      metadata: metadata,
+      metadata: metadata ?? this.metadata,
       url: url ?? this.url,
       hash: hash ?? this.hash,
     );

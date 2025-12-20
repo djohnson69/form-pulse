@@ -4,6 +4,7 @@ class Document {
   final String title;
   final String? description;
   final String? category;
+  final String? projectId;
   final String fileUrl;
   final String? localPath;
   final String filename;
@@ -14,6 +15,7 @@ class Document {
   final DateTime uploadedAt;
   final DateTime? updatedAt;
   final bool isPublished;
+  final bool isTemplate;
   final List<String>? tags;
   final String? companyId;
   final Map<String, dynamic>? metadata;
@@ -23,6 +25,7 @@ class Document {
     required this.title,
     this.description,
     this.category,
+    this.projectId,
     required this.fileUrl,
     this.localPath,
     required this.filename,
@@ -33,6 +36,7 @@ class Document {
     required this.uploadedAt,
     this.updatedAt,
     this.isPublished = true,
+    this.isTemplate = false,
     this.tags,
     this.companyId,
     this.metadata,
@@ -58,6 +62,7 @@ class Document {
       'title': title,
       'description': description,
       'category': category,
+      'projectId': projectId,
       'fileUrl': fileUrl,
       'localPath': localPath,
       'filename': filename,
@@ -68,6 +73,7 @@ class Document {
       'uploadedAt': uploadedAt.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'isPublished': isPublished,
+      'isTemplate': isTemplate,
       'tags': tags,
       'companyId': companyId,
       'metadata': metadata,
@@ -80,6 +86,7 @@ class Document {
       title: json['title'] as String,
       description: json['description'] as String?,
       category: json['category'] as String?,
+      projectId: json['projectId'] as String?,
       fileUrl: json['fileUrl'] as String,
       localPath: json['localPath'] as String?,
       filename: json['filename'] as String,
@@ -92,6 +99,7 @@ class Document {
           ? DateTime.parse(json['updatedAt'] as String)
           : null,
       isPublished: json['isPublished'] as bool? ?? true,
+      isTemplate: json['isTemplate'] as bool? ?? false,
       tags: (json['tags'] as List?)?.cast<String>(),
       companyId: json['companyId'] as String?,
       metadata: json['metadata'] as Map<String, dynamic>?,

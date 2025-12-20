@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'dashboard_repository.dart';
+import '../../../core/utils/file_bytes_loader.dart';
 
 class PendingSubmission {
   PendingSubmission({
@@ -112,11 +113,17 @@ class PendingSubmissionQueue {
     final results = <Map<String, dynamic>>[];
     for (final att in attachments) {
       final bytesBase64 = att['bytes'] as String?;
-      if (bytesBase64 == null) {
+      final pathValue = att['path'] as String?;
+      Uint8List? bytes;
+      if (bytesBase64 != null) {
+        bytes = base64Decode(bytesBase64);
+      } else if (pathValue != null) {
+        bytes = await loadFileBytes(pathValue);
+      }
+      if (bytes == null) {
         results.add(att);
         continue;
       }
-      final bytes = base64Decode(bytesBase64);
       final prefix = orgId != null ? 'org-$orgId' : 'public';
       final path =
           '$prefix/submissions/${DateTime.now().microsecondsSinceEpoch}_${att['filename'] ?? 'file'}';
@@ -124,11 +131,17 @@ class PendingSubmissionQueue {
           .from(bucketName)
           .uploadBinary(path, bytes, fileOptions: const FileOptions(upsert: true));
       final url = _supabase.storage.from(bucketName).getPublicUrl(path);
+      final nextMetadata = <String, dynamic>{
+        ...(att['metadata'] as Map? ?? const <String, dynamic>{}),
+        'storagePath': path,
+        'bucket': bucketName,
+      };
       results.add({
         ...att,
         'url': url,
         'hash': _hashBytes(bytes),
         'bytes': null,
+        'metadata': nextMetadata,
       });
     }
     return results;

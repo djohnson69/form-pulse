@@ -1,36 +1,47 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../features/auth/presentation/pages/login_page.dart';
-import '../features/dashboard/presentation/pages/dashboard_page.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'app_navigator.dart';
 
-/// Main app navigator and entry point
-class AppNavigator extends ConsumerStatefulWidget {
-  const AppNavigator({super.key});
+/// Main app entry point
+class AppEntry extends StatelessWidget {
+  const AppEntry({super.key});
 
-  @override
-  ConsumerState<AppNavigator> createState() => _AppNavigatorState();
-}
-
-class _AppNavigatorState extends ConsumerState<AppNavigator> {
   @override
   Widget build(BuildContext context) {
-    final client = Supabase.instance.client;
-    return StreamBuilder<AuthState>(
-      stream: client.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        final session = snapshot.data?.session ?? client.auth.currentSession;
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            session == null) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        if (session == null) {
-          return const LoginPage();
-        }
-        return const DashboardPage();
-      },
+    return ProviderScope(
+      child: MaterialApp(
+        title: 'Form Bridge',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF2196F3),
+            brightness: Brightness.light,
+          ),
+          textTheme: GoogleFonts.interTextTheme(),
+          useMaterial3: true,
+          appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
+          cardTheme: const CardThemeData(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            filled: true,
+          ),
+        ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF2196F3),
+            brightness: Brightness.dark,
+          ),
+          textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
+          useMaterial3: true,
+        ),
+        home: const AppNavigator(),
+      ),
     );
   }
 }

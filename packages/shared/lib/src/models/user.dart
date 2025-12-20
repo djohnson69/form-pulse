@@ -65,7 +65,10 @@ class User {
       email: json['email'] as String,
       firstName: json['firstName'] as String,
       lastName: json['lastName'] as String,
-      role: UserRole.values.firstWhere((e) => e.name == json['role']),
+      role: UserRole.values.firstWhere(
+        (e) => e.name == json['role'],
+        orElse: () => UserRole.viewer,
+      ),
       companyId: json['companyId'] as String?,
       photoUrl: json['photoUrl'] as String?,
       phoneNumber: json['phoneNumber'] as String?,

@@ -20,9 +20,7 @@ echo "📁 Checking required files..."
 
 files=(
   "apps/mobile/pubspec.yaml"
-  "apps/web/pubspec.yaml"
   "apps/mobile/lib/main.dart"
-  "apps/web/lib/main.dart"
   "supabase/schema.sql"
   "supabase/seed.sql"
   ".vscode/launch.json"
@@ -46,51 +44,33 @@ done
 echo ""
 echo "📦 Checking package dependencies..."
 
-# Check mobile app has supabase_flutter
+# Check app has supabase_flutter
 if grep -q "supabase_flutter:" apps/mobile/pubspec.yaml; then
   echo -e "${GREEN}✓${NC} Mobile app has supabase_flutter"
   ((checks_passed++))
 else
-  echo -e "${RED}✗${NC} Mobile app missing supabase_flutter"
-  ((checks_failed++))
-fi
-
-# Check web app has supabase_flutter
-if grep -q "supabase_flutter:" apps/web/pubspec.yaml; then
-  echo -e "${GREEN}✓${NC} Web app has supabase_flutter"
-  ((checks_passed++))
-else
-  echo -e "${RED}✗${NC} Web app missing supabase_flutter"
+  echo -e "${RED}✗${NC} App missing supabase_flutter"
   ((checks_failed++))
 fi
 
 echo ""
 echo "🔧 Checking configuration..."
 
-# Check mobile main.dart has Supabase.initialize
+# Check main.dart has Supabase.initialize
 if grep -q "Supabase.initialize" apps/mobile/lib/main.dart; then
-  echo -e "${GREEN}✓${NC} Mobile app initializes Supabase"
+  echo -e "${GREEN}✓${NC} App initializes Supabase"
   ((checks_passed++))
 else
-  echo -e "${RED}✗${NC} Mobile app doesn't initialize Supabase"
-  ((checks_failed++))
-fi
-
-# Check web main.dart has Supabase.initialize
-if grep -q "Supabase.initialize" apps/web/lib/main.dart; then
-  echo -e "${GREEN}✓${NC} Web app initializes Supabase"
-  ((checks_passed++))
-else
-  echo -e "${RED}✗${NC} Web app doesn't initialize Supabase"
+  echo -e "${RED}✗${NC} App doesn't initialize Supabase"
   ((checks_failed++))
 fi
 
 # Check for dart-define support
 if grep -q "String.fromEnvironment" apps/mobile/lib/main.dart; then
-  echo -e "${GREEN}✓${NC} Mobile uses dart-define for config"
+  echo -e "${GREEN}✓${NC} App uses dart-define for config"
   ((checks_passed++))
 else
-  echo -e "${YELLOW}⚠${NC}  Mobile might have hardcoded values"
+  echo -e "${YELLOW}⚠${NC}  App might have hardcoded values"
   ((checks_failed++))
 fi
 
@@ -137,6 +117,17 @@ if grep -q "formbridge-attachments" supabase/schema.sql; then
   ((checks_passed++))
 else
   echo -e "${RED}✗${NC} Storage bucket policies missing"
+  ((checks_failed++))
+fi
+
+echo ""
+echo "🧱 Checking forms schema columns..."
+
+if grep -q "id text primary key" supabase/schema.sql && grep -q "fields jsonb" supabase/schema.sql && grep -q "metadata jsonb" supabase/schema.sql; then
+  echo -e "${GREEN}✓${NC} forms table uses text ids with fields/tags/metadata columns"
+  ((checks_passed++))
+else
+  echo -e "${RED}✗${NC} forms table schema missing text id or fields/tags/metadata columns"
   ((checks_failed++))
 fi
 

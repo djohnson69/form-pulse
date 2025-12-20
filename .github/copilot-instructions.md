@@ -21,8 +21,7 @@ Form Force 2.0 is a comprehensive Flutter/Dart full-stack platform that transfor
 ## Project Structure
 ```
 /apps
-  /mobile - Flutter mobile application
-  /web - Flutter web application
+  /mobile - Flutter app (iOS, Android, Web)
 /packages
   /backend - Dart REST API server
   /shared - Shared models and utilities

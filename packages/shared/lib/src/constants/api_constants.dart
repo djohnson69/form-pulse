@@ -22,6 +22,7 @@ class ApiConstants {
   static const String jobSites = '/api/job-sites';
   static const String equipment = '/api/equipment';
   static const String training = '/api/training';
+  static const String tasks = '/api/tasks';
 
   // WebSocket endpoints
   static const String wsNotifications = '/ws/notifications';

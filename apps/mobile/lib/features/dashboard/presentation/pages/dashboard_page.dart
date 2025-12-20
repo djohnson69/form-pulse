@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart' as legacy;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,12 +11,30 @@ import '../../data/pending_queue.dart';
 import 'create_form_page.dart';
 import 'form_detail_page.dart';
 import 'form_fill_page.dart';
+import '../../../projects/data/projects_provider.dart';
+import '../../../projects/presentation/pages/project_detail_page.dart';
+import '../../../projects/presentation/pages/project_editor_page.dart';
+import '../../../projects/presentation/pages/projects_page.dart';
+import '../../../documents/presentation/pages/documents_page.dart';
+import '../../../tasks/data/tasks_provider.dart';
+import '../../../tasks/presentation/pages/task_detail_page.dart';
+import '../../../tasks/presentation/pages/task_editor_page.dart';
+import '../../../tasks/presentation/pages/tasks_page.dart';
+import '../../../training/presentation/pages/training_hub_page.dart';
+import '../../../settings/presentation/pages/settings_page.dart';
+import '../../../partners/presentation/pages/messages_page.dart';
+import '../../../partners/presentation/pages/clients_page.dart';
+import '../../../partners/presentation/pages/vendors_page.dart';
+import '../../../assets/presentation/pages/assets_page.dart';
+import '../../../ops/presentation/pages/ops_hub_page.dart';
 import 'submission_detail_page.dart';
 import 'template_gallery_page.dart';
+import 'reports_page.dart';
 
-final _navToAlertsProvider = StateProvider<bool>((ref) => false);
+final _navToAlertsProvider = legacy.StateProvider<bool>((ref) => false);
+final _navToTasksProvider = legacy.StateProvider<bool>((ref) => false);
 final dashboardPrefsProvider =
-    StateNotifierProvider<DashboardPrefsNotifier, DashboardPreferences>(
+    legacy.StateNotifierProvider<DashboardPrefsNotifier, DashboardPreferences>(
       (ref) => DashboardPrefsNotifier(),
     );
 
@@ -30,6 +49,7 @@ class DashboardPage extends ConsumerStatefulWidget {
 class _DashboardPageState extends ConsumerState<DashboardPage> {
   int _currentIndex = 0;
   ProviderSubscription<bool>? _navSubscription;
+  ProviderSubscription<bool>? _taskNavSubscription;
   PendingSubmissionQueue? _pendingQueue;
   static const _supabaseBucket =
       String.fromEnvironment('SUPABASE_BUCKET', defaultValue: 'formbridge-attachments');
@@ -37,6 +57,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   late final List<Widget> _pages = [
     const DashboardHomeView(),
     const FormsListView(),
+    const ProjectsPage(),
+    const TasksPage(),
     const NotificationsView(),
     const ProfileView(),
   ];
@@ -57,8 +79,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       _navToAlertsProvider,
       (previous, next) {
         if (next) {
-          setState(() => _currentIndex = 2);
+          setState(() => _currentIndex = 4);
           ref.read(_navToAlertsProvider.notifier).state = false;
+        }
+      },
+    );
+    _taskNavSubscription = ref.listenManual<bool>(
+      _navToTasksProvider,
+      (previous, next) {
+        if (next) {
+          setState(() => _currentIndex = 3);
+          ref.read(_navToTasksProvider.notifier).state = false;
         }
       },
     );
@@ -67,6 +98,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   @override
   void dispose() {
     _navSubscription?.close();
+    _taskNavSubscription?.close();
     super.dispose();
   }
 
@@ -95,6 +127,15 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             },
           ),
           IconButton(
+            icon: const Icon(Icons.insights),
+            tooltip: 'Reports',
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ReportsPage()),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.add_box_outlined),
             tooltip: 'Create form',
             onPressed: () async {
@@ -108,25 +149,31 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ),
           IconButton(
             icon: const Icon(Icons.search),
-            onPressed: () {
-              // TODO: hook into backend search once implemented.
+            tooltip: 'Search forms',
+            onPressed: () async {
+              await showSearch<String?>(
+                context: context,
+                delegate: _FormSearchDelegate(ref),
+              );
             },
           ),
-              PopupMenuButton<String>(
-                onSelected: (value) {
-                  switch (value) {
-                    case 'settings':
-                      // TODO: navigate to settings page when available.
-                      break;
-                    case 'profile':
-                      setState(() => _currentIndex = 3);
-                      break;
-                    case 'logout':
-                      Supabase.instance.client.auth.signOut();
-                      break;
-                  }
-                },
-                itemBuilder: (context) => const [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'settings':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsPage()),
+                  );
+                  break;
+                case 'profile':
+                  setState(() => _currentIndex = 5);
+                  break;
+                case 'logout':
+                  Supabase.instance.client.auth.signOut();
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
               PopupMenuItem(
                 value: 'settings',
                 child: ListTile(
@@ -174,6 +221,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             label: 'Forms',
           ),
           NavigationDestination(
+            icon: Icon(Icons.work_outline),
+            selectedIcon: Icon(Icons.work),
+            label: 'Projects',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.checklist_outlined),
+            selectedIcon: Icon(Icons.checklist),
+            label: 'Tasks',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.notifications_outlined),
             selectedIcon: Icon(Icons.notifications),
             label: 'Alerts',
@@ -190,6 +247,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               onPressed: () => _openSubmissionSheet(context),
               icon: const Icon(Icons.add),
               label: const Text('New Submission'),
+            )
+          : _currentIndex == 2
+          ? FloatingActionButton.extended(
+              onPressed: () => _openProjectEditor(context),
+              icon: const Icon(Icons.add),
+              label: const Text('New Project'),
+            )
+          : _currentIndex == 3
+          ? FloatingActionButton.extended(
+              onPressed: () => _openTaskEditor(context),
+              icon: const Icon(Icons.add),
+              label: const Text('New Task'),
             )
           : null,
     );
@@ -231,6 +300,94 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     if (!mounted) return;
     setState(() {});
   }
+
+  Future<void> _openProjectEditor(BuildContext context) async {
+    final project = await Navigator.of(context).push<Project?>(
+      MaterialPageRoute(builder: (_) => const ProjectEditorPage()),
+    );
+    if (!context.mounted) return;
+    if (project != null) {
+      ref.invalidate(projectsProvider);
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ProjectDetailPage(project: project)),
+      );
+    }
+  }
+
+  Future<void> _openTaskEditor(BuildContext context) async {
+    final task = await Navigator.of(context).push<Task?>(
+      MaterialPageRoute(builder: (_) => const TaskEditorPage()),
+    );
+    if (!context.mounted) return;
+    if (task != null) {
+      ref.invalidate(tasksProvider);
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TaskDetailPage(task: task)),
+      );
+    }
+  }
+}
+
+class _FormSearchDelegate extends SearchDelegate<String?> {
+  final WidgetRef ref;
+  _FormSearchDelegate(this.ref);
+
+  @override
+  String get searchFieldLabel => 'Search forms';
+
+  @override
+  List<Widget>? buildActions(BuildContext context) => [
+        IconButton(
+          icon: const Icon(Icons.clear),
+          onPressed: () => query = '',
+        ),
+      ];
+
+  @override
+  Widget? buildLeading(BuildContext context) => IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () => close(context, null),
+      );
+
+  @override
+  Widget buildResults(BuildContext context) => _buildResults(context);
+
+  @override
+  Widget buildSuggestions(BuildContext context) => _buildResults(context);
+
+  Widget _buildResults(BuildContext context) {
+    if (query.isEmpty) {
+      return const Center(child: Text('Enter a search term.'));
+    }
+    final repo = ref.read(dashboardRepositoryProvider);
+    return FutureBuilder<DashboardData>(
+      future: repo.loadDashboard(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final forms = snapshot.data!.forms
+            .where((f) =>
+                f.title.toLowerCase().contains(query.toLowerCase()) ||
+                f.description.toLowerCase().contains(query.toLowerCase()))
+            .toList();
+        if (forms.isEmpty) {
+          return const Center(child: Text('No forms found.'));
+        }
+        return ListView.builder(
+          itemCount: forms.length,
+          itemBuilder: (context, i) {
+            final form = forms[i];
+            return ListTile(
+              title: Text(form.title),
+              subtitle: Text(form.description),
+              onTap: () => close(context, form.id),
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -251,19 +408,110 @@ class DashboardHomeView extends ConsumerWidget {
         await ref.read(dashboardDataProvider.future);
       },
       child: dashboard.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text('Failed to load dashboard: $e'),
-            const SizedBox(height: 12),
-            FilledButton(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, st) => ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            color: Theme.of(context).colorScheme.errorContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Dashboard Load Error',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                      'Unable to load dashboard data from database.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Error: ${e.toString()}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Try: pull to refresh, check network, or sign out/in. If you just added the user to an org, restart the app to refresh the session.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
               onPressed: () => ref.invalidate(dashboardDataProvider),
-              child: const Text('Retry'),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
             ),
           ],
         ),
         data: (data) {
+          if (data.forms.isEmpty) {
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'No templates yet',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'You are signed in but have no published forms. Add the user to an org and publish templates, or browse the gallery to copy templates.',
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ElevatedButton.icon(
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Reload'),
+                              onPressed: () => ref.invalidate(dashboardDataProvider),
+                            ),
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.view_comfy_alt),
+                              label: const Text('Template gallery'),
+                              onPressed: () async {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => TemplateGalleryPage(forms: data.forms),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
           final summaryCards = [
             _StatCardData(
               icon: Icons.assignment,
@@ -360,6 +608,7 @@ class DashboardHomeView extends ConsumerWidget {
                   ),
                 ),
               );
+              if (!context.mounted) return;
               ref.invalidate(dashboardDataProvider);
             },
           ),
@@ -382,6 +631,7 @@ class DashboardHomeView extends ConsumerWidget {
                   ),
                 ),
               );
+              if (!context.mounted) return;
               ref.invalidate(dashboardDataProvider);
             },
           ),
@@ -396,6 +646,7 @@ class DashboardHomeView extends ConsumerWidget {
                     builder: (_) => FormDetailPage(form: data.forms.first),
                   ),
                 );
+                if (!context.mounted) return;
                 ref.invalidate(dashboardDataProvider);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -404,11 +655,90 @@ class DashboardHomeView extends ConsumerWidget {
               }
             },
           ),
+          'documents': (
+            Icons.folder_copy,
+            'Documents',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DocumentsPage()),
+              );
+            },
+          ),
           'alerts': (
             Icons.notifications_active,
             'View Alerts',
             () async {
               ref.read(_navToAlertsProvider.notifier).state = true;
+            },
+          ),
+          'tasks': (
+            Icons.checklist,
+            'View Tasks',
+            () async {
+              ref.read(_navToTasksProvider.notifier).state = true;
+            },
+          ),
+          'assets': (
+            Icons.inventory_2,
+            'Assets',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AssetsPage()),
+              );
+            },
+          ),
+          'ops': (
+            Icons.hub,
+            'Ops Hub',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const OpsHubPage()),
+              );
+            },
+          ),
+          'training': (
+            Icons.school,
+            'Training Hub',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TrainingHubPage()),
+              );
+            },
+          ),
+          'reports': (
+            Icons.insights,
+            'Reports',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ReportsPage()),
+              );
+            },
+          ),
+          'messages': (
+            Icons.chat_bubble_outline,
+            'Messages',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MessagesPage()),
+              );
+            },
+          ),
+          'clients': (
+            Icons.business,
+            'Clients',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ClientsPage()),
+              );
+            },
+          ),
+          'vendors': (
+            Icons.handshake,
+            'Vendors',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const VendorsPage()),
+              );
             },
           ),
         };
@@ -552,7 +882,7 @@ class _FormsListViewState extends ConsumerState<FormsListView> {
     final data = ref.watch(dashboardDataProvider);
     return data.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => _ErrorView(error: e.toString()),
+      error: (e, st) => _ErrorView(error: e.toString(), stackTrace: st),
       data: (payload) {
         final categories = <String>{'All'};
         for (final form in payload.forms) {
@@ -571,6 +901,9 @@ class _FormsListViewState extends ConsumerState<FormsListView> {
               _savedFilter == 'All' || (form.category ?? 'Other') == _savedFilter;
           return matchesQuery && matchesCat && matchesSaved;
         }).toList();
+
+        filtered.sort((a, b) => (b.updatedAt ?? b.createdAt)
+            .compareTo(a.updatedAt ?? a.createdAt));
 
         return ListView(
           padding: const EdgeInsets.all(16),
@@ -622,7 +955,50 @@ class _FormsListViewState extends ConsumerState<FormsListView> {
             ),
             const SizedBox(height: 12),
             if (filtered.isEmpty)
-              const Text('No forms match your filters.')
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'No forms match your filters.',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text('Clear filters or open the template gallery to start.'),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Clear filters'),
+                            onPressed: () {
+                              setState(() {
+                                _searchController.clear();
+                                _categoryFilter = null;
+                                _savedFilter = 'All';
+                              });
+                            },
+                          ),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.view_comfy_alt),
+                            label: const Text('Template gallery'),
+                            onPressed: () async {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => TemplateGalleryPage(forms: payload.forms),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              )
             else
               ...filtered.map((form) {
                 return Card(
@@ -669,7 +1045,14 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
   bool _showUnreadOnly = false;
   String _typeFilter = 'All';
 
-  static const List<String> _types = ['All', 'alert', 'task', 'info'];
+  static const List<String> _types = [
+    'All',
+    'alert',
+    'task',
+    'training',
+    'document',
+    'info',
+  ];
 
   @override
   void dispose() {
@@ -683,7 +1066,7 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
     final repo = ref.read(dashboardRepositoryProvider);
     return data.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => _ErrorView(error: e.toString()),
+      error: (e, st) => _ErrorView(error: e.toString(), stackTrace: st),
       data: (payload) {
         final query = _searchController.text.toLowerCase();
         final filtered = payload.notifications.where((n) {
@@ -800,6 +1183,104 @@ class ProfileView extends StatelessWidget {
                 avatar: Icon(Icons.badge, size: 16),
               ),
             ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.folder_copy),
+            title: const Text('Documents'),
+            subtitle: const Text('Manage SOPs, templates, and files'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DocumentsPage()),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.school),
+            title: const Text('Training Hub'),
+            subtitle: const Text('View certifications and compliance'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TrainingHubPage()),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.inventory_2),
+            title: const Text('Assets'),
+            subtitle: const Text('Track equipment inspections and incidents'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AssetsPage()),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.hub),
+            title: const Text('Operations Hub'),
+            subtitle: const Text('Automation, AI, exports, and marketing'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const OpsHubPage()),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.chat_bubble_outline),
+            title: const Text('Messages'),
+            subtitle: const Text('Communicate with clients and vendors'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MessagesPage()),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.business),
+            title: const Text('Clients'),
+            subtitle: const Text('Manage client contacts and portals'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ClientsPage()),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.handshake),
+            title: const Text('Vendors'),
+            subtitle: const Text('Manage vendor contacts and access'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const VendorsPage()),
+              );
+            },
           ),
         ),
         const SizedBox(height: 32),
@@ -1122,14 +1603,58 @@ class _ProfileTile extends StatelessWidget {
 }
 
 class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.error});
+  const _ErrorView({required this.error, this.stackTrace});
 
   final String error;
+  final StackTrace? stackTrace;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(padding: const EdgeInsets.all(16), child: Text(error)),
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Card(
+        color: Theme.of(context).colorScheme.errorContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
+                  const SizedBox(width: 8),
+                  const Text('Load failed', style: TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SelectableText(
+                error,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              if (stackTrace != null) ...[
+                const SizedBox(height: 8),
+                SelectableText(
+                  stackTrace.toString(),
+                  maxLines: 5,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(fontFamily: 'monospace', color: Theme.of(context).colorScheme.onErrorContainer),
+                ),
+              ],
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+                onPressed: () {
+                  Navigator.of(context).maybePop();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1156,7 +1681,21 @@ class DashboardPreferences {
     this.compactCards = true,
     this.statOrder = const [0, 1, 2, 3],
     this.enabledStats = const [0, 1, 2, 3],
-    this.quickActions = const ['capture', 'scan', 'start', 'alerts'],
+    this.quickActions = const [
+      'capture',
+      'scan',
+      'start',
+      'documents',
+      'tasks',
+      'assets',
+      'ops',
+      'training',
+      'alerts',
+      'reports',
+      'messages',
+      'clients',
+      'vendors',
+    ],
   });
 
   final bool showStats;
@@ -1188,7 +1727,7 @@ class DashboardPreferences {
   }
 }
 
-class DashboardPrefsNotifier extends StateNotifier<DashboardPreferences> {
+class DashboardPrefsNotifier extends legacy.StateNotifier<DashboardPreferences> {
   DashboardPrefsNotifier() : super(const DashboardPreferences());
 
   bool _loaded = false;
@@ -1369,7 +1908,16 @@ class _DashboardPrefsSheet extends ConsumerWidget {
                     ('capture', 'Capture'),
                     ('scan', 'Scan'),
                     ('start', 'Start Form'),
+                    ('documents', 'Documents'),
+                    ('tasks', 'Tasks'),
+                    ('assets', 'Assets'),
+                    ('ops', 'Ops Hub'),
+                    ('training', 'Training'),
                     ('alerts', 'Alerts'),
+                    ('reports', 'Reports'),
+                    ('messages', 'Messages'),
+                    ('clients', 'Clients'),
+                    ('vendors', 'Vendors'),
                   ].map((item) {
                     final enabled = prefs.quickActions.contains(item.$1);
                     return FilterChip(

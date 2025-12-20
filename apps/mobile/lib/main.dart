@@ -3,19 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app/app.dart';
+import 'app/app_navigator.dart';
 import 'core/di/injection.dart';
 
-const _supabaseUrl = String.fromEnvironment(
-  'SUPABASE_URL',
-  defaultValue: 'https://xpcibptzncfmifaneoop.supabase.co',
-);
-const _supabaseAnonKey = String.fromEnvironment(
-  'SUPABASE_ANON_KEY',
-  defaultValue: 'sb_publishable_FHD_ihfrKsprgm1C3d9ang_xWjS21JW',
-);
+const _supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
+const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (_supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty) {
+    throw StateError('Missing Supabase configuration. Provide SUPABASE_URL and SUPABASE_ANON_KEY via --dart-define.');
+  }
 
   // Initialize Supabase
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
@@ -23,7 +22,7 @@ void main() async {
   // Initialize dependency injection
   await configureDependencies();
 
-  runApp(const ProviderScope(child: FormBridgeApp()));
+  runApp(const AppEntry());
 }
 
 class FormBridgeApp extends ConsumerWidget {
@@ -63,7 +62,7 @@ class FormBridgeApp extends ConsumerWidget {
         textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
         useMaterial3: true,
       ),
-      home: const AppNavigator(),
+      home: const AppNavigator(), // Deprecated, now handled by AppEntry
     );
   }
 }

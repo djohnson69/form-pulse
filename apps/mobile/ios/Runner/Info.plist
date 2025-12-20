@@ -52,6 +52,8 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Tag submissions with GPS for audit trails and dispatch.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Record short video clips for submissions.</string>
+	<string>Record audio and video clips for submissions.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Dictate voice notes for form submissions.</string>
 </dict>
 </plist>

@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:mobile/core/services/api_service.dart';
+import '../widgets/azure_ad_login_button.dart';
+
+const _apiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://localhost:8080',
+);
 
 /// Login page for authentication
 class LoginPage extends StatefulWidget {
@@ -16,6 +23,29 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   final _supabase = Supabase.instance.client;
+  final _apiService = ApiService(baseUrl: _apiBaseUrl);
+
+  Future<void> _handleAzureAdLogin(String accessToken) async {
+    try {
+      await _apiService.azureAdLogin(accessToken);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Azure AD login successful!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      // TODO: Navigate or update auth state as needed
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Azure AD login failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -81,6 +111,7 @@ class _LoginPageState extends State<LoginPage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  AzureAdLoginButton(onLogin: _handleAzureAdLogin),
                   Icon(
                     Icons.assignment_turned_in,
                     size: 80,

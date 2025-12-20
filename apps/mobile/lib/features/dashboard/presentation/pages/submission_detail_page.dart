@@ -1,12 +1,34 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class SubmissionDetailPage extends StatelessWidget {
+import '../../../../core/utils/csv_utils.dart';
+import '../../data/dashboard_provider.dart';
+
+class SubmissionDetailPage extends ConsumerStatefulWidget {
   const SubmissionDetailPage({required this.submission, super.key});
 
   final FormSubmission submission;
+
+  @override
+  ConsumerState<SubmissionDetailPage> createState() =>
+      _SubmissionDetailPageState();
+}
+
+class _SubmissionDetailPageState
+    extends ConsumerState<SubmissionDetailPage> {
+  late FormSubmission _submission;
+  bool _updatingStatus = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _submission = widget.submission;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,15 +41,15 @@ class SubmissionDetailPage extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               OutlinedButton.icon(
-                onPressed: () => _export('csv'),
+                onPressed: () => _exportCsv(),
                 icon: const Icon(Icons.file_download),
                 label: const Text('CSV'),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: () => _export('pdf'),
-                icon: const Icon(Icons.picture_as_pdf),
-                label: const Text('PDF'),
+                onPressed: () => _exportCsv(label: 'Excel'),
+                icon: const Icon(Icons.grid_on),
+                label: const Text('Excel'),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
@@ -41,24 +63,36 @@ class SubmissionDetailPage extends StatelessWidget {
           Card(
             child: ListTile(
               leading: const Icon(Icons.description),
-              title: Text(submission.formTitle),
-              subtitle: Text('Status: ${submission.status.displayName}'),
+              title: Text(_submission.formTitle),
+              subtitle:
+                  Text('Status: ${_submission.status.displayName}'),
             ),
+          ),
+          const SizedBox(height: 8),
+          _ApprovalCard(
+            status: _submission.status,
+            busy: _updatingStatus,
+            onApprove: () => _updateStatus(SubmissionStatus.approved),
+            onReject: () => _updateStatus(SubmissionStatus.rejected),
+            onRequestChanges: () =>
+                _updateStatus(SubmissionStatus.requiresChanges),
           ),
           const SizedBox(height: 12),
           Card(
             child: ListTile(
               leading: const Icon(Icons.person),
-              title: Text(submission.submittedByName ?? submission.submittedBy),
+              title: Text(
+                _submission.submittedByName ?? _submission.submittedBy,
+              ),
               subtitle: Text(
-                'Submitted at ${submission.submittedAt.toLocal()}',
+                'Submitted at ${_submission.submittedAt.toLocal()}',
               ),
             ),
           ),
           const SizedBox(height: 12),
           Text('Fields', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
-          ...submission.data.entries.map(
+          ..._submission.data.entries.map(
             (entry) => ListTile(
               leading: const Icon(Icons.checklist_rtl),
               title: Text(entry.key),
@@ -66,23 +100,23 @@ class SubmissionDetailPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          if (submission.attachments?.isNotEmpty ?? false) ...[
+          if (_submission.attachments?.isNotEmpty ?? false) ...[
             Text('Attachments', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            _AttachmentCarousel(attachments: submission.attachments!),
+            _AttachmentCarousel(attachments: _submission.attachments!),
             const SizedBox(height: 12),
           ],
-          if (submission.location != null)
+          if (_submission.location != null)
             Card(
               child: ListTile(
                 leading: const Icon(Icons.location_on),
                 title: Text(
-                  '${submission.location!.latitude}, ${submission.location!.longitude}',
+                  '${_submission.location!.latitude}, ${_submission.location!.longitude}',
                 ),
                 subtitle: const Text('GPS tag • tap to open map'),
                 onTap: () async {
-                  final lat = submission.location!.latitude;
-                  final lng = submission.location!.longitude;
+                  final lat = _submission.location!.latitude;
+                  final lng = _submission.location!.longitude;
                   final uri = Uri.parse('https://maps.google.com/?q=$lat,$lng');
                   if (await canLaunchUrl(uri)) {
                     await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -95,30 +129,143 @@ class SubmissionDetailPage extends StatelessWidget {
     );
   }
 
-  void _export(String type) async {
-    final base = ApiConstants.baseUrlDev;
-    final uri = Uri.parse('$base/api/submissions/export.$type');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+  Future<void> _exportCsv({String label = 'CSV'}) async {
+    final csv = buildSubmissionCsv(_submission);
+    final file = XFile.fromData(
+      utf8.encode(csv),
+      mimeType: 'text/csv',
+      name: 'formbridge_submission_${_submission.id}.csv',
+    );
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          text: 'Form Bridge $label export',
+          files: [file],
+        ),
+      );
+    } catch (_) {
+      await SharePlus.instance.share(ShareParams(text: csv));
     }
   }
 
   Future<void> _share(BuildContext context) async {
-    final csv = Uri.parse(
-      '${ApiConstants.baseUrlDev}/api/submissions/export.csv',
-    ).toString();
-    final pdf = Uri.parse(
-      '${ApiConstants.baseUrlDev}/api/submissions/export.pdf',
-    ).toString();
     final summary = StringBuffer()
-      ..writeln('Submission: ${submission.formTitle}')
+      ..writeln('Submission: ${_submission.formTitle}')
       ..writeln(
-        'Submitted by: ${submission.submittedByName ?? submission.submittedBy}',
+        'Submitted by: ${_submission.submittedByName ?? _submission.submittedBy}',
       )
-      ..writeln('Status: ${submission.status.displayName}')
-      ..writeln('CSV: $csv')
-      ..writeln('PDF: $pdf');
-    await Share.share(summary.toString());
+      ..writeln('Status: ${_submission.status.displayName}');
+    await SharePlus.instance.share(ShareParams(text: summary.toString()));
+  }
+
+  Future<void> _updateStatus(SubmissionStatus status) async {
+    if (_updatingStatus) return;
+    final note = await _promptForNote(status);
+    setState(() => _updatingStatus = true);
+    try {
+      final repo = ref.read(dashboardRepositoryProvider);
+      final updated = await repo.updateSubmissionStatus(
+        submissionId: _submission.id,
+        status: status,
+        note: note,
+      );
+      if (!mounted) return;
+      setState(() => _submission = updated);
+      ref.invalidate(dashboardDataProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Marked as ${status.displayName}.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Update failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingStatus = false);
+    }
+  }
+
+  Future<String?> _promptForNote(SubmissionStatus status) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Add note (${status.displayName})'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'Optional reviewer note',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Skip'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result?.isNotEmpty == true ? result : null;
+  }
+}
+
+class _ApprovalCard extends StatelessWidget {
+  const _ApprovalCard({
+    required this.status,
+    required this.busy,
+    required this.onApprove,
+    required this.onReject,
+    required this.onRequestChanges,
+  });
+
+  final SubmissionStatus status;
+  final bool busy;
+  final VoidCallback onApprove;
+  final VoidCallback onReject;
+  final VoidCallback onRequestChanges;
+
+  @override
+  Widget build(BuildContext context) {
+    final isFinal = status.isFinal;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Approval', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: busy || isFinal ? null : onApprove,
+                  icon: const Icon(Icons.check_circle),
+                  label: const Text('Approve'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: busy || isFinal ? null : onRequestChanges,
+                  icon: const Icon(Icons.rate_review),
+                  label: const Text('Request changes'),
+                ),
+                TextButton.icon(
+                  onPressed: busy || isFinal ? null : onReject,
+                  icon: const Icon(Icons.cancel),
+                  label: const Text('Reject'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -166,13 +313,23 @@ class _AttachmentCarouselState extends State<_AttachmentCarousel> {
                   (att.filename?.toLowerCase().endsWith('.mp4') ?? false);
               final isPdf =
                   att.filename?.toLowerCase().endsWith('.pdf') ?? false;
+              final isAudio = att.type == 'audio' ||
+                  (att.filename?.toLowerCase().endsWith('.m4a') ?? false) ||
+                  (att.filename?.toLowerCase().endsWith('.aac') ?? false) ||
+                  (att.filename?.toLowerCase().endsWith('.mp3') ?? false) ||
+                  (att.filename?.toLowerCase().endsWith('.wav') ?? false);
+              final isSignature = att.type == 'signature';
               final icon = isVideo
                   ? Icons.videocam
                   : isPdf
                   ? Icons.picture_as_pdf
+                  : isAudio
+                  ? Icons.audiotrack
+                  : isSignature
+                  ? Icons.border_color
                   : Icons.photo;
               final previewable =
-                  att.type == 'photo' &&
+                  (att.type == 'photo' || isSignature) &&
                   att.url.isNotEmpty &&
                   !isPdf &&
                   !isVideo;
@@ -186,7 +343,7 @@ class _AttachmentCarouselState extends State<_AttachmentCarousel> {
                           child: Image.network(att.url, fit: BoxFit.cover),
                         ),
                       );
-                    } else if (isVideo || isPdf) {
+                    } else if (isVideo || isPdf || isAudio) {
                       final uri = Uri.parse(att.url);
                       if (await canLaunchUrl(uri)) {
                         await launchUrl(

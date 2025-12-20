@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
@@ -5,6 +6,7 @@ import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/data/api_client.dart';
+import '../../../core/utils/storage_utils.dart';
 
 class DashboardData {
   DashboardData({
@@ -22,15 +24,38 @@ class DashboardData {
   int get unreadNotifications => notifications.where((n) => !n.isRead).length;
 }
 
+class SubmissionFilters {
+  SubmissionFilters({
+    this.status,
+    this.formId,
+    this.startDate,
+    this.endDate,
+  });
+
+  final SubmissionStatus? status;
+  final String? formId;
+  final DateTime? startDate;
+  final DateTime? endDate;
+}
+
 /// Repository interface for dashboard data sources.
 abstract class DashboardRepositoryBase {
   Future<DashboardData> loadDashboard();
+  Future<List<FormSubmission>> fetchSubmissions({
+    SubmissionFilters? filters,
+    int limit = 200,
+  });
   Future<FormSubmission> createSubmission({
     required String formId,
     required Map<String, dynamic> data,
     required String submittedBy,
     List<Map<String, dynamic>>? attachments,
     Map<String, dynamic>? location,
+  });
+  Future<FormSubmission> updateSubmissionStatus({
+    required String submissionId,
+    required SubmissionStatus status,
+    String? note,
   });
   Future<void> markNotificationRead(String id);
   Future<FormDefinition> createForm(FormDefinition form);
@@ -69,10 +94,6 @@ class DashboardRepository implements DashboardRepositoryBase {
               .toList() ??
           const <AppNotification>[];
 
-      if (forms.isEmpty && submissions.isEmpty && notifications.isEmpty) {
-        return _demoFallback('API returned empty payloads');
-      }
-
       return DashboardData(
         forms: forms,
         submissions: submissions,
@@ -80,21 +101,32 @@ class DashboardRepository implements DashboardRepositoryBase {
       );
     } on DioException catch (e, st) {
       developer.log(
-        'Dashboard fetch failed, using demo data',
+        'Dashboard fetch failed',
         error: e,
         stackTrace: st,
       );
-      return _demoFallback(e.message ?? 'Network error');
+      rethrow;
     } catch (e, st) {
       developer.log(
-        'Unexpected dashboard error, using demo data',
+        'Unexpected dashboard error',
         error: e,
         stackTrace: st,
       );
-      return _demoFallback(e.toString());
+      rethrow;
     }
   }
 
+  @override
+  Future<List<FormSubmission>> fetchSubmissions({
+    SubmissionFilters? filters,
+    int limit = 200,
+  }) async {
+    final data = await loadDashboard();
+    if (filters == null) return data.submissions;
+    return _applySubmissionFilters(data.submissions, filters);
+  }
+
+  @override
   Future<FormSubmission> createSubmission({
     required String formId,
     required Map<String, dynamic> data,
@@ -121,31 +153,45 @@ class DashboardRepository implements DashboardRepositoryBase {
       if (body is Map<String, dynamic> && body.containsKey('id')) {
         return FormSubmission.fromJson(body);
       }
+      throw Exception('Submission response missing id');
     } on DioException catch (e, st) {
       developer.log(
-        'Submission POST failed, using local demo record',
+        'Submission POST failed',
         error: e,
         stackTrace: st,
       );
+      rethrow;
     }
+  }
 
-    // Fallback when backend returns acknowledgement only or fails outright.
-    final now = DateTime.now().toUtc();
-    final submission = FormSubmission(
-      id: now.microsecondsSinceEpoch.toString(),
-      formId: formId,
-      formTitle: resolveFormTitle(formId),
-      submittedBy: submittedBy,
-      submittedAt: now,
-      status: SubmissionStatus.submitted,
-      data: data,
-      attachments: attachments
-          ?.map((a) => MediaAttachment.fromJson(a))
-          .toList(),
-      location: location != null ? LocationData.fromJson(location) : null,
-    );
-    _demoSubmissions.insert(0, submission);
-    return submission;
+  @override
+  Future<FormSubmission> updateSubmissionStatus({
+    required String submissionId,
+    required SubmissionStatus status,
+    String? note,
+  }) async {
+    final payload = {
+      'status': status.name,
+      if (note != null && note.isNotEmpty) 'note': note,
+    };
+    try {
+      final res = await _client.raw.patch(
+        '${ApiConstants.submissions}/$submissionId',
+        data: payload,
+      );
+      final body = res.data;
+      if (body is Map<String, dynamic>) {
+        return FormSubmission.fromJson(body);
+      }
+      throw Exception('Update submission response missing body');
+    } on DioException catch (e, st) {
+      developer.log(
+        'Update submission failed',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
   }
 
   @override
@@ -159,34 +205,6 @@ class DashboardRepository implements DashboardRepositoryBase {
     } on DioException catch (_) {
       await _client.raw.post('${ApiConstants.notifications}/$id/read');
     }
-
-    final index = _demoNotifications.indexWhere((n) => n.id == id);
-    if (index != -1) {
-      final notif = _demoNotifications[index];
-      _demoNotifications[index] = AppNotification(
-        id: notif.id,
-        title: notif.title,
-        body: notif.body,
-        type: notif.type,
-        targetUserId: notif.targetUserId,
-        targetRole: notif.targetRole,
-        data: notif.data,
-        isRead: true,
-        createdAt: notif.createdAt,
-        readAt: DateTime.now().toUtc(),
-        actionUrl: notif.actionUrl,
-        metadata: notif.metadata,
-      );
-    }
-  }
-
-  DashboardData _demoFallback(String reason) {
-    developer.log('Using in-app demo data: $reason');
-    return DashboardData(
-      forms: List<FormDefinition>.from(_demoForms),
-      submissions: List<FormSubmission>.from(_demoSubmissions),
-      notifications: List<AppNotification>.from(_demoNotifications),
-    );
   }
 
   @override
@@ -200,41 +218,60 @@ class DashboardRepository implements DashboardRepositoryBase {
       if (body is Map<String, dynamic> && body.containsKey('id')) {
         return FormDefinition.fromJson(body);
       }
+      throw Exception('Create form response missing id');
     } on DioException catch (e, st) {
       developer.log(
-        'Create form failed, using local save',
+        'Create form failed',
         error: e,
         stackTrace: st,
       );
+      rethrow;
     }
-
-    _demoForms.insert(0, form);
-    return form;
   }
 }
 
-/// Supabase-backed repository with demo fallback.
+/// Supabase-backed repository.
 class SupabaseDashboardRepository implements DashboardRepositoryBase {
-  SupabaseDashboardRepository(
-    this._client, {
-    required this.fallback,
-  });
+  SupabaseDashboardRepository(this._client);
 
   final SupabaseClient _client;
-  final DashboardRepositoryBase fallback;
+  static const _bucketName =
+      String.fromEnvironment('SUPABASE_BUCKET', defaultValue: 'formbridge-attachments');
 
   @override
   Future<DashboardData> loadDashboard() async {
     try {
-      final formsFuture = _client.from('forms').select();
+      developer.log('Loading dashboard from Supabase...');
+
+      final orgId = await _getOrgId();
+      if (orgId == null) {
+        developer.log(
+          'No organization found for current user. Returning empty dashboard data.',
+        );
+        return DashboardData(
+          forms: const [],
+          submissions: const [],
+          notifications: const [],
+        );
+      }
+
+      final formsFuture = _client
+          .from('forms')
+          .select()
+          .eq('org_id', orgId)
+          .eq('is_published', true)
+          .order('updated_at', ascending: false);
       final submissionsFuture = _client
           .from('submissions')
           .select()
-          .order('submittedAt', ascending: false);
+          .eq('org_id', orgId)
+          .order('submitted_at', ascending: false)
+          .limit(50);
       final notificationsFuture = _client
           .from('notifications')
           .select()
-          .order('createdAt', ascending: false);
+          .order('created_at', ascending: false)
+          .limit(50);
 
       final results = await Future.wait([
         formsFuture,
@@ -242,28 +279,110 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
         notificationsFuture,
       ]);
 
+      developer.log('Supabase queries completed successfully');
+      developer.log('Raw results - forms: ${(results[0] as List).length}, submissions: ${(results[1] as List).length}, notifications: ${(results[2] as List).length}');
+
       final forms = (results[0] as List<dynamic>)
-          .map((e) => FormDefinition.fromJson(e as Map<String, dynamic>))
+          .map((e) => _mapFormDefinition(Map<String, dynamic>.from(e as Map)))
           .toList();
+      final formTitleIndex = {for (final f in forms) f.id: f.title};
       final submissions = (results[1] as List<dynamic>)
-          .map((e) => FormSubmission.fromJson(e as Map<String, dynamic>))
+          .map(
+            (e) => _mapSubmission(
+              Map<String, dynamic>.from(e as Map),
+              formTitleIndex,
+            ),
+          )
           .toList();
+      final signedSubmissions =
+          await Future.wait(submissions.map(_withSignedAttachments));
       final notifications = (results[2] as List<dynamic>)
-          .map((e) => AppNotification.fromJson(e as Map<String, dynamic>))
+          .map((e) => _mapNotification(Map<String, dynamic>.from(e as Map)))
           .toList();
+
+      developer.log('Parsed ${forms.length} forms, ${submissions.length} submissions, ${notifications.length} notifications');
 
       return DashboardData(
         forms: forms,
-        submissions: submissions,
+        submissions: signedSubmissions,
         notifications: notifications,
       );
-    } catch (e, st) {
+    } on PostgrestException catch (e, st) {
       developer.log(
-        'Supabase loadDashboard failed, falling back',
+        'PostgreSQL error loading dashboard: ${e.message} (code: ${e.code})',
         error: e,
         stackTrace: st,
       );
-      return fallback.loadDashboard();
+      throw Exception(
+        'Supabase query failed (${e.code ?? 'unknown'}): ${e.message}. '
+        'Confirm org membership and RLS policies, then retry.',
+      );
+    } catch (e, st) {
+      developer.log(
+        'Unexpected error loading dashboard',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
+  }
+
+  @override
+  Future<List<FormSubmission>> fetchSubmissions({
+    SubmissionFilters? filters,
+    int limit = 200,
+  }) async {
+    try {
+      final orgId = await _getOrgId();
+      if (orgId == null) return const <FormSubmission>[];
+      var query = _client
+          .from('submissions')
+          .select()
+          .eq('org_id', orgId);
+      if (filters?.status != null) {
+        query = query.eq('status', filters!.status!.name);
+      }
+      if (filters?.formId != null && filters!.formId!.isNotEmpty) {
+        query = query.eq('form_id', filters.formId!);
+      }
+      if (filters?.startDate != null) {
+        query = query.gte(
+          'submitted_at',
+          filters!.startDate!.toIso8601String(),
+        );
+      }
+      if (filters?.endDate != null) {
+        query = query.lte(
+          'submitted_at',
+          filters!.endDate!.toIso8601String(),
+        );
+      }
+      final results =
+          await query.order('submitted_at', ascending: false).limit(limit);
+      final formTitles = await _formTitleIndex();
+      final submissions = (results as List<dynamic>)
+          .map(
+            (row) => _mapSubmission(
+              Map<String, dynamic>.from(row as Map),
+              formTitles,
+            ),
+          )
+          .toList();
+      return Future.wait(submissions.map(_withSignedAttachments));
+    } on PostgrestException catch (e, st) {
+      developer.log(
+        'PostgreSQL error fetching submissions: ${e.message} (code: ${e.code})',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    } catch (e, st) {
+      developer.log(
+        'Unexpected error fetching submissions',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
     }
   }
 
@@ -275,54 +394,124 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
     List<Map<String, dynamic>>? attachments,
     Map<String, dynamic>? location,
   }) async {
+    final formMetadata = await _client
+        .from('forms')
+        .select('org_id, title')
+        .eq('id', formId)
+        .maybeSingle();
+    final orgId = formMetadata?['org_id']?.toString() ?? await _getOrgId();
+    if (orgId == null) {
+      throw Exception('User must belong to an organization before submitting.');
+    }
+
     final payload = {
-      'formId': formId,
+      'org_id': orgId,
+      'form_id': formId,
       'data': data,
-      'submittedBy': submittedBy,
-      'submittedAt': DateTime.now().toIso8601String(),
+      'submitted_by': _client.auth.currentUser?.id ?? submittedBy,
+      'submitted_at': DateTime.now().toIso8601String(),
       'status': SubmissionStatus.submitted.name,
       if (attachments != null) 'attachments': attachments,
       if (location != null) 'location': location,
     };
     try {
-      final res = await _client.from('submissions').insert(payload).select();
-      if (res.isNotEmpty) {
-        final body = Map<String, dynamic>.from(res.first as Map);
-        return FormSubmission.fromJson(
-          body..putIfAbsent('formTitle', () => resolveFormTitle(formId)),
-        );
-      }
+      final res = await _client
+          .from('submissions')
+          .insert(payload)
+          .select()
+          .single();
+      final body = Map<String, dynamic>.from(res as Map);
+      return _mapSubmission(body, {
+        formId: (formMetadata?['title'] ?? '') as String? ??
+            resolveFormTitle(formId),
+      });
     } catch (e, st) {
       developer.log(
-        'Supabase createSubmission failed, using fallback',
+        'Supabase createSubmission failed',
         error: e,
         stackTrace: st,
       );
     }
-    return fallback.createSubmission(
-      formId: formId,
-      data: data,
-      submittedBy: submittedBy,
-      attachments: attachments,
-      location: location,
-    );
+    throw Exception('Supabase createSubmission failed');
+  }
+
+  @override
+  Future<FormSubmission> updateSubmissionStatus({
+    required String submissionId,
+    required SubmissionStatus status,
+    String? note,
+  }) async {
+    final userId = _client.auth.currentUser?.id;
+    try {
+      final current = await _client
+          .from('submissions')
+          .select('metadata')
+          .eq('id', submissionId)
+          .maybeSingle();
+      final existingMeta = Map<String, dynamic>.from(
+        current?['metadata'] as Map? ?? <String, dynamic>{},
+      );
+      existingMeta['review'] = {
+        'status': status.name,
+        if (note != null && note.isNotEmpty) 'note': note,
+        'reviewedAt': DateTime.now().toIso8601String(),
+        if (userId != null) 'reviewedBy': userId,
+      };
+
+      final res = await _client
+          .from('submissions')
+          .update({'status': status.name, 'metadata': existingMeta})
+          .eq('id', submissionId)
+          .select()
+          .maybeSingle();
+      if (res == null) {
+        throw Exception('Submission update failed');
+      }
+      final formTitles = await _formTitleIndex();
+      final updated = _mapSubmission(
+        Map<String, dynamic>.from(res),
+        formTitles,
+      );
+      return _withSignedAttachments(updated);
+    } on PostgrestException catch (e, st) {
+      developer.log(
+        'PostgreSQL error updating submission: ${e.message} (code: ${e.code})',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    } catch (e, st) {
+      developer.log(
+        'Unexpected error updating submission',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
   }
 
   @override
   Future<FormDefinition> createForm(FormDefinition form) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) {
+      throw Exception('User must belong to an organization to create forms.');
+    }
+
     try {
-      final res = await _client.from('forms').insert(form.toJson()).select();
-      if (res.isNotEmpty) {
-        return FormDefinition.fromJson(Map<String, dynamic>.from(res.first as Map));
-      }
+      final res = await _client
+          .from('forms')
+          .insert(_toSupabaseFormMap(form, orgId))
+          .select()
+          .single();
+      return _mapFormDefinition(Map<String, dynamic>.from(res as Map));
     } catch (e, st) {
       developer.log(
-        'Supabase createForm failed, using fallback',
+        'Supabase createForm failed',
         error: e,
         stackTrace: st,
       );
     }
-    return fallback.createForm(form);
+    throw Exception('Supabase createForm failed');
   }
 
   @override
@@ -330,19 +519,255 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
     try {
       await _client
           .from('notifications')
-          .update({'isRead': true, 'readAt': DateTime.now().toIso8601String()})
+          .update({'is_read': true, 'read_at': DateTime.now().toIso8601String()})
           .eq('id', id);
       return;
     } catch (e, st) {
       developer.log(
-        'Supabase markNotificationRead failed, using fallback',
+        'Supabase markNotificationRead failed',
         error: e,
         stackTrace: st,
       );
     }
-    await fallback.markNotificationRead(id);
   }
 
+  Future<String?> _getOrgId() async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return null;
+    try {
+      final res = await _client
+          .from('org_members')
+          .select('org_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    try {
+      final res = await _client
+          .from('profiles')
+          .select('org_id')
+          .eq('id', userId)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    developer.log('No org_id found for user $userId in org_members or profiles');
+    return null;
+  }
+
+  Future<Map<String, String>> _formTitleIndex() async {
+    try {
+      final rows = await _client.from('forms').select('id, title');
+      return {
+        for (final row in (rows as List))
+          row['id'].toString(): row['title']?.toString() ?? '',
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  FormDefinition _mapFormDefinition(Map<String, dynamic> row) {
+    final rawFields = row['fields'];
+    final parsedFields = rawFields is String
+        ? jsonDecode(rawFields)
+        : rawFields ?? <dynamic>[];
+    final tags = row['tags'];
+
+    return FormDefinition(
+      id: row['id'].toString(),
+      title: row['title'] as String? ?? 'Untitled form',
+      description: row['description'] as String? ?? '',
+      category: row['category'] as String?,
+      tags: tags is List ? tags.map((e) => e.toString()).toList() : null,
+      fields: (parsedFields as List)
+          .map(
+            (f) => FormField.fromJson(
+              Map<String, dynamic>.from(f as Map),
+            ),
+          )
+          .toList(),
+      isPublished:
+          (row['is_published'] as bool?) ?? (row['isPublished'] as bool?) ?? false,
+      version:
+          row['version'] as String? ?? row['current_version'] as String?,
+      createdBy:
+          row['created_by']?.toString() ?? row['createdBy']?.toString() ?? '',
+      createdAt: _parseDate(row['created_at'] ?? row['createdAt']),
+      updatedAt: _parseNullableDate(row['updated_at'] ?? row['updatedAt']),
+      metadata: row['metadata'] as Map<String, dynamic>?,
+    );
+  }
+
+  FormSubmission _mapSubmission(
+    Map<String, dynamic> row,
+    Map<String, String> formTitles,
+  ) {
+    final formId = row['form_id']?.toString() ?? row['formId'] as String? ?? '';
+    final statusValue = row['status']?.toString() ?? 'submitted';
+    return FormSubmission(
+      id: row['id'].toString(),
+      formId: formId,
+      formTitle:
+          row['form_title'] as String? ?? formTitles[formId] ?? resolveFormTitle(formId),
+      submittedBy:
+          row['submitted_by']?.toString() ?? row['submittedBy']?.toString() ?? '',
+      submittedByName: row['submitted_by_name'] as String?,
+      submittedAt: _parseDate(row['submitted_at'] ?? row['submittedAt']),
+      status: SubmissionStatus.values.firstWhere(
+        (e) => e.name == statusValue,
+        orElse: () => SubmissionStatus.submitted,
+      ),
+      data: Map<String, dynamic>.from(
+        row['data'] as Map? ?? <String, dynamic>{},
+      ),
+      attachments: (row['attachments'] as List?)
+          ?.map(
+            (a) => MediaAttachment.fromJson(
+              Map<String, dynamic>.from(a as Map),
+            ),
+          )
+          .toList(),
+      location: row['location'] != null
+          ? LocationData.fromJson(
+              Map<String, dynamic>.from(row['location'] as Map),
+            )
+          : null,
+      jobSiteId: row['job_site_id']?.toString() ?? row['jobSiteId'] as String?,
+      companyId: row['company_id']?.toString() ?? row['companyId'] as String?,
+      syncedAt: _parseNullableDate(row['synced_at'] ?? row['syncedAt']),
+      metadata: row['metadata'] as Map<String, dynamic>?,
+    );
+  }
+
+  Future<FormSubmission> _withSignedAttachments(
+    FormSubmission submission,
+  ) async {
+    final attachments = submission.attachments;
+    if (attachments == null || attachments.isEmpty) return submission;
+    final signed = await Future.wait(attachments.map(_signAttachment));
+    return FormSubmission(
+      id: submission.id,
+      formId: submission.formId,
+      formTitle: submission.formTitle,
+      submittedBy: submission.submittedBy,
+      submittedByName: submission.submittedByName,
+      submittedAt: submission.submittedAt,
+      status: submission.status,
+      data: submission.data,
+      attachments: signed,
+      location: submission.location,
+      jobSiteId: submission.jobSiteId,
+      companyId: submission.companyId,
+      syncedAt: submission.syncedAt,
+      metadata: submission.metadata,
+    );
+  }
+
+  Future<MediaAttachment> _signAttachment(MediaAttachment attachment) async {
+    try {
+      final signedUrl = await createSignedStorageUrl(
+        client: _client,
+        url: attachment.url,
+        defaultBucket: _bucketName,
+        metadata: attachment.metadata,
+        expiresInSeconds: kSignedUrlExpirySeconds,
+      );
+      if (signedUrl == null || signedUrl.isEmpty) return attachment;
+      return MediaAttachment(
+        id: attachment.id,
+        type: attachment.type,
+        url: signedUrl,
+        localPath: attachment.localPath,
+        filename: attachment.filename,
+        fileSize: attachment.fileSize,
+        mimeType: attachment.mimeType,
+        capturedAt: attachment.capturedAt,
+        location: attachment.location,
+        metadata: attachment.metadata,
+      );
+    } catch (_) {
+      return attachment;
+    }
+  }
+
+  AppNotification _mapNotification(Map<String, dynamic> row) {
+    return AppNotification(
+      id: row['id'].toString(),
+      title: row['title'] as String? ?? '',
+      body: row['body'] as String? ?? '',
+      type: row['type'] as String?,
+      targetUserId: row['user_id']?.toString() ?? row['targetUserId'] as String?,
+      targetRole: row['targetRole'] as String?,
+      data: row['data'] as Map<String, dynamic>?,
+      isRead:
+          (row['is_read'] as bool?) ?? (row['isRead'] as bool?) ?? false,
+      createdAt: _parseDate(row['created_at'] ?? row['createdAt']),
+      readAt: _parseNullableDate(row['read_at'] ?? row['readAt']),
+      actionUrl:
+          row['action_url'] as String? ?? row['actionUrl'] as String?,
+      metadata: row['metadata'] as Map<String, dynamic>?,
+    );
+  }
+
+  Map<String, dynamic> _toSupabaseFormMap(
+    FormDefinition form,
+    String orgId,
+  ) {
+    return {
+      'id': form.id,
+      'org_id': orgId,
+      'title': form.title,
+      'description': form.description,
+      'category': form.category,
+      'tags': form.tags,
+      'fields': form.fields.map((f) => f.toJson()).toList(),
+      'is_published': form.isPublished,
+      'version': form.version,
+      'created_by': form.createdBy.isEmpty
+          ? _client.auth.currentUser?.id
+          : form.createdBy,
+      'metadata': form.metadata,
+    };
+  }
+
+  DateTime _parseDate(dynamic value) {
+    if (value == null) return DateTime.now();
+    if (value is DateTime) return value;
+    return DateTime.parse(value.toString());
+  }
+
+  DateTime? _parseNullableDate(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    return DateTime.tryParse(value.toString());
+  }
+}
+
+List<FormSubmission> _applySubmissionFilters(
+  List<FormSubmission> submissions,
+  SubmissionFilters filters,
+) {
+  return submissions.where((submission) {
+    if (filters.status != null && submission.status != filters.status) {
+      return false;
+    }
+    if (filters.formId != null &&
+        filters.formId!.isNotEmpty &&
+        submission.formId != filters.formId) {
+      return false;
+    }
+    if (filters.startDate != null &&
+        submission.submittedAt.isBefore(filters.startDate!)) {
+      return false;
+    }
+    if (filters.endDate != null &&
+        submission.submittedAt.isAfter(filters.endDate!)) {
+      return false;
+    }
+    return true;
+  }).toList();
 }
 
 // ---------------------------------------------------------------------------
@@ -350,8 +775,6 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
 // ---------------------------------------------------------------------------
 
 final List<FormDefinition> _demoForms = _buildDemoForms();
-final List<FormSubmission> _demoSubmissions = _buildDemoSubmissions();
-final List<AppNotification> _demoNotifications = _buildDemoNotifications();
 
 String resolveFormTitle(String formId) {
   final match = _demoForms.firstWhere(
@@ -511,136 +934,4 @@ List<FormDefinition> _buildDemoForms() {
       ],
     },
   ].map((json) => FormDefinition.fromJson(json)).toList();
-}
-
-List<FormSubmission> _buildDemoSubmissions() {
-  return [
-    {
-      'id': 'sub-1001',
-      'formId': 'jobsite-safety',
-      'formTitle': 'Job Site Safety Walk',
-      'submittedBy': 'sarah.c',
-      'submittedByName': 'Sarah Chen',
-      'submittedAt': DateTime.now()
-          .subtract(const Duration(hours: 3))
-          .toIso8601String(),
-      'status': 'underReview',
-      'data': {
-        'siteName': 'South Plant 7',
-        'inspector': 'Sarah Chen',
-        'ppe': ['Hard hat', 'Vest', 'Gloves'],
-        'hazards': 'Loose cabling near east stairwell, blocked exit near bay 4',
-      },
-      'attachments': [
-        {
-          'id': 'att-1',
-          'type': 'photo',
-          'url': 'https://placehold.co/400x300?text=Exit+Blocked',
-          'filename': 'exit-blocked.jpg',
-          'capturedAt': DateTime.now()
-              .subtract(const Duration(hours: 3, minutes: 15))
-              .toIso8601String(),
-        },
-      ],
-      'location': {
-        'latitude': 37.7765,
-        'longitude': -122.4192,
-        'timestamp': DateTime.now()
-            .subtract(const Duration(hours: 3))
-            .toIso8601String(),
-        'accuracy': 8.5,
-        'address': 'Bay 4, South Plant 7',
-      },
-      'metadata': {'priority': 'high'},
-    },
-    {
-      'id': 'sub-1002',
-      'formId': 'equipment-checkout',
-      'formTitle': 'Equipment Checkout',
-      'submittedBy': 'mike.l',
-      'submittedByName': 'Mike Lopez',
-      'submittedAt': DateTime.now()
-          .subtract(const Duration(hours: 18))
-          .toIso8601String(),
-      'status': 'submitted',
-      'data': {
-        'assetTag': 'FORK-2231',
-        'condition': 'Good',
-        'notes': 'Tires look new. Fuel at 80%.',
-      },
-      'attachments': [
-        {
-          'id': 'att-2',
-          'type': 'photo',
-          'url': 'https://placehold.co/400x300?text=Forklift',
-          'filename': 'forklift.jpg',
-          'capturedAt': DateTime.now()
-              .subtract(const Duration(hours: 18, minutes: 20))
-              .toIso8601String(),
-        },
-      ],
-      'metadata': {'handoff': 'Dock A'},
-    },
-    {
-      'id': 'sub-1003',
-      'formId': 'visitor-log',
-      'formTitle': 'Visitor Log',
-      'submittedBy': 'reception',
-      'submittedByName': 'Reception Desk',
-      'submittedAt': DateTime.now()
-          .subtract(const Duration(days: 1, hours: 2))
-          .toIso8601String(),
-      'status': 'approved',
-      'data': {
-        'fullName': 'Alex Morgan',
-        'company': 'Bright Manufacturing',
-        'host': 'Taylor Brooks',
-        'purpose': 'Audit',
-        'badge': true,
-      },
-    },
-  ].map((json) => FormSubmission.fromJson(json)).toList();
-}
-
-List<AppNotification> _buildDemoNotifications() {
-  return [
-    {
-      'id': 'notif-1',
-      'title': 'Action required: Blocked exit',
-      'body':
-          'Resolve the blocked exit near Bay 4 and attach a photo once clear.',
-      'type': 'task',
-      'targetRole': 'Supervisor',
-      'isRead': false,
-      'createdAt': DateTime.now()
-          .subtract(const Duration(hours: 1, minutes: 15))
-          .toIso8601String(),
-      'data': {'submissionId': 'sub-1001'},
-    },
-    {
-      'id': 'notif-2',
-      'title': 'New visitor awaiting host',
-      'body': 'Alex Morgan (Bright Manufacturing) is waiting in the lobby.',
-      'type': 'alert',
-      'targetRole': 'Security',
-      'isRead': true,
-      'createdAt': DateTime.now()
-          .subtract(const Duration(hours: 5))
-          .toIso8601String(),
-      'readAt': DateTime.now()
-          .subtract(const Duration(hours: 3))
-          .toIso8601String(),
-      'data': {'formId': 'visitor-log'},
-    },
-    {
-      'id': 'notif-3',
-      'title': 'Equipment checkout approved',
-      'body': 'FORK-2231 checked out to Mike Lopez.',
-      'type': 'info',
-      'isRead': true,
-      'createdAt': DateTime.now()
-          .subtract(const Duration(days: 1, hours: 4))
-          .toIso8601String(),
-    },
-  ].map((json) => AppNotification.fromJson(json)).toList();
 }

@@ -1,23 +1,24 @@
-/// Text extraction service using AI/OCR
+import 'ai_service_base.dart';
+
+/// Text extraction service using the AIService backend.
 class TextExtractor {
-  /// Extract text from image
-  Future<String> extractFromImage(String imagePath) async {
-    // TODO: Implement OCR
-    return '';
+  final AIService ai;
+
+  TextExtractor(this.ai);
+
+  /// Extract text from an image using vision models.
+  Future<String> extractFromImage(String imagePath) => ai.extractTextFromImage(imagePath);
+
+  /// Extract structured data from free text.
+  Future<Map<String, dynamic>> extractStructuredData(String text, {String? schemaHint}) {
+    return ai.extractStructuredData(text: text, schemaHint: schemaHint);
   }
 
-  /// Extract structured data from text
-  Future<Map<String, dynamic>> extractStructuredData(String text) async {
-    // TODO: Implement AI-powered data extraction
-    return {};
-  }
-
-  /// Extract specific fields from text
+  /// Extract a specific list of fields from text.
   Future<Map<String, String>> extractFields({
     required String text,
     required List<String> fields,
-  }) async {
-    // TODO: Implement field extraction
-    return {};
+  }) {
+    return ai.extractFields(text: text, fields: fields);
   }
 }

@@ -14,6 +14,7 @@
 -- In Supabase SQL Editor, run:
 -- 1. supabase/schema.sql (creates tables, RLS policies, storage policies)
 -- 2. supabase/seed.sql (creates demo org and sample form)
+-- If you already created the older UUID-based forms table, run supabase/add_missing_columns.sql before loading templates.
 ```
 
 ### 2. Create Storage Bucket

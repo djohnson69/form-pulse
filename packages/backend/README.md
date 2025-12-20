@@ -1,49 +1,45 @@
-A server app built using [Shelf](https://pub.dev/packages/shelf),
-configured to enable running with [Docker](https://www.docker.com/).
+# Admin API (Shelf + Supabase)
 
-This sample code handles HTTP GET requests to `/` and `/echo/<message>`
+A lightweight admin/backoffice API that fronts Supabase with a service role key.
+It exposes secure endpoints for dashboard stats, forms management, and recent submissions.
 
-# Running the sample
+## Endpoints
+- `GET /health` — liveness.
+- `GET /admin/stats` — counts for forms, submissions, attachments + category breakdown.
+- `GET /admin/forms` — list forms with search/category/published filters, pagination.
+- `GET /admin/forms/:id` — fetch a single form.
+- `PATCH /admin/forms/:id` — update form fields (title, description, category, tags, is_published, version, metadata, fields).
+- `GET /admin/submissions` — list recent submissions, optional status filter.
 
-## Running with the Dart SDK
+All `/admin/*` endpoints require header `x-api-key: $ADMIN_API_KEY`.
 
-You can run the example with the [Dart SDK](https://dart.dev/get-dart)
-like this:
-
+## Configuration
+Set environment variables (can be loaded via your process manager or `.env` when developing):
 ```
-$ dart run bin/server.dart
-Server listening on port 8080
-```
-
-And then from a second terminal:
-```
-$ curl http://0.0.0.0:8080
-Hello, World!
-$ curl http://0.0.0.0:8080/echo/I_love_Dart
-I_love_Dart
-```
-
-## Running with Docker
-
-If you have [Docker Desktop](https://www.docker.com/get-started) installed, you
-can build and run with the `docker` command:
-
-```
-$ docker build . -t myserver
-$ docker run -it -p 8080:8080 myserver
-Server listening on port 8080
+SUPABASE_URL=https://xpcibptzncfmifaneoop.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+ADMIN_API_KEY=choose_a_strong_random_key
+PORT=8080
 ```
 
-And then from a second terminal:
+## Run locally
 ```
-$ curl http://0.0.0.0:8080
-Hello, World!
-$ curl http://0.0.0.0:8080/echo/I_love_Dart
-I_love_Dart
+cd packages/backend
+dart pub get
+SUPABASE_URL=... \
+SUPABASE_SERVICE_ROLE_KEY=... \
+ADMIN_API_KEY=... \
+dart run bin/server.dart
 ```
 
-You should see the logging printed in the first terminal:
+## Example calls
 ```
-2021-05-06T15:47:04.620417  0:00:00.000158 GET     [200] /
-2021-05-06T15:47:08.392928  0:00:00.001216 GET     [200] /echo/I_love_Dart
+curl -H "x-api-key: $ADMIN_API_KEY" http://localhost:8080/admin/stats
+curl -H "x-api-key: $ADMIN_API_KEY" "http://localhost:8080/admin/forms?search=safety&limit=20"
+curl -H "x-api-key: $ADMIN_API_KEY" http://localhost:8080/admin/forms/jobsite-safety
+curl -H "x-api-key: $ADMIN_API_KEY" \
+  -X PATCH \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Job Site Safety Walk (Updated)"}' \
+  http://localhost:8080/admin/forms/jobsite-safety
 ```

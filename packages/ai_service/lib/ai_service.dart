@@ -9,3 +9,4 @@ export 'src/ai_service_base.dart';
 export 'src/data_validator.dart';
 export 'src/text_extractor.dart';
 export 'src/image_analyzer.dart';
+export 'src/openai_config.dart';

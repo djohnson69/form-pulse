@@ -47,6 +47,12 @@ enum FormFieldType {
   
   /// Video capture
   video,
+
+  /// Audio recording
+  audio,
+
+  /// Voice note (speech-to-text)
+  voiceNote,
   
   /// Signature capture
   signature,
@@ -110,6 +116,10 @@ enum FormFieldType {
         return 'Photo';
       case FormFieldType.video:
         return 'Video';
+      case FormFieldType.audio:
+        return 'Audio';
+      case FormFieldType.voiceNote:
+        return 'Voice Note';
       case FormFieldType.signature:
         return 'Signature';
       case FormFieldType.location:
@@ -142,6 +152,7 @@ enum FormFieldType {
   bool get isMediaField {
     return this == FormFieldType.photo || 
            this == FormFieldType.video ||
+           this == FormFieldType.audio ||
            this == FormFieldType.file ||
            this == FormFieldType.files;
   }

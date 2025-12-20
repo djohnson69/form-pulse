@@ -2,13 +2,16 @@
 enum UserRole {
   /// Super administrator with full system access
   superAdmin,
-  
+
   /// Company administrator
   admin,
-  
+
   /// Site manager with limited administrative access
   manager,
-  
+
+  /// Frontline supervisor with scoped administrative access
+  supervisor,
+
   /// Standard employee user
   employee,
   
@@ -30,6 +33,8 @@ enum UserRole {
         return 'Administrator';
       case UserRole.manager:
         return 'Manager';
+      case UserRole.supervisor:
+        return 'Supervisor';
       case UserRole.employee:
         return 'Employee';
       case UserRole.client:
@@ -46,4 +51,11 @@ enum UserRole {
 
   /// Check if role has management privileges
   bool get canManage => isAdmin || this == UserRole.manager;
+
+  /// Check if role has supervisor privileges
+  bool get canSupervise => canManage || this == UserRole.supervisor;
+
+  /// Check if role can access the admin console
+  bool get canAccessAdminConsole =>
+      isAdmin || this == UserRole.manager || this == UserRole.supervisor;
 }

@@ -50,21 +50,31 @@ class FormDefinition {
 
   /// Create from JSON
   factory FormDefinition.fromJson(Map<String, dynamic> json) {
+    final rawFields = (json['fields'] as List?) ?? const <dynamic>[];
+    final parsedFields = <FormField>[];
+    for (final f in rawFields) {
+      try {
+        parsedFields.add(FormField.fromJson(f as Map<String, dynamic>));
+      } catch (_) {
+        // Skip invalid field entries to avoid crashes from bad data
+        continue;
+      }
+    }
+
     return FormDefinition(
       id: json['id'] as String,
-      title: json['title'] as String,
-      description: json['description'] as String,
+      title: json['title'] as String? ?? 'Untitled form',
+      description: json['description'] as String? ?? '',
       category: json['category'] as String?,
       tags: (json['tags'] as List?)?.cast<String>(),
-      fields: (json['fields'] as List)
-          .map((f) => FormField.fromJson(f as Map<String, dynamic>))
-          .toList(),
+      fields: parsedFields,
       isPublished: json['isPublished'] as bool? ?? false,
       version: json['version'] as String?,
-      createdBy: json['createdBy'] as String,
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdBy: json['createdBy']?.toString() ?? '',
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+          DateTime.now(),
       updatedAt: json['updatedAt'] != null
-          ? DateTime.parse(json['updatedAt'] as String)
+          ? DateTime.tryParse(json['updatedAt'].toString())
           : null,
       metadata: json['metadata'] as Map<String, dynamic>?,
     );
@@ -127,22 +137,29 @@ class FormField {
 
   /// Create from JSON
   factory FormField.fromJson(Map<String, dynamic> json) {
+    final typeName = json['type']?.toString();
+    final type = FormFieldType.values.firstWhere(
+      (e) => e.name == typeName,
+      orElse: () => FormFieldType.text,
+    );
     return FormField(
-      id: json['id'] as String,
-      label: json['label'] as String,
-      type: FormFieldType.values.firstWhere((e) => e.name == json['type']),
+      id: json['id']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      type: type,
       group: json['group'] as String?,
       placeholder: json['placeholder'] as String?,
       helpText: json['helpText'] as String?,
       isRequired: json['isRequired'] as bool? ?? false,
-      options: (json['options'] as List?)?.cast<String>(),
+      options: (json['options'] as List?)?.map((e) => e.toString()).toList(),
       validation: json['validation'] as Map<String, dynamic>?,
       conditionalLogic: json['conditionalLogic'] as Map<String, dynamic>?,
       calculations: json['calculations'] as Map<String, dynamic>?,
       children: (json['children'] as List?)
           ?.map((f) => FormField.fromJson(f as Map<String, dynamic>))
           .toList(),
-      order: json['order'] as int,
+      order: json['order'] is int
+          ? json['order'] as int
+          : int.tryParse(json['order']?.toString() ?? '0') ?? 0,
       metadata: json['metadata'] as Map<String, dynamic>?,
     );
   }

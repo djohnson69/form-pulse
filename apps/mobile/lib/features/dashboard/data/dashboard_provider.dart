@@ -2,20 +2,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../core/data/api_client.dart';
 import 'dashboard_repository.dart';
 
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
 final supabaseClientProvider = Provider<SupabaseClient>(
   (ref) => Supabase.instance.client,
 );
 
 final dashboardRepositoryProvider = Provider<DashboardRepositoryBase>((ref) {
   final supabaseClient = ref.read(supabaseClientProvider);
-  return SupabaseDashboardRepository(
-    supabaseClient,
-    fallback: DashboardRepository(ref.read(apiClientProvider)),
-  );
+  return SupabaseDashboardRepository(supabaseClient);
 });
 
 final dashboardDataProvider = FutureProvider.autoDispose<DashboardData>((

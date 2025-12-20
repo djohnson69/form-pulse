@@ -1,6 +1,7 @@
 import 'package:ai_service/ai_service.dart';
 
 void main() {
-  var awesome = Awesome();
-  print('awesome: ${awesome.isAwesome}');
+  // Simple instantiation example (no network call).
+  final ai = AIService(apiKey: 'demo-key');
+  print('AI service ready with model: ${ai.model}');
 }

@@ -1,16 +1,18 @@
-# mobile
+# Form Bridge Mobile
 
-A new Flutter project.
+Flutter client for Form Bridge.
 
-## Getting Started
+## Running with AI enabled
 
-This project is a starting point for a Flutter application.
+Pass your OpenAI key as a dart define (do not commit secrets):
 
-A few resources to get you started if this is your first Flutter project:
+```bash
+flutter run \
+	--dart-define=OPENAI_API_KEY=sk-... \
+	--dart-define=OPENAI_MODEL=gpt-4o-mini \
+	--dart-define=OPENAI_BASE_URL=https://api.openai.com/v1 \
+	--dart-define=SUPABASE_URL=https://your-project.supabase.co \
+	--dart-define=SUPABASE_ANON_KEY=your-anon-key
+```
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The app exposes `aiServiceProvider` for Riverpod consumers.

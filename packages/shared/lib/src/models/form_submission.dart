@@ -65,6 +65,7 @@ class FormSubmission {
       submittedAt: DateTime.parse(json['submittedAt'] as String),
       status: SubmissionStatus.values.firstWhere(
         (e) => e.name == json['status'],
+        orElse: () => SubmissionStatus.submitted,
       ),
       data: json['data'] as Map<String, dynamic>,
       attachments: (json['attachments'] as List?)

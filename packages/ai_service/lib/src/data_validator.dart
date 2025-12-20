@@ -1,42 +1,44 @@
-/// Data validator using AI
+import 'ai_service_base.dart';
+
+/// Data validator that delegates to the shared AI service.
 class DataValidator {
-  /// Validate email format and suggest corrections
-  Future<ValidationResult> validateEmail(String email) async {
-    // TODO: Implement AI-powered email validation
-    return ValidationResult(isValid: email.contains('@'), suggestions: []);
+  final AIService ai;
+
+  DataValidator(this.ai);
+
+  /// Validate email format and suggest corrections.
+  Future<ValidationResult> validateEmail(String email) {
+    return ai.validateData(
+      data: {'email': email},
+      context: 'email',
+    );
   }
 
-  /// Validate phone number and format
-  Future<ValidationResult> validatePhone(String phone) async {
-    // TODO: Implement AI-powered phone validation
-    return ValidationResult(isValid: true, suggestions: []);
+  /// Validate phone number and formatting.
+  Future<ValidationResult> validatePhone(String phone) {
+    return ai.validateData(
+      data: {'phone': phone},
+      context: 'phone',
+    );
   }
 
-  /// Validate address and suggest completions
-  Future<ValidationResult> validateAddress(String address) async {
-    // TODO: Implement AI-powered address validation
-    return ValidationResult(isValid: true, suggestions: []);
+  /// Validate address and suggest completions.
+  Future<ValidationResult> validateAddress(String address) {
+    return ai.validateData(
+      data: {'address': address},
+      context: 'address',
+    );
   }
 
-  /// Validate custom field data
+  /// Validate custom field data with an explicit field type.
   Future<ValidationResult> validateCustomField({
     required String value,
     required String fieldType,
     String? context,
-  }) async {
-    // TODO: Implement AI-powered custom validation
-    return ValidationResult(isValid: true, suggestions: []);
+  }) {
+    return ai.validateData(
+      data: {'value': value, 'fieldType': fieldType},
+      context: context ?? 'custom',
+    );
   }
-}
-
-class ValidationResult {
-  final bool isValid;
-  final List<String> suggestions;
-  final String? errorMessage;
-
-  ValidationResult({
-    required this.isValid,
-    required this.suggestions,
-    this.errorMessage,
-  });
 }

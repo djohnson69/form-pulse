@@ -70,8 +70,7 @@ Form Bridge is a comprehensive Flutter/Dart full-stack platform that breathes li
 ```
 Form_Pulse/
 ├── apps/
-│   ├── mobile/          # Flutter mobile application (iOS & Android)
-│   └── web/             # Flutter web application
+│   └── mobile/          # Flutter app (iOS, Android, Web)
 ├── packages/
 │   ├── shared/          # Shared domain models and utilities
 │   ├── backend/         # Dart REST API server
@@ -130,15 +129,9 @@ Form_Pulse/
 
 3. **Install dependencies**
 
-   Mobile app:
+   Flutter app:
    ```bash
    cd apps/mobile
-   flutter pub get
-   ```
-
-   Web app:
-   ```bash
-   cd apps/web
    flutter pub get
    ```
 
@@ -175,13 +168,17 @@ dart run bin/server.dart
 
 **Run the mobile app:**
 ```bash
+./run-mobile.sh
+# or manually:
 cd apps/mobile
 flutter run
 ```
 
 **Run the web app:**
 ```bash
-cd apps/web
+./run-web.sh
+# or manually:
+cd apps/mobile
 flutter run -d chrome
 ```
 
@@ -189,13 +186,10 @@ flutter run -d chrome
 
 ### Project Structure
 
-- **`apps/mobile/`** - Flutter mobile application
+- **`apps/mobile/`** - Flutter multi-platform application (iOS, Android, Web)
   - `lib/features/` - Feature-based modules (auth, forms, dashboard, etc.)
   - `lib/core/` - Core services and utilities
   - `lib/app/` - App-level configuration
-
-- **`apps/web/`** - Flutter web application
-  - Similar structure to mobile app
 
 - **`packages/shared/`** - Shared code
   - `lib/src/models/` - Domain models

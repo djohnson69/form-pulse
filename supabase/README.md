@@ -2,6 +2,7 @@
 
 1) Create a storage bucket for attachments, e.g. `formbridge-attachments` (public access off).
 2) Run `schema.sql` in the Supabase SQL editor to create tables and RLS policies.
+   - If your project already has the older UUID-based forms table, run `add_missing_columns.sql` first to migrate ids to text and add fields/tags/metadata.
 3) Set project env values (do not commit secrets):
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
