@@ -35,8 +35,13 @@ class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
   int _sectionIndex = 0;
 
   @override
-  void initState() {
-    super.initState();
+  Widget build(BuildContext context) {
+    if (!widget.userRole.canAccessAdminConsole) {
+      return const Scaffold(
+        body: Center(child: Text('Access denied: Admins only.')),
+      );
+    }
+
     ref.listen<AsyncValue<List<AdminOrgSummary>>>(
       adminOrganizationsProvider,
       (previous, next) {
@@ -51,15 +56,6 @@ class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
         });
       },
     );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!widget.userRole.canAccessAdminConsole) {
-      return const Scaffold(
-        body: Center(child: Text('Access denied: Admins only.')),
-      );
-    }
 
     final permissions = _AdminPermissions(widget.userRole);
     final orgCount =
