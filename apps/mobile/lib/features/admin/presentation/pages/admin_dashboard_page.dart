@@ -9,9 +9,21 @@ import '../../../dashboard/presentation/pages/submission_detail_page.dart';
 import '../../../documents/presentation/pages/documents_page.dart';
 import '../../../ops/presentation/pages/ai_tools_page.dart';
 import '../../../ops/presentation/pages/export_jobs_page.dart';
+import '../../../ops/presentation/pages/guest_invites_page.dart';
 import '../../../ops/presentation/pages/integrations_page.dart';
+import '../../../ops/presentation/pages/news_posts_page.dart';
+import '../../../ops/presentation/pages/notebook_pages_page.dart';
+import '../../../ops/presentation/pages/notebook_reports_page.dart';
+import '../../../ops/presentation/pages/notification_rules_page.dart';
 import '../../../ops/presentation/pages/ops_hub_page.dart';
+import '../../../ops/presentation/pages/payment_requests_page.dart';
+import '../../../ops/presentation/pages/portfolio_items_page.dart';
+import '../../../ops/presentation/pages/project_galleries_page.dart';
+import '../../../ops/presentation/pages/reviews_page.dart';
+import '../../../ops/presentation/pages/signature_requests_page.dart';
+import '../../../partners/presentation/pages/clients_page.dart';
 import '../../../partners/presentation/pages/messages_page.dart';
+import '../../../partners/presentation/pages/vendors_page.dart';
 import '../../../projects/presentation/pages/projects_page.dart';
 import '../../../tasks/presentation/pages/tasks_page.dart';
 import '../../../training/presentation/pages/training_hub_page.dart';
@@ -33,16 +45,12 @@ class AdminDashboardPage extends ConsumerStatefulWidget {
 
 class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
   int _sectionIndex = 0;
+  late final ProviderSubscription<AsyncValue<List<AdminOrgSummary>>> _orgListener;
 
   @override
-  Widget build(BuildContext context) {
-    if (!widget.userRole.canAccessAdminConsole) {
-      return const Scaffold(
-        body: Center(child: Text('Access denied: Admins only.')),
-      );
-    }
-
-    ref.listen<AsyncValue<List<AdminOrgSummary>>>(
+  void initState() {
+    super.initState();
+    _orgListener = ref.listenManual<AsyncValue<List<AdminOrgSummary>>>(
       adminOrganizationsProvider,
       (previous, next) {
         next.whenData((orgs) {
@@ -56,6 +64,21 @@ class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
         });
       },
     );
+  }
+
+  @override
+  void dispose() {
+    _orgListener.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.userRole.canAccessAdminConsole) {
+      return const Scaffold(
+        body: Center(child: Text('Access denied: Admins only.')),
+      );
+    }
 
     final permissions = _AdminPermissions(widget.userRole);
     final orgCount =
@@ -611,6 +634,12 @@ class _FormsSection extends ConsumerWidget {
           forms: forms,
         ),
         const SizedBox(height: 12),
+        stats.when(
+          data: (data) => _FormsByCategoryCard(stats: data),
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const SizedBox.shrink(),
+        ),
+        const SizedBox(height: 12),
         forms.when(
           data: (data) => _FormsList(
             forms: data,
@@ -753,11 +782,27 @@ class _OpsSection extends ConsumerWidget {
                 ),
               ),
               _AdminActionCard(
+                label: 'Photo Galleries',
+                value: data.projectPhotos,
+                icon: Icons.photo_library,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ProjectGalleriesPage()),
+                ),
+              ),
+              _AdminActionCard(
                 label: 'Documents',
                 value: data.documents,
                 icon: Icons.folder_copy,
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const DocumentsPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Signatures',
+                value: data.signatureRequests,
+                icon: Icons.border_color,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SignatureRequestsPage()),
                 ),
               ),
               _AdminActionCard(
@@ -785,11 +830,91 @@ class _OpsSection extends ConsumerWidget {
                 ),
               ),
               _AdminActionCard(
+                label: 'Notebook Pages',
+                value: data.notebookPages,
+                icon: Icons.note_alt,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NotebookPagesPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Notebook Reports',
+                value: data.notebookReports,
+                icon: Icons.picture_as_pdf,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NotebookReportsPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'News Posts',
+                value: data.newsPosts,
+                icon: Icons.campaign,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NewsPostsPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Notification Rules',
+                value: data.notificationRules,
+                icon: Icons.notifications_active,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NotificationRulesPage()),
+                ),
+              ),
+              _AdminActionCard(
                 label: 'Messages',
-                value: data.notifications,
+                value: data.messageThreads,
                 icon: Icons.chat_bubble_outline,
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const MessagesPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Clients',
+                value: data.clients,
+                icon: Icons.business,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ClientsPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Vendors',
+                value: data.vendors,
+                icon: Icons.handshake,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const VendorsPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Guest Access',
+                value: data.guestInvites,
+                icon: Icons.person_add_alt_1,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const GuestInvitesPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Payments',
+                value: data.paymentRequests,
+                icon: Icons.payments,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const PaymentRequestsPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Reviews',
+                value: data.reviews,
+                icon: Icons.star_rate,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ReviewsPage()),
+                ),
+              ),
+              _AdminActionCard(
+                label: 'Portfolio',
+                value: data.portfolioItems,
+                icon: Icons.auto_stories,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const PortfolioItemsPage()),
                 ),
               ),
             ],
@@ -994,30 +1119,6 @@ class _StatsGrid extends StatelessWidget {
                 .toList(),
           );
         }),
-        const SizedBox(height: 12),
-        if (stats.formsByCategory.isNotEmpty)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Forms by category',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 12),
-                  ...stats.formsByCategory.entries.map(
-                    (e) => _CategoryBar(
-                      label: e.key.isEmpty ? 'Uncategorized' : e.key,
-                      value: e.value,
-                      max: stats.forms,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
       ],
     );
   }
@@ -1146,6 +1247,41 @@ class _CategoryBar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FormsByCategoryCard extends StatelessWidget {
+  const _FormsByCategoryCard({required this.stats});
+
+  final AdminStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    if (stats.formsByCategory.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Forms by category',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            ...stats.formsByCategory.entries.map(
+              (e) => _CategoryBar(
+                label: e.key.isEmpty ? 'Uncategorized' : e.key,
+                value: e.value,
+                max: stats.forms,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

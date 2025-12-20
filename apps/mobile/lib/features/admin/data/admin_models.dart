@@ -16,6 +16,19 @@ class AdminStats {
     required this.webhooks,
     required this.exportJobs,
     required this.aiJobs,
+    required this.newsPosts,
+    required this.notificationRules,
+    required this.notebookPages,
+    required this.notebookReports,
+    required this.signatureRequests,
+    required this.projectPhotos,
+    required this.paymentRequests,
+    required this.reviews,
+    required this.portfolioItems,
+    required this.guestInvites,
+    required this.clients,
+    required this.vendors,
+    required this.messageThreads,
     required this.formsByCategory,
   });
 
@@ -33,6 +46,19 @@ class AdminStats {
   final int webhooks;
   final int exportJobs;
   final int aiJobs;
+  final int newsPosts;
+  final int notificationRules;
+  final int notebookPages;
+  final int notebookReports;
+  final int signatureRequests;
+  final int projectPhotos;
+  final int paymentRequests;
+  final int reviews;
+  final int portfolioItems;
+  final int guestInvites;
+  final int clients;
+  final int vendors;
+  final int messageThreads;
   final Map<String, int> formsByCategory;
 }
 

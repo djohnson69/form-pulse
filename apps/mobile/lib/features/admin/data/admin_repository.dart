@@ -24,6 +24,23 @@ class AdminRepository {
     var webhooksQuery = _client.from('webhook_endpoints').select('id');
     var exportJobsQuery = _client.from('export_jobs').select('id');
     var aiJobsQuery = _client.from('ai_jobs').select('id');
+    var newsPostsQuery = _client.from('news_posts').select('id');
+    var notificationRulesQuery =
+        _client.from('notification_rules').select('id');
+    var notebookPagesQuery = _client.from('notebook_pages').select('id');
+    var notebookReportsQuery = _client.from('notebook_reports').select('id');
+    var signatureRequestsQuery =
+        _client.from('signature_requests').select('id');
+    var projectPhotosQuery = _client.from('project_photos').select('id');
+    var paymentRequestsQuery =
+        _client.from('payment_requests').select('id');
+    var reviewsQuery = _client.from('reviews').select('id');
+    var portfolioItemsQuery =
+        _client.from('portfolio_items').select('id');
+    var guestInvitesQuery = _client.from('guest_invites').select('id');
+    var clientsQuery = _client.from('clients').select('id');
+    var vendorsQuery = _client.from('vendors').select('id');
+    var messageThreadsQuery = _client.from('message_threads').select('id');
 
     if (orgId != null && orgId.isNotEmpty) {
       formsQuery = formsQuery.eq('org_id', orgId);
@@ -40,6 +57,19 @@ class AdminRepository {
       webhooksQuery = webhooksQuery.eq('org_id', orgId);
       exportJobsQuery = exportJobsQuery.eq('org_id', orgId);
       aiJobsQuery = aiJobsQuery.eq('org_id', orgId);
+      newsPostsQuery = newsPostsQuery.eq('org_id', orgId);
+      notificationRulesQuery = notificationRulesQuery.eq('org_id', orgId);
+      notebookPagesQuery = notebookPagesQuery.eq('org_id', orgId);
+      notebookReportsQuery = notebookReportsQuery.eq('org_id', orgId);
+      signatureRequestsQuery = signatureRequestsQuery.eq('org_id', orgId);
+      projectPhotosQuery = projectPhotosQuery.eq('org_id', orgId);
+      paymentRequestsQuery = paymentRequestsQuery.eq('org_id', orgId);
+      reviewsQuery = reviewsQuery.eq('org_id', orgId);
+      portfolioItemsQuery = portfolioItemsQuery.eq('org_id', orgId);
+      guestInvitesQuery = guestInvitesQuery.eq('org_id', orgId);
+      clientsQuery = clientsQuery.eq('org_id', orgId);
+      vendorsQuery = vendorsQuery.eq('org_id', orgId);
+      messageThreadsQuery = messageThreadsQuery.eq('org_id', orgId);
     }
 
     final results = await Future.wait([
@@ -57,6 +87,19 @@ class AdminRepository {
       webhooksQuery,
       exportJobsQuery,
       aiJobsQuery,
+      newsPostsQuery,
+      notificationRulesQuery,
+      notebookPagesQuery,
+      notebookReportsQuery,
+      signatureRequestsQuery,
+      projectPhotosQuery,
+      paymentRequestsQuery,
+      reviewsQuery,
+      portfolioItemsQuery,
+      guestInvitesQuery,
+      clientsQuery,
+      vendorsQuery,
+      messageThreadsQuery,
     ]);
 
     final forms = results[0] as List;
@@ -73,6 +116,19 @@ class AdminRepository {
     final webhooks = results[11] as List;
     final exportJobs = results[12] as List;
     final aiJobs = results[13] as List;
+    final newsPosts = results[14] as List;
+    final notificationRules = results[15] as List;
+    final notebookPages = results[16] as List;
+    final notebookReports = results[17] as List;
+    final signatureRequests = results[18] as List;
+    final projectPhotos = results[19] as List;
+    final paymentRequests = results[20] as List;
+    final reviews = results[21] as List;
+    final portfolioItems = results[22] as List;
+    final guestInvites = results[23] as List;
+    final clients = results[24] as List;
+    final vendors = results[25] as List;
+    final messageThreads = results[26] as List;
 
     final byCategory = <String, int>{};
     for (final row in forms) {
@@ -95,6 +151,19 @@ class AdminRepository {
       webhooks: webhooks.length,
       exportJobs: exportJobs.length,
       aiJobs: aiJobs.length,
+      newsPosts: newsPosts.length,
+      notificationRules: notificationRules.length,
+      notebookPages: notebookPages.length,
+      notebookReports: notebookReports.length,
+      signatureRequests: signatureRequests.length,
+      projectPhotos: projectPhotos.length,
+      paymentRequests: paymentRequests.length,
+      reviews: reviews.length,
+      portfolioItems: portfolioItems.length,
+      guestInvites: guestInvites.length,
+      clients: clients.length,
+      vendors: vendors.length,
+      messageThreads: messageThreads.length,
       formsByCategory: byCategory,
     );
   }
