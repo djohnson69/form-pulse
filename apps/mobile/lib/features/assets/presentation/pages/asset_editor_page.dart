@@ -23,9 +23,15 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
   final _manufacturerController = TextEditingController();
   final _modelController = TextEditingController();
   final _assignedToController = TextEditingController();
+  final _contactNameController = TextEditingController();
+  final _contactEmailController = TextEditingController();
+  final _contactPhoneController = TextEditingController();
   final _descriptionController = TextEditingController();
   DateTime? _purchaseDate;
   DateTime? _nextMaintenanceDate;
+  String? _inspectionCadence;
+  DateTime? _lastInspectionAt;
+  DateTime? _nextInspectionAt;
   bool _isActive = true;
   bool _saving = false;
 
@@ -42,9 +48,15 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
       _manufacturerController.text = existing.manufacturer ?? '';
       _modelController.text = existing.modelNumber ?? '';
       _assignedToController.text = existing.assignedTo ?? '';
+      _contactNameController.text = existing.contactName ?? '';
+      _contactEmailController.text = existing.contactEmail ?? '';
+      _contactPhoneController.text = existing.contactPhone ?? '';
       _descriptionController.text = existing.description ?? '';
       _purchaseDate = existing.purchaseDate;
       _nextMaintenanceDate = existing.nextMaintenanceDate;
+      _inspectionCadence = existing.inspectionCadence;
+      _lastInspectionAt = existing.lastInspectionAt;
+      _nextInspectionAt = existing.nextInspectionAt;
       _isActive = existing.isActive;
     }
   }
@@ -59,6 +71,9 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
     _manufacturerController.dispose();
     _modelController.dispose();
     _assignedToController.dispose();
+    _contactNameController.dispose();
+    _contactEmailController.dispose();
+    _contactPhoneController.dispose();
     _descriptionController.dispose();
     super.dispose();
   }
@@ -129,6 +144,30 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
               ),
               const SizedBox(height: 12),
               TextFormField(
+                controller: _contactNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Contact name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _contactEmailController,
+                decoration: const InputDecoration(
+                  labelText: 'Contact email',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _contactPhoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Contact phone',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
                 controller: _manufacturerController,
                 decoration: const InputDecoration(
                   labelText: 'Manufacturer',
@@ -168,6 +207,38 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                   child: const Text('Select'),
                 ),
               ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String?>(
+                key: ValueKey(_inspectionCadence),
+                initialValue: _inspectionCadence,
+                decoration: const InputDecoration(
+                  labelText: 'Inspection cadence',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('No schedule')),
+                  DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                  DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                  DropdownMenuItem(value: 'quarterly', child: Text('Quarterly')),
+                ],
+                onChanged: (value) {
+                  setState(() {
+                    _inspectionCadence = value;
+                    _nextInspectionAt =
+                        _computeNextInspection(value, _lastInspectionAt);
+                  });
+                },
+              ),
+              if (_nextInspectionAt != null) const SizedBox(height: 8),
+              if (_nextInspectionAt != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.fact_check),
+                  title: Text('Next inspection ${_formatDate(_nextInspectionAt!)}'),
+                  subtitle: _lastInspectionAt == null
+                      ? const Text('No inspections recorded yet')
+                      : Text('Last inspection ${_formatDate(_lastInspectionAt!)}'),
+                ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.build),
@@ -212,6 +283,10 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
+      if (_inspectionCadence != null && _nextInspectionAt == null) {
+        _nextInspectionAt =
+            _computeNextInspection(_inspectionCadence, _lastInspectionAt);
+      }
       final repo = ref.read(assetsRepositoryProvider);
       final existing = widget.existing;
       final asset = Equipment(
@@ -232,6 +307,15 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
         assignedTo: _assignedToController.text.trim().isEmpty
             ? null
             : _assignedToController.text.trim(),
+        contactName: _contactNameController.text.trim().isEmpty
+            ? null
+            : _contactNameController.text.trim(),
+        contactEmail: _contactEmailController.text.trim().isEmpty
+            ? null
+            : _contactEmailController.text.trim(),
+        contactPhone: _contactPhoneController.text.trim().isEmpty
+            ? null
+            : _contactPhoneController.text.trim(),
         manufacturer: _manufacturerController.text.trim().isEmpty
             ? null
             : _manufacturerController.text.trim(),
@@ -243,6 +327,9 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
             : _descriptionController.text.trim(),
         purchaseDate: _purchaseDate,
         nextMaintenanceDate: _nextMaintenanceDate,
+        inspectionCadence: _inspectionCadence,
+        lastInspectionAt: _lastInspectionAt,
+        nextInspectionAt: _nextInspectionAt,
         isActive: _isActive,
         createdAt: existing?.createdAt ?? DateTime.now(),
         metadata: existing?.metadata,
@@ -275,5 +362,20 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
 
   String _formatDate(DateTime date) {
     return '${date.month}/${date.day}/${date.year}';
+  }
+
+  DateTime? _computeNextInspection(String? cadence, DateTime? base) {
+    if (cadence == null || cadence.isEmpty) return null;
+    final origin = base ?? DateTime.now();
+    switch (cadence) {
+      case 'daily':
+        return origin.add(const Duration(days: 1));
+      case 'weekly':
+        return origin.add(const Duration(days: 7));
+      case 'quarterly':
+        return origin.add(const Duration(days: 90));
+      default:
+        return null;
+    }
   }
 }

@@ -30,6 +30,7 @@ abstract class TasksRepositoryBase {
     String? assignedTo,
     String? assignedToName,
     String? assignedTeam,
+    Map<String, dynamic>? metadata,
   });
   Future<Task> updateTask({
     required String taskId,
@@ -43,6 +44,7 @@ abstract class TasksRepositoryBase {
     String? assignedTo,
     String? assignedToName,
     String? assignedTeam,
+    Map<String, dynamic>? metadata,
   });
   Future<void> sendReminder(Task task, {String? message});
 }
@@ -83,8 +85,9 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
     try {
       final res = await _client
           .from('profiles')
-          .select('id, first_name, last_name, email, role')
+          .select('id, first_name, last_name, email, role, is_active')
           .eq('org_id', orgId)
+          .eq('is_active', true)
           .order('last_name', ascending: true);
       return (res as List<dynamic>).map((row) {
         final data = Map<String, dynamic>.from(row as Map);
@@ -119,6 +122,7 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
     String? assignedTo,
     String? assignedToName,
     String? assignedTeam,
+    Map<String, dynamic>? metadata,
   }) async {
     final orgId = await _getOrgId();
     if (orgId == null) {
@@ -138,6 +142,7 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
       'assigned_team': assignedTeam,
       'created_by': _client.auth.currentUser?.id,
       'updated_at': DateTime.now().toIso8601String(),
+      if (metadata != null) 'metadata': metadata,
     };
     try {
       final res = await _client.from('tasks').insert(payload).select().single();
@@ -150,6 +155,36 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
           body: 'Task: ${task.title}',
           type: 'task',
         );
+      }
+      if (assignedTeam != null && assignedTeam.trim().isNotEmpty) {
+        final members = await _resolveTeamMembers(
+          orgId: orgId,
+          teamName: assignedTeam,
+        );
+        for (final userId in members) {
+          if (userId == assignedTo) continue;
+          await _createNotification(
+            orgId: orgId,
+            userId: userId,
+            title: 'Team task assigned',
+            body: 'Task: ${task.title}',
+            type: 'task',
+          );
+        }
+      }
+      final approval = metadata?['approval'] as Map?;
+      if (approval?['required'] == true) {
+        final approverRole = approval?['approverRole']?.toString();
+        final approvers = await _fetchApprovers(orgId, approverRole);
+        for (final userId in approvers) {
+          await _createNotification(
+            orgId: orgId,
+            userId: userId,
+            title: 'Task approval requested',
+            body: 'Task: ${task.title}',
+            type: 'task_approval',
+          );
+        }
       }
       return task;
     } catch (e, st) {
@@ -175,6 +210,7 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
     String? assignedTo,
     String? assignedToName,
     String? assignedTeam,
+    Map<String, dynamic>? metadata,
   }) async {
     final payload = <String, dynamic>{
       'updated_at': DateTime.now().toIso8601String(),
@@ -191,6 +227,7 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
     if (assignedTo != null) payload['assigned_to'] = assignedTo;
     if (assignedToName != null) payload['assigned_to_name'] = assignedToName;
     if (assignedTeam != null) payload['assigned_team'] = assignedTeam;
+    if (metadata != null) payload['metadata'] = metadata;
 
     final completing = status == TaskStatus.completed;
     if (completing) {
@@ -208,6 +245,24 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
       final task = _mapTask(Map<String, dynamic>.from(res as Map));
       if (completing) {
         await _notifySupervisors(task);
+      }
+      if (assignedTeam != null && assignedTeam.trim().isNotEmpty) {
+        final effectiveOrgId = task.orgId ?? await _getOrgId();
+        if (effectiveOrgId == null) return task;
+        final members = await _resolveTeamMembers(
+          orgId: effectiveOrgId,
+          teamName: assignedTeam,
+        );
+        for (final userId in members) {
+          if (userId == assignedTo) continue;
+          await _createNotification(
+            orgId: effectiveOrgId,
+            userId: userId,
+            title: 'Team task updated',
+            body: 'Task: ${task.title}',
+            type: 'task',
+          );
+        }
       }
       return task;
     } catch (e, st) {
@@ -273,6 +328,33 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
     }
   }
 
+  Future<List<String>> _fetchApprovers(
+    String orgId,
+    String? requiredRole,
+  ) async {
+    if (requiredRole == null || requiredRole.trim().isEmpty) {
+      return _fetchSupervisors(orgId);
+    }
+    try {
+      final res = await _client
+          .from('org_members')
+          .select('user_id, role')
+          .eq('org_id', orgId)
+          .eq('role', requiredRole);
+      return (res as List<dynamic>)
+          .map((row) => row['user_id'].toString())
+          .toSet()
+          .toList();
+    } catch (e, st) {
+      developer.log(
+        'Supabase fetchApprovers failed',
+        error: e,
+        stackTrace: st,
+      );
+      return const [];
+    }
+  }
+
   Future<void> _createNotification({
     required String orgId,
     required String userId,
@@ -290,12 +372,54 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
         'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
+      await _client.functions.invoke(
+        'push',
+        body: {
+          'orgId': orgId,
+          'userId': userId,
+          'title': title,
+          'body': body,
+          'data': {'type': type},
+        },
+      );
     } catch (e, st) {
       developer.log(
         'Supabase createNotification failed',
         error: e,
         stackTrace: st,
       );
+    }
+  }
+
+  Future<List<String>> _resolveTeamMembers({
+    required String? orgId,
+    required String teamName,
+  }) async {
+    if (orgId == null || orgId.isEmpty) return const [];
+    try {
+      final teamRow = await _client
+          .from('teams')
+          .select('id')
+          .eq('org_id', orgId)
+          .eq('name', teamName)
+          .maybeSingle();
+      final teamId = teamRow?['id']?.toString();
+      if (teamId == null) return const [];
+      final members = await _client
+          .from('team_members')
+          .select('user_id')
+          .eq('team_id', teamId);
+      return (members as List<dynamic>)
+          .map((row) => row['user_id']?.toString())
+          .whereType<String>()
+          .toList();
+    } catch (e, st) {
+      developer.log(
+        'Supabase resolveTeamMembers failed',
+        error: e,
+        stackTrace: st,
+      );
+      return const [];
     }
   }
 

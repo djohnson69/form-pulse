@@ -62,6 +62,34 @@ class AdminStats {
   final Map<String, int> formsByCategory;
 }
 
+class AdminAiUsageSummary {
+  const AdminAiUsageSummary({
+    required this.totalJobs,
+    required this.byType,
+    required this.topUsers,
+    required this.windowLabel,
+  });
+
+  final int totalJobs;
+  final Map<String, int> byType;
+  final List<AdminAiUserUsage> topUsers;
+  final String windowLabel;
+}
+
+class AdminAiUserUsage {
+  const AdminAiUserUsage({
+    required this.userId,
+    required this.displayName,
+    required this.email,
+    required this.jobs,
+  });
+
+  final String userId;
+  final String displayName;
+  final String email;
+  final int jobs;
+}
+
 class AdminOrgSummary {
   const AdminOrgSummary({
     required this.id,
@@ -86,6 +114,7 @@ class AdminUserSummary {
     required this.firstName,
     required this.lastName,
     required this.role,
+    required this.isActive,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -96,6 +125,7 @@ class AdminUserSummary {
   final String firstName;
   final String lastName;
   final UserRole role;
+  final bool isActive;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -132,6 +162,9 @@ class AdminSubmissionSummary {
     required this.status,
     required this.submittedAt,
     this.submittedBy,
+    this.formTitle,
+    this.submittedByName,
+    this.submittedByRole,
     this.attachmentsCount = 0,
     this.metadata,
   });
@@ -141,6 +174,9 @@ class AdminSubmissionSummary {
   final String status;
   final DateTime submittedAt;
   final String? submittedBy;
+  final String? formTitle;
+  final String? submittedByName;
+  final UserRole? submittedByRole;
   final int attachmentsCount;
   final Map<String, dynamic>? metadata;
 }

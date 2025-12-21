@@ -1,11 +1,15 @@
 import 'dart:developer' as developer;
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/ai/ai_function_service.dart';
+import '../../../core/services/push_dispatcher.dart';
 import '../../../core/utils/storage_utils.dart';
+import '../../tasks/data/tasks_repository.dart';
 
 class AttachmentDraft {
   AttachmentDraft({
@@ -23,6 +27,20 @@ class AttachmentDraft {
   final Map<String, dynamic>? metadata;
 }
 
+class AutomationRunSummary {
+  AutomationRunSummary({
+    required this.rulesChecked,
+    required this.rulesFired,
+    required this.notificationsSent,
+    required this.breakdown,
+  });
+
+  final int rulesChecked;
+  final int rulesFired;
+  final int notificationsSent;
+  final Map<String, int> breakdown;
+}
+
 abstract class OpsRepositoryBase {
   Future<List<NewsPost>> fetchNewsPosts();
   Future<NewsPost> createNewsPost({
@@ -31,6 +49,7 @@ abstract class OpsRepositoryBase {
     String scope,
     bool isPublished,
     List<String> tags,
+    String? siteId,
   });
 
   Future<List<NotificationRule>> fetchNotificationRules();
@@ -43,11 +62,12 @@ abstract class OpsRepositoryBase {
     String? schedule,
     String? messageTemplate,
   });
-  Future<void> triggerRule({
+  Future<int> triggerRule({
     required NotificationRule rule,
     String? title,
     String? body,
   });
+  Future<AutomationRunSummary> runDueAutomations();
 
   Future<List<NotebookPage>> fetchNotebookPages({String? projectId});
   Future<NotebookPage> createNotebookPage({
@@ -99,6 +119,7 @@ abstract class OpsRepositoryBase {
     required String photoId,
     required String body,
     List<String> mentions,
+    AttachmentDraft? voiceNote,
   });
 
   Future<List<WebhookEndpoint>> fetchWebhookEndpoints();
@@ -117,12 +138,26 @@ abstract class OpsRepositoryBase {
     bool? isActive,
   });
 
+  Future<List<IntegrationProfile>> fetchIntegrations();
+  Future<IntegrationProfile> upsertIntegration({
+    required String provider,
+    String status,
+    Map<String, dynamic>? config,
+  });
+
   Future<List<ExportJob>> fetchExportJobs();
   Future<ExportJob> createExportJob({
     required String type,
     String format,
     String status,
     String? fileUrl,
+    Map<String, dynamic>? metadata,
+  });
+  Future<ExportJob> createExportJobWithFile({
+    required String type,
+    required String format,
+    required String filename,
+    required Uint8List bytes,
     Map<String, dynamic>? metadata,
   });
   Future<ExportJob> completeExportJob({
@@ -137,6 +172,17 @@ abstract class OpsRepositoryBase {
     String? inputText,
     String? outputText,
     List<AttachmentDraft> inputMedia,
+    Map<String, dynamic>? metadata,
+  });
+  Future<int> processPendingAiJobs({int maxJobs});
+
+  Future<List<DailyLog>> fetchDailyLogs({String? projectId});
+  Future<DailyLog> createDailyLog({
+    required String content,
+    DateTime? logDate,
+    String? title,
+    String? projectId,
+    Map<String, dynamic>? metadata,
   });
 
   Future<List<GuestInvite>> fetchGuestInvites();
@@ -152,6 +198,9 @@ abstract class OpsRepositoryBase {
     String currency,
     String? description,
     String? projectId,
+  });
+  Future<PaymentRequest> createPaymentCheckout({
+    required PaymentRequest request,
   });
   Future<PaymentRequest> updatePaymentStatus({
     required String id,
@@ -186,11 +235,17 @@ abstract class OpsRepositoryBase {
 }
 
 class SupabaseOpsRepository implements OpsRepositoryBase {
-  SupabaseOpsRepository(this._client);
+  SupabaseOpsRepository(this._client)
+      : _push = PushDispatcher(_client),
+        _tasksRepository = SupabaseTasksRepository(_client);
 
   final SupabaseClient _client;
+  final PushDispatcher _push;
+  final SupabaseTasksRepository _tasksRepository;
   static const _bucketName =
       String.fromEnvironment('SUPABASE_BUCKET', defaultValue: 'formbridge-attachments');
+  static const int _taskDueSoonHours = 24;
+  static const int _assetMaintenanceWindowDays = 7;
 
   @override
   Future<List<NewsPost>> fetchNewsPosts() async {
@@ -214,6 +269,7 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     String scope = 'company',
     bool isPublished = true,
     List<String> tags = const [],
+    String? siteId,
   }) async {
     final orgId = await _getOrgId();
     if (orgId == null) {
@@ -224,6 +280,7 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
       'title': title,
       'body': body,
       'scope': scope,
+      if (siteId != null) 'site_id': siteId,
       'tags': tags,
       'is_published': isPublished,
       'published_at': DateTime.now().toIso8601String(),
@@ -232,6 +289,18 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     };
     final res = await _client.from('news_posts').insert(payload).select().single();
     final post = _mapNewsPost(Map<String, dynamic>.from(res as Map));
+    if (isPublished) {
+      await _push.sendToOrg(
+        orgId: orgId,
+        title: title,
+        body: body ?? 'New update posted.',
+        data: {
+          'type': 'news',
+          'scope': scope,
+          if (siteId != null) 'siteId': siteId,
+        },
+      );
+    }
     return _signNewsAttachments(post);
   }
 
@@ -279,13 +348,14 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
   }
 
   @override
-  Future<void> triggerRule({
+  Future<int> triggerRule({
     required NotificationRule rule,
     String? title,
     String? body,
   }) async {
     final orgId = await _getOrgId();
     if (orgId == null) throw Exception('User must belong to an organization.');
+    final targets = await _resolveRuleTargets(rule: rule, orgId: orgId);
     await _client.from('notification_events').insert({
       'org_id': orgId,
       'rule_id': rule.id,
@@ -296,14 +366,105 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
         'body': body,
       },
     });
-    await _client.from('notifications').insert({
-      'org_id': orgId,
-      'user_id': _client.auth.currentUser?.id,
-      'title': title ?? rule.name,
-      'body': body ?? rule.messageTemplate ?? 'Automation triggered',
-      'type': rule.triggerType,
-      'is_read': false,
-    });
+    if (targets.isEmpty) return 0;
+    final payload = targets
+        .map(
+          (userId) => {
+            'org_id': orgId,
+            'user_id': userId,
+            'title': title ?? rule.name,
+            'body': body ?? rule.messageTemplate ?? 'Automation triggered',
+            'type': rule.triggerType,
+            'is_read': false,
+          },
+        )
+        .toList();
+    await _client.from('notifications').insert(payload);
+    await _push.sendToUsers(
+      userIds: targets,
+      orgId: orgId,
+      title: title ?? rule.name,
+      body: body ?? rule.messageTemplate ?? 'Automation triggered',
+      data: {'type': rule.triggerType},
+    );
+    return targets.length;
+  }
+
+  @override
+  Future<AutomationRunSummary> runDueAutomations() async {
+    final orgId = await _getOrgId();
+    if (orgId == null) throw Exception('User must belong to an organization.');
+
+    final rules = await fetchNotificationRules();
+    final activeRules = rules.where((rule) => rule.isActive).toList();
+    final breakdown = <String, int>{};
+    int fired = 0;
+    int notificationsSent = 0;
+
+    final now = DateTime.now();
+    final submissionsCount = await _countRecentSubmissions(orgId, now);
+    final dueTasksCount = await _countDueTasks(orgId, now);
+    final expiringTrainingCount = await _countExpiringTraining(orgId, now);
+    final assetDueCount = await _countAssetMaintenance(orgId, now);
+    final inspectionDueCount = await _countDueInspections(orgId, now);
+    final sopAckCount = await _countPendingSopAcknowledgements(orgId);
+    final scheduledInspections =
+        await _scheduleInspectionTasks(orgId: orgId, now: now);
+    if (scheduledInspections > 0) {
+      breakdown['inspection_due'] = scheduledInspections;
+    }
+
+    for (final rule in activeRules) {
+      int count = 0;
+      String? defaultMessage;
+      switch (rule.triggerType) {
+        case 'submission':
+          count = submissionsCount;
+          defaultMessage = '$submissionsCount new submissions in the last 24 hours.';
+          break;
+        case 'task_due':
+          count = dueTasksCount;
+          defaultMessage = '$dueTasksCount tasks due within 24 hours.';
+          break;
+        case 'training_expire':
+          count = expiringTrainingCount;
+          defaultMessage =
+              '$expiringTrainingCount certifications expiring soon.';
+          break;
+        case 'asset_due':
+          count = assetDueCount;
+          defaultMessage = '$assetDueCount assets need maintenance.';
+          break;
+        case 'inspection_due':
+          count = inspectionDueCount;
+          defaultMessage = '$inspectionDueCount inspections due.';
+          break;
+        case 'sop_ack_due':
+          count = sopAckCount;
+          defaultMessage = '$sopAckCount SOP acknowledgements pending.';
+          break;
+        default:
+          count = 0;
+          break;
+      }
+      if (count == 0) continue;
+      breakdown.update(rule.triggerType, (value) => value + count,
+          ifAbsent: () => count);
+      final sent = await triggerRule(
+        rule: rule,
+        title: rule.name,
+        body: rule.messageTemplate ?? defaultMessage,
+      );
+      fired += 1;
+      notificationsSent += sent;
+    }
+
+    return AutomationRunSummary(
+      rulesChecked: activeRules.length,
+      rulesFired: fired,
+      notificationsSent: notificationsSent,
+      breakdown: breakdown,
+    );
   }
 
   @override
@@ -556,9 +717,22 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     required String photoId,
     required String body,
     List<String> mentions = const [],
+    AttachmentDraft? voiceNote,
   }) async {
     final orgId = await _getOrgId();
     if (orgId == null) throw Exception('User must belong to an organization.');
+    final metadata = <String, dynamic>{};
+    if (mentions.isNotEmpty) {
+      metadata['mentions'] = mentions;
+    }
+    if (voiceNote != null) {
+      final attachment = await _uploadAttachmentDraft(
+        orgId: orgId,
+        folder: 'photo-comments',
+        draft: voiceNote,
+      );
+      metadata['voiceNote'] = attachment;
+    }
     final res = await _client
         .from('photo_comments')
         .insert({
@@ -566,10 +740,40 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
           'photo_id': photoId,
           'author_id': _client.auth.currentUser?.id,
           'body': body,
-          'metadata': {'mentions': mentions},
+          'metadata': metadata,
         })
         .select()
         .single();
+    if (mentions.isNotEmpty) {
+      final targets = await _resolveMentionTargets(
+        orgId: orgId,
+        mentions: mentions,
+      );
+      if (targets.isNotEmpty) {
+        final notificationBody =
+            'You were mentioned in a photo comment.';
+        final payload = targets
+            .map(
+              (userId) => {
+                'org_id': orgId,
+                'user_id': userId,
+                'title': 'Photo mention',
+                'body': notificationBody,
+                'type': 'photo_mention',
+                'is_read': false,
+              },
+            )
+            .toList();
+        await _client.from('notifications').insert(payload);
+        await _push.sendToUsers(
+          userIds: targets,
+          orgId: orgId,
+          title: 'Photo mention',
+          body: notificationBody,
+          data: {'type': 'photo_mention', 'photoId': photoId},
+        );
+      }
+    }
     return _mapPhotoComment(Map<String, dynamic>.from(res as Map));
   }
 
@@ -636,6 +840,44 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
   }
 
   @override
+  Future<List<IntegrationProfile>> fetchIntegrations() async {
+    final orgId = await _getOrgId();
+    if (orgId == null) return const [];
+    final rows = await _client
+        .from('integrations')
+        .select()
+        .eq('org_id', orgId)
+        .order('provider', ascending: true);
+    return (rows as List<dynamic>)
+        .map((row) => _mapIntegration(Map<String, dynamic>.from(row as Map)))
+        .toList();
+  }
+
+  @override
+  Future<IntegrationProfile> upsertIntegration({
+    required String provider,
+    String status = 'inactive',
+    Map<String, dynamic>? config,
+  }) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) throw Exception('User must belong to an organization.');
+    final payload = {
+      'org_id': orgId,
+      'provider': provider,
+      'status': status,
+      'config': config ?? const {},
+      'created_by': _client.auth.currentUser?.id,
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    final res = await _client
+        .from('integrations')
+        .upsert(payload, onConflict: 'org_id,provider')
+        .select()
+        .single();
+    return _mapIntegration(Map<String, dynamic>.from(res as Map));
+  }
+
+  @override
   Future<List<ExportJob>> fetchExportJobs() async {
     final orgId = await _getOrgId();
     if (orgId == null) return const [];
@@ -644,9 +886,10 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
         .select()
         .eq('org_id', orgId)
         .order('created_at', ascending: false);
-    return (rows as List<dynamic>)
+    final jobs = (rows as List<dynamic>)
         .map((row) => _mapExportJob(Map<String, dynamic>.from(row as Map)))
         .toList();
+    return Future.wait(jobs.map(_signExportJob));
   }
 
   @override
@@ -669,6 +912,40 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
           'file_url': fileUrl,
           'metadata': metadata ?? const {},
           'requested_by': _client.auth.currentUser?.id,
+        })
+        .select()
+        .single();
+    return _mapExportJob(Map<String, dynamic>.from(res as Map));
+  }
+
+  @override
+  Future<ExportJob> createExportJobWithFile({
+    required String type,
+    required String format,
+    required String filename,
+    required Uint8List bytes,
+    Map<String, dynamic>? metadata,
+  }) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) throw Exception('User must belong to an organization.');
+    final path = await _uploadFile(
+      orgId: orgId,
+      folder: 'exports',
+      filename: filename,
+      mimeType: _exportMimeType(format),
+      bytes: bytes,
+    );
+    final res = await _client
+        .from('export_jobs')
+        .insert({
+          'org_id': orgId,
+          'type': type,
+          'format': format,
+          'status': 'completed',
+          'file_url': path,
+          'metadata': metadata ?? const {},
+          'requested_by': _client.auth.currentUser?.id,
+          'completed_at': DateTime.now().toIso8601String(),
         })
         .select()
         .single();
@@ -715,6 +992,7 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     String? inputText,
     String? outputText,
     List<AttachmentDraft> inputMedia = const [],
+    Map<String, dynamic>? metadata,
   }) async {
     final orgId = await _getOrgId();
     if (orgId == null) throw Exception('User must belong to an organization.');
@@ -730,9 +1008,10 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
           'type': type,
           'status': outputText != null ? 'completed' : 'pending',
           'input_text': inputText,
-          'input_media': uploaded.map((a) => a.toJson()).toList(),
-          'output_text': outputText,
-          'created_by': _client.auth.currentUser?.id,
+      'input_media': uploaded.map((a) => a.toJson()).toList(),
+      'output_text': outputText,
+      'metadata': metadata ?? const {},
+      'created_by': _client.auth.currentUser?.id,
           'completed_at':
               outputText != null ? DateTime.now().toIso8601String() : null,
         })
@@ -740,6 +1019,106 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
         .single();
     final job = _mapAiJob(Map<String, dynamic>.from(res as Map));
     return _signAiMedia(job);
+  }
+
+  @override
+  Future<int> processPendingAiJobs({int maxJobs = 3}) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) throw Exception('User must belong to an organization.');
+    final rows = await _client
+        .from('ai_jobs')
+        .select()
+        .eq('org_id', orgId)
+        .eq('status', 'pending')
+        .order('created_at', ascending: true)
+        .limit(maxJobs);
+    int processed = 0;
+
+    for (final row in rows as List<dynamic>) {
+      final job = _mapAiJob(Map<String, dynamic>.from(row as Map));
+      final locked = await _client
+          .from('ai_jobs')
+          .update({
+            'status': 'processing',
+            'metadata': {
+              ...?job.metadata,
+              'processingStartedAt': DateTime.now().toIso8601String(),
+            },
+          })
+          .eq('id', job.id)
+          .eq('status', 'pending')
+          .select()
+          .maybeSingle();
+      if (locked == null) continue;
+
+      try {
+        final signedJob = await _signAiMedia(job);
+        final output = await _runAiJob(signedJob);
+        await _client.from('ai_jobs').update({
+          'status': 'completed',
+          'output_text': output,
+          'completed_at': DateTime.now().toIso8601String(),
+          'metadata': {
+            ...?job.metadata,
+            'processedBy': 'client',
+            'processedAt': DateTime.now().toIso8601String(),
+          },
+        }).eq('id', job.id);
+        processed += 1;
+      } catch (e) {
+        await _client.from('ai_jobs').update({
+          'status': 'failed',
+          'completed_at': DateTime.now().toIso8601String(),
+          'metadata': {
+            ...?job.metadata,
+            'error': e.toString(),
+          },
+        }).eq('id', job.id);
+      }
+    }
+
+    return processed;
+  }
+
+  @override
+  Future<List<DailyLog>> fetchDailyLogs({String? projectId}) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) return const [];
+    var query = _client.from('daily_logs').select().eq('org_id', orgId);
+    if (projectId != null && projectId.isNotEmpty) {
+      query = query.eq('project_id', projectId);
+    }
+    final rows = await query.order('log_date', ascending: false);
+    return (rows as List<dynamic>)
+        .map((row) => _mapDailyLog(Map<String, dynamic>.from(row as Map)))
+        .toList();
+  }
+
+  @override
+  Future<DailyLog> createDailyLog({
+    required String content,
+    DateTime? logDate,
+    String? title,
+    String? projectId,
+    Map<String, dynamic>? metadata,
+  }) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) throw Exception('User must belong to an organization.');
+    final res = await _client
+        .from('daily_logs')
+        .insert({
+          'org_id': orgId,
+          'project_id': projectId,
+          'log_date':
+              (logDate ?? DateTime.now()).toIso8601String(),
+          'title': title,
+          'content': content,
+          'created_by': _client.auth.currentUser?.id,
+          'metadata': metadata ?? const {},
+        })
+        .select()
+        .single();
+    return _mapDailyLog(Map<String, dynamic>.from(res as Map));
   }
 
   @override
@@ -816,6 +1195,32 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
         .select()
         .single();
     return _mapPaymentRequest(Map<String, dynamic>.from(res as Map));
+  }
+
+  @override
+  Future<PaymentRequest> createPaymentCheckout({
+    required PaymentRequest request,
+  }) async {
+    final response = await _client.functions.invoke(
+      'payments',
+      body: {
+        'requestId': request.id,
+        'amount': request.amount,
+        'currency': request.currency,
+        'description': request.description,
+        'projectId': request.projectId,
+        'orgId': request.orgId,
+      },
+    );
+    if (response.status != 200) {
+      throw Exception('Payments function failed (${response.status}).');
+    }
+    final updated = await _client
+        .from('payment_requests')
+        .select()
+        .eq('id', request.id)
+        .single();
+    return _mapPaymentRequest(Map<String, dynamic>.from(updated as Map));
   }
 
   @override
@@ -1004,6 +1409,79 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     return path;
   }
 
+  Future<Map<String, dynamic>> _uploadAttachmentDraft({
+    required String orgId,
+    required String folder,
+    required AttachmentDraft draft,
+  }) async {
+    final path = await _uploadFile(
+      orgId: orgId,
+      folder: folder,
+      filename: draft.filename,
+      mimeType: draft.mimeType,
+      bytes: draft.bytes,
+    );
+    final url = _client.storage.from(_bucketName).getPublicUrl(path);
+    return {
+      'url': url,
+      'filename': draft.filename,
+      'mimeType': draft.mimeType,
+      'storagePath': path,
+      'bucket': _bucketName,
+      if (draft.metadata != null) 'metadata': draft.metadata,
+    };
+  }
+
+  Future<List<String>> _resolveMentionTargets({
+    required String orgId,
+    required List<String> mentions,
+  }) async {
+    final targetHandles =
+        mentions.map((mention) => mention.trim().toLowerCase()).toSet();
+    if (targetHandles.isEmpty) return const [];
+    try {
+      final rows = await _client
+          .from('profiles')
+          .select('id, email, first_name, last_name, is_active')
+          .eq('org_id', orgId)
+          .eq('is_active', true);
+      final matches = <String>[];
+      for (final row in rows as List<dynamic>) {
+        final data = Map<String, dynamic>.from(row as Map);
+        final id = data['id']?.toString();
+        if (id == null) continue;
+        final handles = _profileHandles(data);
+        if (handles.any(targetHandles.contains)) {
+          matches.add(id);
+        }
+      }
+      return matches;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Set<String> _profileHandles(Map<String, dynamic> row) {
+    final handles = <String>{};
+    final email = row['email']?.toString().toLowerCase() ?? '';
+    if (email.isNotEmpty) {
+      handles.add(email);
+      final prefix = email.split('@').first;
+      if (prefix.isNotEmpty) handles.add(prefix);
+    }
+    final first = row['first_name']?.toString().toLowerCase().trim() ?? '';
+    final last = row['last_name']?.toString().toLowerCase().trim() ?? '';
+    if (first.isNotEmpty) handles.add(first);
+    if (last.isNotEmpty) handles.add(last);
+    if (first.isNotEmpty && last.isNotEmpty) {
+      handles.add('$first$last');
+      handles.add('$first.$last');
+      handles.add('${first}_$last');
+      handles.add('$first-$last');
+    }
+    return handles;
+  }
+
   NewsPost _mapNewsPost(Map<String, dynamic> row) {
     return NewsPost(
       id: row['id'].toString(),
@@ -1147,6 +1625,19 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     );
   }
 
+  IntegrationProfile _mapIntegration(Map<String, dynamic> row) {
+    return IntegrationProfile(
+      id: row['id'].toString(),
+      orgId: row['org_id']?.toString() ?? '',
+      provider: row['provider'] as String? ?? '',
+      status: row['status'] as String? ?? 'inactive',
+      config: row['config'] as Map<String, dynamic>? ?? const {},
+      createdBy: row['created_by']?.toString(),
+      createdAt: _parseDate(row['created_at']),
+      updatedAt: _parseDate(row['updated_at']),
+    );
+  }
+
   ExportJob _mapExportJob(Map<String, dynamic> row) {
     return ExportJob(
       id: row['id'].toString(),
@@ -1174,6 +1665,20 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
       createdBy: row['created_by']?.toString(),
       createdAt: _parseDate(row['created_at']),
       completedAt: _parseNullableDate(row['completed_at']),
+      metadata: row['metadata'] as Map<String, dynamic>?,
+    );
+  }
+
+  DailyLog _mapDailyLog(Map<String, dynamic> row) {
+    return DailyLog(
+      id: row['id'].toString(),
+      orgId: row['org_id']?.toString() ?? '',
+      projectId: row['project_id']?.toString(),
+      logDate: _parseDate(row['log_date']),
+      title: row['title'] as String?,
+      content: row['content'] as String?,
+      createdBy: row['created_by']?.toString(),
+      createdAt: _parseDate(row['created_at']),
       metadata: row['metadata'] as Map<String, dynamic>?,
     );
   }
@@ -1366,6 +1871,83 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     );
   }
 
+  Future<String> _runAiJob(AiJob job) async {
+    final attachments = job.inputMedia ?? const <MediaAttachment>[];
+    final imageAttachment = _firstAttachmentOfType(attachments, 'photo') ??
+        _firstAttachmentOfType(attachments, 'image');
+    final audioAttachment = _firstAttachmentOfType(attachments, 'audio');
+    final imageBytes = await _downloadAttachment(imageAttachment);
+    final audioBytes = await _downloadAttachment(audioAttachment);
+    final inputText = job.inputText?.trim() ?? '';
+
+    if (inputText.isEmpty && imageBytes == null && audioBytes == null) {
+      throw Exception('AI job missing input text or media.');
+    }
+
+    final meta = job.metadata ?? const <String, dynamic>{};
+    final checklistRaw = meta['checklistCount'];
+    final checklistCount = checklistRaw is int
+        ? checklistRaw
+        : int.tryParse(checklistRaw?.toString() ?? '');
+    final targetLanguage = meta['targetLanguage']?.toString();
+
+    final ai = AiFunctionService(_client);
+    return ai.runJob(
+      type: job.type,
+      inputText: inputText.isEmpty ? null : inputText,
+      imageBytes: imageBytes,
+      audioBytes: audioBytes,
+      audioMimeType: audioAttachment?.mimeType,
+      targetLanguage: targetLanguage,
+      checklistCount: checklistCount,
+    );
+  }
+
+  MediaAttachment? _firstAttachmentOfType(
+    List<MediaAttachment> attachments,
+    String type,
+  ) {
+    for (final attachment in attachments) {
+      if (attachment.type == type) return attachment;
+    }
+    return null;
+  }
+
+  Future<Uint8List?> _downloadAttachment(
+    MediaAttachment? attachment,
+  ) async {
+    if (attachment == null) return null;
+    final url = attachment.url;
+    if (url.isEmpty) return null;
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) return null;
+      return response.bodyBytes;
+    } catch (e) {
+      developer.log('AI input download failed', error: e);
+      return null;
+    }
+  }
+
+  Future<ExportJob> _signExportJob(ExportJob job) async {
+    final url = job.fileUrl;
+    if (url == null || url.isEmpty) return job;
+    final signed = await _signUrlIfNeeded(url);
+    if (signed == null || signed.isEmpty) return job;
+    return ExportJob(
+      id: job.id,
+      orgId: job.orgId,
+      type: job.type,
+      format: job.format,
+      status: job.status,
+      requestedBy: job.requestedBy,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt,
+      fileUrl: signed,
+      metadata: job.metadata,
+    );
+  }
+
   Future<MediaAttachment> _signAttachment(MediaAttachment attachment) async {
     try {
       final signedUrl = await createSignedStorageUrl(
@@ -1394,6 +1976,230 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     }
   }
 
+  Future<int> _countRecentSubmissions(String orgId, DateTime now) async {
+    final since = now.subtract(const Duration(hours: 24)).toIso8601String();
+    final rows = await _client
+        .from('submissions')
+        .select('id')
+        .eq('org_id', orgId)
+        .gte('created_at', since);
+    return (rows as List).length;
+  }
+
+  Future<int> _countDueTasks(String orgId, DateTime now) async {
+    final rows = await _client
+        .from('tasks')
+        .select('id, due_date, status')
+        .eq('org_id', orgId);
+    int count = 0;
+    for (final row in (rows as List<dynamic>)) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final dueDate = _parseNullableDate(map['due_date']);
+      if (dueDate == null) continue;
+      final status = map['status']?.toString() ?? TaskStatus.todo.name;
+      if (status == TaskStatus.completed.name) continue;
+      final diff = dueDate.difference(now);
+      if (diff.inHours >= 0 && diff.inHours <= _taskDueSoonHours) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  Future<int> _countExpiringTraining(String orgId, DateTime now) async {
+    final rows = await _client
+        .from('training_records')
+        .select('id, expiration_date, status')
+        .eq('org_id', orgId);
+    int count = 0;
+    for (final row in (rows as List<dynamic>)) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final expiration = _parseNullableDate(map['expiration_date']);
+      if (expiration == null) continue;
+      final status = map['status']?.toString() ?? TrainingStatus.notStarted.name;
+      if (status == TrainingStatus.expired.name) continue;
+      final days = expiration.difference(now).inDays;
+      if (days >= 0 && days <= AppConstants.certificationExpiryWarningDays) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  Future<int> _countAssetMaintenance(String orgId, DateTime now) async {
+    final rows = await _client
+        .from('equipment')
+        .select('id, next_maintenance_date, is_active')
+        .eq('org_id', orgId)
+        .eq('is_active', true);
+    int count = 0;
+    for (final row in (rows as List<dynamic>)) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final nextDate = _parseNullableDate(map['next_maintenance_date']);
+      if (nextDate == null) continue;
+      final days = nextDate.difference(now).inDays;
+      if (days <= _assetMaintenanceWindowDays) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  Future<int> _countDueInspections(String orgId, DateTime now) async {
+    final rows = await _client
+        .from('equipment')
+        .select('id, next_inspection_at, inspection_cadence, is_active')
+        .eq('org_id', orgId)
+        .eq('is_active', true);
+    int count = 0;
+    for (final row in (rows as List<dynamic>)) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final cadence = map['inspection_cadence']?.toString();
+      if (cadence == null || cadence.isEmpty) continue;
+      final nextAt = _parseNullableDate(map['next_inspection_at']);
+      if (nextAt == null) continue;
+      if (!nextAt.isAfter(now)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  Future<int> _scheduleInspectionTasks({
+    required String orgId,
+    required DateTime now,
+  }) async {
+    final equipmentRows = await _client
+        .from('equipment')
+        .select('id, name, assigned_to, inspection_cadence, next_inspection_at')
+        .eq('org_id', orgId)
+        .eq('is_active', true);
+
+    final openTasks = await _client
+        .from('tasks')
+        .select('metadata, status')
+        .eq('org_id', orgId)
+        .eq('metadata->>type', 'inspection')
+        .neq('status', TaskStatus.completed.name);
+    final existingEquipmentIds = <String>{};
+    for (final row in (openTasks as List<dynamic>)) {
+      final metadata = Map<String, dynamic>.from(
+        (row as Map)['metadata'] as Map? ?? const {},
+      );
+      final equipmentId = metadata['equipment_id']?.toString();
+      if (equipmentId != null) existingEquipmentIds.add(equipmentId);
+    }
+
+    int created = 0;
+    for (final row in (equipmentRows as List<dynamic>)) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final cadence = map['inspection_cadence']?.toString();
+      if (cadence == null || cadence.isEmpty) continue;
+      final nextAt = _parseNullableDate(map['next_inspection_at']);
+      if (nextAt == null || nextAt.isAfter(now)) continue;
+      final equipmentId = map['id']?.toString();
+      if (equipmentId == null || existingEquipmentIds.contains(equipmentId)) {
+        continue;
+      }
+      final name = map['name']?.toString() ?? 'Asset';
+      final assignedTo = map['assigned_to']?.toString();
+      await _tasksRepository.createTask(
+        title: 'Inspection due: $name',
+        description: 'Inspection scheduled by cadence ($cadence).',
+        dueDate: nextAt,
+        assignedTo: assignedTo,
+        metadata: {
+          'type': 'inspection',
+          'equipment_id': equipmentId,
+          'inspection_cadence': cadence,
+          'inspection_due_at': nextAt.toIso8601String(),
+        },
+      );
+      created += 1;
+      existingEquipmentIds.add(equipmentId);
+    }
+
+    return created;
+  }
+
+  Future<int> _countPendingSopAcknowledgements(String orgId) async {
+    try {
+      final docs = await _client
+        .from('sop_documents')
+          .select('id, current_version_id, status')
+          .eq('org_id', orgId)
+          .eq('status', 'published');
+      final documentRows = docs as List<dynamic>;
+      if (documentRows.isEmpty) return 0;
+      final members = await _client
+          .from('org_members')
+          .select('user_id')
+          .eq('org_id', orgId);
+      final memberIds = (members as List<dynamic>)
+          .map((row) => (row as Map)['user_id']?.toString())
+          .whereType<String>()
+          .toList();
+      if (memberIds.isEmpty) return 0;
+      final sopIds = documentRows
+          .map((row) => (row as Map)['id']?.toString())
+          .whereType<String>()
+          .toList();
+      if (sopIds.isEmpty) return 0;
+      final ackRows = await _client
+          .from('sop_acknowledgements')
+          .select('sop_id, version_id, user_id')
+          .eq('org_id', orgId)
+          .inFilter('sop_id', sopIds);
+      final acked = <String>{};
+      for (final row in ackRows as List<dynamic>) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final sopId = map['sop_id']?.toString();
+        final versionId = map['version_id']?.toString();
+        final userId = map['user_id']?.toString();
+        if (sopId == null || versionId == null || userId == null) continue;
+        acked.add('$sopId:$versionId:$userId');
+      }
+      int count = 0;
+      for (final row in documentRows) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final sopId = map['id']?.toString();
+        final versionId = map['current_version_id']?.toString();
+        if (sopId == null || versionId == null) continue;
+        for (final userId in memberIds) {
+          if (!acked.contains('$sopId:$versionId:$userId')) {
+            count += 1;
+          }
+        }
+      }
+      return count;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<List<String>> _resolveRuleTargets({
+    required NotificationRule rule,
+    required String orgId,
+  }) async {
+    if (rule.targetType == 'org') {
+      final rows = await _client
+          .from('org_members')
+          .select('user_id')
+          .eq('org_id', orgId);
+      return (rows as List<dynamic>)
+          .map((row) => (row as Map)['user_id']?.toString())
+          .whereType<String>()
+          .toSet()
+          .toList();
+    }
+    if (rule.targetType == 'user' || rule.targetType == 'team') {
+      final ids = rule.targetIds;
+      if (ids.isNotEmpty) return ids.toSet().toList();
+    }
+    final currentUserId = _client.auth.currentUser?.id;
+    return currentUserId == null ? const [] : [currentUserId];
+  }
+
   Future<String?> _signUrlIfNeeded(String? url) async {
     if (url == null || url.isEmpty) return null;
     try {
@@ -1405,6 +2211,16 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
       );
     } catch (_) {
       return url;
+    }
+  }
+
+  String _exportMimeType(String format) {
+    switch (format) {
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'csv':
+      default:
+        return 'text/csv';
     }
   }
 

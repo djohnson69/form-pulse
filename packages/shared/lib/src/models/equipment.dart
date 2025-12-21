@@ -14,9 +14,15 @@ class Equipment {
   final String? assignedTo;
   final String? currentLocation;
   final LocationData? gpsLocation;
+  final String? contactName;
+  final String? contactEmail;
+  final String? contactPhone;
   final String? rfidTag;
   final DateTime? lastMaintenanceDate;
   final DateTime? nextMaintenanceDate;
+  final String? inspectionCadence;
+  final DateTime? lastInspectionAt;
+  final DateTime? nextInspectionAt;
   final bool isActive;
   final String? companyId;
   final DateTime? createdAt;
@@ -36,9 +42,15 @@ class Equipment {
     this.assignedTo,
     this.currentLocation,
     this.gpsLocation,
+    this.contactName,
+    this.contactEmail,
+    this.contactPhone,
     this.rfidTag,
     this.lastMaintenanceDate,
     this.nextMaintenanceDate,
+    this.inspectionCadence,
+    this.lastInspectionAt,
+    this.nextInspectionAt,
     this.isActive = true,
     this.companyId,
     this.createdAt,
@@ -72,9 +84,15 @@ class Equipment {
       'assignedTo': assignedTo,
       'currentLocation': currentLocation,
       'gpsLocation': gpsLocation?.toJson(),
+      'contactName': contactName,
+      'contactEmail': contactEmail,
+      'contactPhone': contactPhone,
       'rfidTag': rfidTag,
       'lastMaintenanceDate': lastMaintenanceDate?.toIso8601String(),
       'nextMaintenanceDate': nextMaintenanceDate?.toIso8601String(),
+      'inspectionCadence': inspectionCadence,
+      'lastInspectionAt': lastInspectionAt?.toIso8601String(),
+      'nextInspectionAt': nextInspectionAt?.toIso8601String(),
       'isActive': isActive,
       'companyId': companyId,
       'createdAt': createdAt?.toIso8601String(),
@@ -101,12 +119,22 @@ class Equipment {
       gpsLocation: json['gpsLocation'] != null
           ? LocationData.fromJson(json['gpsLocation'] as Map<String, dynamic>)
           : null,
+      contactName: json['contactName'] as String?,
+      contactEmail: json['contactEmail'] as String?,
+      contactPhone: json['contactPhone'] as String?,
       rfidTag: json['rfidTag'] as String?,
       lastMaintenanceDate: json['lastMaintenanceDate'] != null
           ? DateTime.parse(json['lastMaintenanceDate'] as String)
           : null,
       nextMaintenanceDate: json['nextMaintenanceDate'] != null
           ? DateTime.parse(json['nextMaintenanceDate'] as String)
+          : null,
+      inspectionCadence: json['inspectionCadence'] as String?,
+      lastInspectionAt: json['lastInspectionAt'] != null
+          ? DateTime.parse(json['lastInspectionAt'] as String)
+          : null,
+      nextInspectionAt: json['nextInspectionAt'] != null
+          ? DateTime.parse(json['nextInspectionAt'] as String)
           : null,
       isActive: json['isActive'] as bool? ?? true,
       companyId: json['companyId'] as String?,

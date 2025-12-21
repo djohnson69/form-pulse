@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/assets_provider.dart';
 import 'asset_detail_page.dart';
@@ -17,6 +18,37 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
   String _query = '';
   bool _activeOnly = true;
   bool _maintenanceOnly = false;
+  String? _categoryFilter;
+  String? _locationFilter;
+  String? _contactFilter;
+  RealtimeChannel? _assetsChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToAssetChanges();
+  }
+
+  @override
+  void dispose() {
+    _assetsChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToAssetChanges() {
+    final client = Supabase.instance.client;
+    _assetsChannel = client.channel('assets-changes')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'equipment',
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(equipmentProvider);
+        },
+      )
+      ..subscribe();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +72,30 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, st) => _ErrorView(error: e.toString()),
         data: (assets) {
+          final categories = assets
+              .map((asset) => asset.category)
+              .whereType<String>()
+              .map((value) => value.trim())
+              .where((value) => value.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+          final locations = assets
+              .map((asset) => asset.currentLocation)
+              .whereType<String>()
+              .map((value) => value.trim())
+              .where((value) => value.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+          final contacts = assets
+              .map((asset) => asset.contactName)
+              .whereType<String>()
+              .map((value) => value.trim())
+              .where((value) => value.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
           final filtered = _applyFilters(assets);
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -51,6 +107,15 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 ),
                 onChanged: (value) => setState(() => _query = value.trim()),
               ),
+              if (categories.isNotEmpty ||
+                  locations.isNotEmpty ||
+                  contacts.isNotEmpty)
+                const SizedBox(height: 12),
+              if (categories.isNotEmpty) _buildCategoryFilter(categories),
+              if (locations.isNotEmpty) const SizedBox(height: 8),
+              if (locations.isNotEmpty) _buildLocationFilter(locations),
+              if (contacts.isNotEmpty) const SizedBox(height: 8),
+              if (contacts.isNotEmpty) _buildContactFilter(contacts),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Active only'),
@@ -87,11 +152,90 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           asset.name.toLowerCase().contains(query) ||
           (asset.category ?? '').toLowerCase().contains(query) ||
           (asset.serialNumber ?? '').toLowerCase().contains(query) ||
-          (asset.rfidTag ?? '').toLowerCase().contains(query);
+          (asset.rfidTag ?? '').toLowerCase().contains(query) ||
+          (asset.currentLocation ?? '').toLowerCase().contains(query) ||
+          (asset.assignedTo ?? '').toLowerCase().contains(query) ||
+          (asset.contactName ?? '').toLowerCase().contains(query) ||
+          (asset.contactEmail ?? '').toLowerCase().contains(query) ||
+          (asset.contactPhone ?? '').toLowerCase().contains(query);
       final matchesActive = !_activeOnly || asset.isActive;
       final matchesMaintenance = !_maintenanceOnly || asset.isMaintenanceDue;
-      return matchesQuery && matchesActive && matchesMaintenance;
+      final matchesCategory =
+          _categoryFilter == null || _categoryFilter == asset.category;
+      final matchesLocation =
+          _locationFilter == null || _locationFilter == asset.currentLocation;
+      final matchesContact =
+          _contactFilter == null || _contactFilter == asset.contactName;
+      return matchesQuery &&
+          matchesActive &&
+          matchesMaintenance &&
+          matchesCategory &&
+          matchesLocation &&
+          matchesContact;
     }).toList();
+  }
+
+  Widget _buildCategoryFilter(List<String> categories) {
+    return DropdownButtonFormField<String?>(
+      key: ValueKey(_categoryFilter),
+      initialValue: _categoryFilter,
+      decoration: const InputDecoration(
+        labelText: 'Category',
+        border: OutlineInputBorder(),
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('All categories')),
+        ...categories.map(
+          (category) => DropdownMenuItem(
+            value: category,
+            child: Text(category),
+          ),
+        ),
+      ],
+      onChanged: (value) => setState(() => _categoryFilter = value),
+    );
+  }
+
+  Widget _buildLocationFilter(List<String> locations) {
+    return DropdownButtonFormField<String?>(
+      key: ValueKey(_locationFilter),
+      initialValue: _locationFilter,
+      decoration: const InputDecoration(
+        labelText: 'Location',
+        border: OutlineInputBorder(),
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('All locations')),
+        ...locations.map(
+          (location) => DropdownMenuItem(
+            value: location,
+            child: Text(location),
+          ),
+        ),
+      ],
+      onChanged: (value) => setState(() => _locationFilter = value),
+    );
+  }
+
+  Widget _buildContactFilter(List<String> contacts) {
+    return DropdownButtonFormField<String?>(
+      key: ValueKey(_contactFilter),
+      initialValue: _contactFilter,
+      decoration: const InputDecoration(
+        labelText: 'Contact',
+        border: OutlineInputBorder(),
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('All contacts')),
+        ...contacts.map(
+          (contact) => DropdownMenuItem(
+            value: contact,
+            child: Text(contact),
+          ),
+        ),
+      ],
+      onChanged: (value) => setState(() => _contactFilter = value),
+    );
   }
 
   Future<void> _openEditor(BuildContext context, {Equipment? existing}) async {

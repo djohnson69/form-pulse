@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/ai/ai_assist_sheet.dart';
+import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart' as ops_repo;
 import '../../data/partners_provider.dart';
 import '../../data/partners_repository.dart';
 
@@ -18,11 +21,41 @@ class ThreadDetailPage extends ConsumerStatefulWidget {
 class _ThreadDetailPageState extends ConsumerState<ThreadDetailPage> {
   final _messageController = TextEditingController();
   bool _sending = false;
+  RealtimeChannel? _messagesChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToMessages();
+  }
 
   @override
   void dispose() {
+    _messagesChannel?.unsubscribe();
     _messageController.dispose();
     super.dispose();
+  }
+
+  void _subscribeToMessages() {
+    final client = Supabase.instance.client;
+    final threadId = widget.preview.thread.id;
+    _messagesChannel = client.channel('thread-$threadId')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'messages',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'thread_id',
+          value: threadId,
+        ),
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(threadMessagesProvider(threadId));
+          ref.invalidate(messageThreadsProvider);
+        },
+      )
+      ..subscribe();
   }
 
   @override
@@ -72,6 +105,7 @@ class _ThreadDetailPageState extends ConsumerState<ThreadDetailPage> {
             controller: _messageController,
             sending: _sending,
             onSend: _sendMessage,
+            onAiAssist: _openAiAssist,
           ),
         ],
       ),
@@ -100,6 +134,70 @@ class _ThreadDetailPageState extends ConsumerState<ThreadDetailPage> {
       );
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _openAiAssist() async {
+    if (_sending) return;
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'AI Message Assist',
+        initialText: _messageController.text.trim(),
+        initialType: 'translation',
+        options: const [
+          AiAssistOption(
+            id: 'translation',
+            label: 'Translation',
+            requiresLanguage: true,
+            allowsAudio: true,
+          ),
+          AiAssistOption(id: 'summary', label: 'Summary', allowsAudio: true),
+        ],
+        allowImage: false,
+        allowAudio: true,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    if (!mounted) return;
+    setState(() => _messageController.text = output);
+    await _recordAiUsage(result);
+  }
+
+  Future<void> _recordAiUsage(AiAssistResult result) async {
+    try {
+      final attachments = <ops_repo.AttachmentDraft>[];
+      if (result.audioBytes != null) {
+        attachments.add(
+          ops_repo.AttachmentDraft(
+            type: 'audio',
+            bytes: result.audioBytes!,
+            filename: result.audioName ?? 'ai-audio',
+            mimeType: result.audioMimeType ?? 'audio/m4a',
+          ),
+        );
+      }
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            inputMedia: attachments,
+            metadata: {
+              'source': 'message_compose',
+              'threadId': widget.preview.thread.id,
+              if (result.targetLanguage != null &&
+                  result.targetLanguage!.isNotEmpty)
+                'targetLanguage': result.targetLanguage,
+              if (result.checklistCount != null)
+                'checklistCount': result.checklistCount,
+            },
+          );
+    } catch (_) {
+      // Ignore AI logging failures for message assist.
     }
   }
 }
@@ -158,11 +256,13 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.sending,
     required this.onSend,
+    required this.onAiAssist,
   });
 
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
+  final VoidCallback onAiAssist;
 
   @override
   Widget build(BuildContext context) {
@@ -185,6 +285,11 @@ class _Composer extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            IconButton(
+              onPressed: sending ? null : onAiAssist,
+              icon: const Icon(Icons.auto_awesome),
+              tooltip: 'AI assist',
+            ),
             IconButton(
               onPressed: sending ? null : onSend,
               icon: sending

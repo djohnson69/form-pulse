@@ -1,5 +1,9 @@
 import 'package:ai_service/ai_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'ai_function_service.dart';
+import 'ai_job_runner.dart';
 
 const String _kOpenAIApiKey = String.fromEnvironment('OPENAI_API_KEY', defaultValue: '');
 const String _kOpenAIBaseUrl = String.fromEnvironment(
@@ -11,6 +15,8 @@ const String _kOpenAIModel = String.fromEnvironment(
   defaultValue: 'gpt-4o-mini',
 );
 const String _kOpenAIOrg = String.fromEnvironment('OPENAI_ORG', defaultValue: '');
+const String _kOpenAIClientFallback =
+    String.fromEnvironment('OPENAI_CLIENT_FALLBACK', defaultValue: '');
 
 /// Provides a singleton AIService configured via --dart-define or env.
 final aiServiceProvider = Provider<AIService>((ref) {
@@ -23,5 +29,26 @@ final aiServiceProvider = Provider<AIService>((ref) {
     baseUrl: _kOpenAIBaseUrl,
     model: _kOpenAIModel,
     organization: org,
+  );
+});
+
+final aiFunctionServiceProvider = Provider<AiFunctionService>((ref) {
+  return AiFunctionService(Supabase.instance.client);
+});
+
+final aiJobRunnerProvider = Provider<AiJobRunner>((ref) {
+  final functionService = ref.read(aiFunctionServiceProvider);
+  AIService? directService;
+  final allowFallback = _kOpenAIClientFallback.toLowerCase() == 'true';
+  if (allowFallback) {
+    try {
+      directService = ref.read(aiServiceProvider);
+    } catch (_) {
+      directService = null;
+    }
+  }
+  return AiJobRunner(
+    functionService: functionService,
+    directService: directService,
   );
 });

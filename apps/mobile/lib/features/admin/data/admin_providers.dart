@@ -36,6 +36,12 @@ final adminStatsProvider = FutureProvider<AdminStats>((ref) async {
   return repo.fetchStats(orgId: orgId);
 });
 
+final adminAiUsageProvider = FutureProvider<AdminAiUsageSummary>((ref) async {
+  final repo = ref.read(adminRepositoryProvider);
+  final orgId = ref.watch(adminActiveOrgIdProvider);
+  return repo.fetchAiUsageSummary(orgId: orgId);
+});
+
 final adminFormsFilterProvider =
     legacy.StateProvider<({String search, String category, bool? published})>((ref) {
   return (search: '', category: '', published: null);
@@ -55,6 +61,8 @@ final adminFormsProvider = FutureProvider.autoDispose<List<AdminFormSummary>>((r
 
 final adminSubmissionsStatusProvider =
     legacy.StateProvider<String?>((ref) => null);
+final adminSubmissionsRoleProvider =
+    legacy.StateProvider<UserRole?>((ref) => null);
 
 final adminSubmissionsProvider =
     FutureProvider.autoDispose<List<AdminSubmissionSummary>>((ref) async {

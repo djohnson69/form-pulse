@@ -155,6 +155,9 @@ CREATE TABLE IF NOT EXISTS equipment (
   assigned_to text,
   current_location text,
   gps_location jsonb,
+  contact_name text,
+  contact_email text,
+  contact_phone text,
   rfid_tag text,
   last_maintenance_date timestamptz,
   next_maintenance_date timestamptz,
@@ -196,6 +199,76 @@ CREATE TABLE IF NOT EXISTS incident_reports (
   attachments jsonb not null default '[]'::jsonb,
   location jsonb,
   created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS sop_documents (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  title text not null,
+  summary text,
+  category text,
+  tags text[] not null default '{}'::text[],
+  status text not null default 'draft',
+  current_version text,
+  current_version_id uuid,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS sop_versions (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version text not null,
+  body text,
+  attachments jsonb not null default '[]'::jsonb,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  unique (sop_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS sop_approvals (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version_id uuid references sop_versions(id) on delete set null,
+  status text not null default 'pending',
+  requested_by uuid references auth.users(id),
+  requested_at timestamptz not null default now(),
+  approved_by uuid references auth.users(id),
+  approved_at timestamptz,
+  notes text,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS sop_acknowledgements (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version_id uuid references sop_versions(id) on delete set null,
+  user_id uuid references auth.users(id),
+  acknowledged_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  unique (sop_id, version_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS app_templates (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  type text not null,
+  name text not null,
+  description text,
+  payload jsonb not null default '{}'::jsonb,
+  assigned_user_ids uuid[] not null default '{}'::uuid[],
+  assigned_roles text[] not null default '{}'::text[],
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   metadata jsonb not null default '{}'::jsonb
 );
 
@@ -353,6 +426,18 @@ CREATE TABLE IF NOT EXISTS ai_jobs (
   metadata jsonb not null default '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS daily_logs (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  project_id uuid references projects(id) on delete set null,
+  log_date date not null default current_date,
+  title text,
+  content text,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
 CREATE TABLE IF NOT EXISTS guest_invites (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references orgs(id) on delete cascade,
@@ -427,6 +512,7 @@ ALTER TABLE photo_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhook_endpoints ENABLE ROW LEVEL SECURITY;
 ALTER TABLE export_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guest_invites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
@@ -462,6 +548,9 @@ CREATE INDEX IF NOT EXISTS idx_export_jobs_org ON export_jobs(org_id);
 CREATE INDEX IF NOT EXISTS idx_export_jobs_status ON export_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_org ON ai_jobs(org_id);
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_status ON ai_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_daily_logs_org ON daily_logs(org_id);
+CREATE INDEX IF NOT EXISTS idx_daily_logs_project ON daily_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_daily_logs_date ON daily_logs(log_date);
 CREATE INDEX IF NOT EXISTS idx_guest_invites_org ON guest_invites(org_id);
 CREATE INDEX IF NOT EXISTS idx_guest_invites_status ON guest_invites(status);
 CREATE INDEX IF NOT EXISTS idx_payment_requests_org ON payment_requests(org_id);
@@ -709,6 +798,25 @@ BEGIN
             ON ai_jobs FOR ALL
             USING (EXISTS (
                 SELECT 1 FROM org_members m WHERE m.org_id = ai_jobs.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read daily logs') THEN
+        CREATE POLICY "Org members read daily logs"
+            ON daily_logs FOR SELECT
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = daily_logs.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members manage daily logs') THEN
+        CREATE POLICY "Org members manage daily logs"
+            ON daily_logs FOR ALL
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = daily_logs.org_id AND m.user_id = auth.uid()
+            ))
+            WITH CHECK (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = daily_logs.org_id AND m.user_id = auth.uid()
             ));
     END IF;
 

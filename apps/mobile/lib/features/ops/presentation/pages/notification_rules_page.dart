@@ -3,14 +3,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/ops_provider.dart';
 
-class NotificationRulesPage extends ConsumerWidget {
+class NotificationRulesPage extends ConsumerStatefulWidget {
   const NotificationRulesPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NotificationRulesPage> createState() =>
+      _NotificationRulesPageState();
+}
+
+class _NotificationRulesPageState extends ConsumerState<NotificationRulesPage> {
+  bool _runningSweep = false;
+
+  @override
+  Widget build(BuildContext context) {
     final rulesAsync = ref.watch(notificationRulesProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Automation Rules')),
+      appBar: AppBar(
+        title: const Text('Automation Rules'),
+        actions: [
+          IconButton(
+            tooltip: 'Run due automations',
+            onPressed: _runningSweep ? null : _runAutomationSweep,
+            icon: _runningSweep
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_circle),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openCreateSheet(context, ref),
         icon: const Icon(Icons.add),
@@ -36,14 +59,17 @@ class NotificationRulesPage extends ConsumerWidget {
                   subtitle: Text('${rule.triggerType} • ${rule.targetType}'),
                   trailing: TextButton(
                     onPressed: () async {
-                      await ref.read(opsRepositoryProvider).triggerRule(
+                      final sent =
+                          await ref.read(opsRepositoryProvider).triggerRule(
                             rule: rule,
                             title: rule.name,
                             body: rule.messageTemplate,
                           );
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Rule triggered.')),
+                          SnackBar(
+                            content: Text('Rule triggered for $sent user(s).'),
+                          ),
                         );
                       }
                     },
@@ -109,6 +135,14 @@ class NotificationRulesPage extends ConsumerWidget {
                         value: 'asset_due',
                         child: Text('Asset maintenance due'),
                       ),
+                      DropdownMenuItem(
+                        value: 'inspection_due',
+                        child: Text('Inspection due'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'sop_ack_due',
+                        child: Text('SOP acknowledgement due'),
+                      ),
                     ],
                     onChanged: (value) =>
                         setState(() => triggerType = value ?? 'submission'),
@@ -170,6 +204,27 @@ class NotificationRulesPage extends ConsumerWidget {
     messageController.dispose();
     if (result == true) {
       ref.invalidate(notificationRulesProvider);
+    }
+  }
+
+  Future<void> _runAutomationSweep() async {
+    setState(() => _runningSweep = true);
+    try {
+      final summary = await ref.read(opsRepositoryProvider).runDueAutomations();
+      if (!mounted) return;
+      final message = summary.rulesFired == 0
+          ? 'No due automations found.'
+          : 'Ran ${summary.rulesFired} rule(s), sent ${summary.notificationsSent} notification(s).';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Automation run failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _runningSweep = false);
     }
   }
 }

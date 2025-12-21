@@ -51,6 +51,7 @@ abstract class DashboardRepositoryBase {
     required String submittedBy,
     List<Map<String, dynamic>>? attachments,
     Map<String, dynamic>? location,
+    Map<String, dynamic>? metadata,
   });
   Future<FormSubmission> updateSubmissionStatus({
     required String submissionId,
@@ -133,6 +134,7 @@ class DashboardRepository implements DashboardRepositoryBase {
     required String submittedBy,
     List<Map<String, dynamic>>? attachments,
     Map<String, dynamic>? location,
+    Map<String, dynamic>? metadata,
   }) async {
     final payload = {
       'formId': formId,
@@ -142,6 +144,7 @@ class DashboardRepository implements DashboardRepositoryBase {
       'status': SubmissionStatus.submitted.name,
       if (attachments != null) 'attachments': attachments,
       if (location != null) 'location': location,
+      if (metadata != null) 'metadata': metadata,
     };
     try {
       final res = await _client.raw.post(
@@ -255,6 +258,8 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
         );
       }
 
+      final roleFuture = _getUserRole();
+      final userId = _client.auth.currentUser?.id;
       final formsFuture = _client
           .from('forms')
           .select()
@@ -285,7 +290,9 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       final forms = (results[0] as List<dynamic>)
           .map((e) => _mapFormDefinition(Map<String, dynamic>.from(e as Map)))
           .toList();
-      final formTitleIndex = {for (final f in forms) f.id: f.title};
+      final role = await roleFuture;
+      final filteredForms = _filterFormsForRole(forms, role, userId);
+      final formTitleIndex = {for (final f in filteredForms) f.id: f.title};
       final submissions = (results[1] as List<dynamic>)
           .map(
             (e) => _mapSubmission(
@@ -294,8 +301,13 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
             ),
           )
           .toList();
+      final allowedFormIds = filteredForms.map((f) => f.id).toSet();
+      final scopedSubmissions = submissions.where((submission) {
+        if (allowedFormIds.isEmpty) return false;
+        return allowedFormIds.contains(submission.formId);
+      }).toList();
       final signedSubmissions =
-          await Future.wait(submissions.map(_withSignedAttachments));
+          await Future.wait(scopedSubmissions.map(_withSignedAttachments));
       final notifications = (results[2] as List<dynamic>)
           .map((e) => _mapNotification(Map<String, dynamic>.from(e as Map)))
           .toList();
@@ -303,7 +315,7 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       developer.log('Parsed ${forms.length} forms, ${submissions.length} submissions, ${notifications.length} notifications');
 
       return DashboardData(
-        forms: forms,
+        forms: filteredForms,
         submissions: signedSubmissions,
         notifications: notifications,
       );
@@ -335,6 +347,8 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
     try {
       final orgId = await _getOrgId();
       if (orgId == null) return const <FormSubmission>[];
+      final roleFuture = _getUserRole();
+      final userId = _client.auth.currentUser?.id;
       var query = _client
           .from('submissions')
           .select()
@@ -359,7 +373,10 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       }
       final results =
           await query.order('submitted_at', ascending: false).limit(limit);
-      final formTitles = await _formTitleIndex();
+      final role = await roleFuture;
+      final forms = await _fetchFormsForRole(orgId, role, userId);
+      final formTitles = {for (final form in forms) form.id: form.title};
+      final allowedFormIds = formTitles.keys.toSet();
       final submissions = (results as List<dynamic>)
           .map(
             (row) => _mapSubmission(
@@ -368,7 +385,11 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
             ),
           )
           .toList();
-      return Future.wait(submissions.map(_withSignedAttachments));
+      final scoped = submissions.where((submission) {
+        if (allowedFormIds.isEmpty) return false;
+        return allowedFormIds.contains(submission.formId);
+      }).toList();
+      return Future.wait(scoped.map(_withSignedAttachments));
     } on PostgrestException catch (e, st) {
       developer.log(
         'PostgreSQL error fetching submissions: ${e.message} (code: ${e.code})',
@@ -393,6 +414,7 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
     required String submittedBy,
     List<Map<String, dynamic>>? attachments,
     Map<String, dynamic>? location,
+    Map<String, dynamic>? metadata,
   }) async {
     final formMetadata = await _client
         .from('forms')
@@ -413,6 +435,8 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       'status': SubmissionStatus.submitted.name,
       if (attachments != null) 'attachments': attachments,
       if (location != null) 'location': location,
+      if (metadata != null)
+        'metadata': _withProvider(metadata),
     };
     try {
       final res = await _client
@@ -421,6 +445,15 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
           .select()
           .single();
       final body = Map<String, dynamic>.from(res as Map);
+      await _enqueueAutoReport(
+        orgId: orgId,
+        submissionId: body['id']?.toString() ?? '',
+        formId: formId,
+        formTitle: (formMetadata?['title'] ?? '') as String? ??
+            resolveFormTitle(formId),
+        data: data,
+        attachments: attachments ?? const [],
+      );
       return _mapSubmission(body, {
         formId: (formMetadata?['title'] ?? '') as String? ??
             resolveFormTitle(formId),
@@ -433,6 +466,40 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       );
     }
     throw Exception('Supabase createSubmission failed');
+  }
+
+  Future<void> _enqueueAutoReport({
+    required String orgId,
+    required String submissionId,
+    required String formId,
+    required String formTitle,
+    required Map<String, dynamic> data,
+    required List<Map<String, dynamic>> attachments,
+  }) async {
+    if (attachments.isEmpty) return;
+    try {
+      await _client.from('ai_jobs').insert({
+        'org_id': orgId,
+        'type': 'field_report',
+        'status': 'pending',
+        'input_text': jsonEncode(data),
+        'input_media': attachments,
+        'created_by': _client.auth.currentUser?.id,
+        'metadata': {
+          'source': 'submission',
+          'submissionId': submissionId,
+          'formId': formId,
+          'formTitle': formTitle,
+          'autoGenerated': true,
+        },
+      });
+    } catch (e, st) {
+      developer.log(
+        'Auto report enqueue failed',
+        error: e,
+        stackTrace: st,
+      );
+    }
   }
 
   @override
@@ -554,6 +621,106 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
     } catch (_) {}
     developer.log('No org_id found for user $userId in org_members or profiles');
     return null;
+  }
+
+  Map<String, dynamic> _withProvider(Map<String, dynamic> metadata) {
+    if (metadata.containsKey('provider')) return metadata;
+    final user = _client.auth.currentUser;
+    if (user == null) return metadata;
+    final appMeta = user.appMetadata;
+    final provider = appMeta['provider'];
+    if (provider is String && provider.trim().isNotEmpty) {
+      return {...metadata, 'provider': provider.trim()};
+    }
+    final providers = appMeta['providers'];
+    if (providers is List && providers.isNotEmpty) {
+      final value = providers.first.toString().trim();
+      if (value.isNotEmpty) {
+        return {...metadata, 'provider': value};
+      }
+    }
+    return metadata;
+  }
+
+  List<FormDefinition> _filterFormsForRole(
+    List<FormDefinition> forms,
+    UserRole role,
+    String? userId,
+  ) {
+    if (role.canManage) return forms;
+    return forms.where((form) {
+      if (userId != null && form.createdBy == userId) {
+        return true;
+      }
+      final metadata = form.metadata ?? const <String, dynamic>{};
+      final sharedRolesRaw = metadata['shared_roles'];
+      final sharedUsersRaw = metadata['shared_users'];
+      final sharedRoles = (sharedRolesRaw is List)
+          ? sharedRolesRaw.map((e) => e.toString().toLowerCase()).toList()
+          : const <String>[];
+      final sharedUsers = (sharedUsersRaw is List)
+          ? sharedUsersRaw.map((e) => e.toString()).toList()
+          : const <String>[];
+      if (sharedRoles.isEmpty && sharedUsers.isEmpty) {
+        return true;
+      }
+      if (sharedUsers.contains(userId)) {
+        return true;
+      }
+      final roleKey = role.name.toLowerCase();
+      return sharedRoles.contains(roleKey) || sharedRoles.contains('all');
+    }).toList();
+  }
+
+  Future<UserRole> _getUserRole() async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return UserRole.viewer;
+    try {
+      final res = await _client
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .maybeSingle();
+      final raw = res?['role']?.toString();
+      if (raw != null) {
+        return UserRole.values.firstWhere(
+          (role) => role.name == raw,
+          orElse: () => UserRole.viewer,
+        );
+      }
+    } catch (_) {}
+    try {
+      final res = await _client
+          .from('org_members')
+          .select('role')
+          .eq('user_id', userId)
+          .maybeSingle();
+      final raw = res?['role']?.toString();
+      if (raw != null) {
+        return UserRole.values.firstWhere(
+          (role) => role.name == raw,
+          orElse: () => UserRole.viewer,
+        );
+      }
+    } catch (_) {}
+    return UserRole.viewer;
+  }
+
+  Future<List<FormDefinition>> _fetchFormsForRole(
+    String orgId,
+    UserRole role,
+    String? userId,
+  ) async {
+    final rows = await _client
+        .from('forms')
+        .select()
+        .eq('org_id', orgId)
+        .eq('is_published', true)
+        .order('updated_at', ascending: false);
+    final forms = (rows as List<dynamic>)
+        .map((e) => _mapFormDefinition(Map<String, dynamic>.from(e as Map)))
+        .toList();
+    return _filterFormsForRole(forms, role, userId);
   }
 
   Future<Map<String, String>> _formTitleIndex() async {

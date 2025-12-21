@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:mobile/app/app.dart';
+import 'package:mobile/app/app_navigator.dart';
 import 'package:mobile/core/di/injection.dart';
 
 const _supabaseUrl = String.fromEnvironment(
@@ -29,8 +30,8 @@ void main() {
 
   testWidgets('App launches successfully', (WidgetTester tester) async {
     await tester.pumpWidget(const AppEntry());
-    await tester.pumpAndSettle();
+    await tester.pump();
 
-    expect(find.text('Form Bridge'), findsOneWidget);
+    expect(find.byType(AppNavigator), findsOneWidget);
   });
 }

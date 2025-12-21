@@ -52,5 +52,8 @@ Future<String?> createSignedStorageUrl({
   final path = resolveStoragePath(url, metadata);
   if (path == null || path.isEmpty) return null;
   final bucket = resolveBucket(defaultBucket, url, metadata);
-  return client.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
+  final signed =
+      await client.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
+  if (!signed.startsWith('https://')) return null;
+  return signed;
 }

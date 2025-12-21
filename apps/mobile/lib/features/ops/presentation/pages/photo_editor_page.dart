@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../../core/utils/file_bytes_loader.dart';
 import '../../data/ops_provider.dart';
@@ -22,6 +23,7 @@ class PhotoEditorPage extends ConsumerStatefulWidget {
 class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _tagsController = TextEditingController();
   final _picker = ImagePicker();
   final AudioRecorder _recorder = AudioRecorder();
   final List<_AttachmentEntry> _attachments = [];
@@ -29,6 +31,9 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
   bool _recording = false;
   bool _shared = false;
   bool _featured = false;
+  bool _before = false;
+  bool _after = false;
+  bool _logoSticker = false;
 
   @override
   void dispose() {
@@ -37,6 +42,7 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
     }
     _titleController.dispose();
     _descriptionController.dispose();
+    _tagsController.dispose();
     _recorder.dispose();
     super.dispose();
   }
@@ -66,6 +72,14 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
               ),
             ),
             const SizedBox(height: 12),
+            TextField(
+              controller: _tagsController,
+              decoration: const InputDecoration(
+                labelText: 'Tags (comma separated)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Share with clients'),
@@ -77,6 +91,30 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
               title: const Text('Feature in gallery'),
               value: _featured,
               onChanged: (value) => setState(() => _featured = value),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Before photo'),
+              value: _before,
+              onChanged: (value) => setState(() {
+                _before = value;
+                if (value) _after = false;
+              }),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('After photo'),
+              value: _after,
+              onChanged: (value) => setState(() {
+                _after = value;
+                if (value) _before = false;
+              }),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Logo sticker applied'),
+              value: _logoSticker,
+              onChanged: (value) => setState(() => _logoSticker = value),
             ),
             const SizedBox(height: 12),
             Text('Attachments', style: Theme.of(context).textTheme.titleMedium),
@@ -94,6 +132,11 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
                   onPressed: () => _pickVideo(ImageSource.camera),
                   icon: const Icon(Icons.videocam),
                   label: const Text('Video'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _pickDualVideo,
+                  icon: const Icon(Icons.switch_video),
+                  label: const Text('Dual video'),
                 ),
                 OutlinedButton.icon(
                   onPressed: _toggleRecording,
@@ -175,6 +218,40 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
     );
   }
 
+  Future<void> _pickDualVideo() async {
+    final pairId = const Uuid().v4();
+    final first = await _picker.pickVideo(source: ImageSource.camera);
+    if (first == null) return;
+    final firstBytes = await first.readAsBytes();
+    _addAttachment(
+      AttachmentDraft(
+        type: 'video',
+        bytes: firstBytes,
+        filename: first.name,
+        mimeType: _guessMimeType(first.path) ?? 'video/mp4',
+        metadata: {'dualMode': true, 'pairId': pairId, 'slot': 'primary'},
+      ),
+      label: 'Dual video (1/2)',
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Record second angle.')),
+    );
+    final second = await _picker.pickVideo(source: ImageSource.camera);
+    if (second == null) return;
+    final secondBytes = await second.readAsBytes();
+    _addAttachment(
+      AttachmentDraft(
+        type: 'video',
+        bytes: secondBytes,
+        filename: second.name,
+        mimeType: _guessMimeType(second.path) ?? 'video/mp4',
+        metadata: {'dualMode': true, 'pairId': pairId, 'slot': 'secondary'},
+      ),
+      label: 'Dual video (2/2)',
+    );
+  }
+
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return;
@@ -248,7 +325,7 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
                 ? null
                 : _descriptionController.text.trim(),
             attachments: _attachments.map((e) => e.draft).toList(),
-            tags: const [],
+            tags: _buildTags(),
             isFeatured: _featured,
             isShared: _shared,
           );
@@ -275,6 +352,19 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
       default:
         return Icons.attach_file;
     }
+  }
+
+  List<String> _buildTags() {
+    final tags = <String>[];
+    final rawTags = _tagsController.text
+        .split(',')
+        .map((tag) => tag.trim())
+        .where((tag) => tag.isNotEmpty);
+    tags.addAll(rawTags);
+    if (_before) tags.add('before');
+    if (_after) tags.add('after');
+    if (_logoSticker) tags.add('logo_sticker');
+    return tags.toSet().toList();
   }
 
   String? _guessMimeType(String filename) {

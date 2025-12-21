@@ -3,6 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/ai/ai_assist_sheet.dart';
+import '../../../../core/ai/ai_parsers.dart';
+import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart' as ops_repo;
+import '../../../teams/data/teams_provider.dart';
 import '../../data/tasks_provider.dart';
 import '../../data/tasks_repository.dart';
 
@@ -55,6 +60,7 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
   @override
   Widget build(BuildContext context) {
     final assigneesAsync = ref.watch(taskAssigneesProvider);
+    final teamsAsync = ref.watch(teamsProvider);
     final isEditing = widget.existing != null;
     return Scaffold(
       appBar: AppBar(title: Text(isEditing ? 'Edit Task' : 'New Task')),
@@ -95,6 +101,15 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: _saving ? null : _openAiAssist,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('AI Assist'),
+                ),
+              ),
               const SizedBox(height: 12),
               assigneesAsync.when(
                 loading: () => const LinearProgressIndicator(),
@@ -133,6 +148,28 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
                   labelText: 'Assign to team (optional)',
                   border: OutlineInputBorder(),
                 ),
+              ),
+              const SizedBox(height: 8),
+              teamsAsync.when(
+                loading: () => const SizedBox.shrink(),
+                error: (error, stackTrace) => const SizedBox.shrink(),
+                data: (teams) {
+                  if (teams.isEmpty) return const SizedBox.shrink();
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: teams
+                        .map(
+                          (team) => ActionChip(
+                            label: Text(team.name),
+                            onPressed: () {
+                              setState(() => _teamController.text = team.name);
+                            },
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -228,6 +265,104 @@ class _TaskEditorPageState extends ConsumerState<TaskEditorPage> {
     );
     if (selected == null) return;
     setState(() => _dueDate = selected);
+  }
+
+  Future<void> _openAiAssist() async {
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'AI Task Builder',
+        initialText: _buildAiInput(),
+        initialType: 'checklist_builder',
+        options: const [
+          AiAssistOption(id: 'summary', label: 'Summary', allowsAudio: true),
+          AiAssistOption(
+            id: 'checklist_builder',
+            label: 'Checklist builder',
+            requiresChecklist: true,
+            allowsAudio: true,
+          ),
+          AiAssistOption(
+            id: 'translation',
+            label: 'Translation',
+            requiresLanguage: true,
+            allowsAudio: true,
+          ),
+        ],
+        allowImage: false,
+        allowAudio: true,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    if (!mounted) return;
+    final firstSuggestion = _suggestTitle(output);
+    setState(() {
+      if (_titleController.text.trim().isEmpty && firstSuggestion.isNotEmpty) {
+        _titleController.text = firstSuggestion;
+      }
+      if (_descriptionController.text.trim().isEmpty &&
+          firstSuggestion.isNotEmpty) {
+        _descriptionController.text = firstSuggestion;
+      }
+      _instructionsController.text = output;
+    });
+    await _recordAiUsage(result);
+  }
+
+  String _buildAiInput() {
+    final parts = <String>[];
+    final title = _titleController.text.trim();
+    final description = _descriptionController.text.trim();
+    final instructions = _instructionsController.text.trim();
+    if (title.isNotEmpty) parts.add('Title: $title');
+    if (description.isNotEmpty) parts.add('Description: $description');
+    if (instructions.isNotEmpty) parts.add('Instructions: $instructions');
+    return parts.isEmpty ? '' : parts.join('\n');
+  }
+
+  String _suggestTitle(String output) {
+    final items = parseChecklistItems(output);
+    if (items.isNotEmpty) return items.first;
+    final firstLine = output.split('\n').first.trim();
+    return firstLine;
+  }
+
+  Future<void> _recordAiUsage(AiAssistResult result) async {
+    try {
+      final attachments = <ops_repo.AttachmentDraft>[];
+      if (result.audioBytes != null) {
+        attachments.add(
+          ops_repo.AttachmentDraft(
+            type: 'audio',
+            bytes: result.audioBytes!,
+            filename: result.audioName ?? 'ai-audio',
+            mimeType: result.audioMimeType ?? 'audio/m4a',
+          ),
+        );
+      }
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            inputMedia: attachments,
+            metadata: {
+              'source': 'task_editor',
+              'priority': _priority,
+              if (_dueDate != null) 'dueDate': _dueDate!.toIso8601String(),
+              if (result.targetLanguage != null &&
+                  result.targetLanguage!.isNotEmpty)
+                'targetLanguage': result.targetLanguage,
+              if (result.checklistCount != null)
+                'checklistCount': result.checklistCount,
+            },
+          );
+    } catch (_) {
+      // Ignore AI logging failures for task assist.
+    }
   }
 
   Future<void> _submit() async {

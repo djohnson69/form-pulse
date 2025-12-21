@@ -19,6 +19,23 @@ create table if not exists org_members (
   primary key (org_id, user_id)
 );
 
+create table if not exists teams (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  name text not null,
+  description text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (org_id, name)
+);
+
+create table if not exists team_members (
+  team_id uuid not null references teams(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (team_id, user_id)
+);
+
 -- User profiles
 create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -28,6 +45,7 @@ create table if not exists profiles (
   last_name text,
   phone text,
   role text,
+  is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -157,14 +175,34 @@ create table if not exists equipment (
   assigned_to text,
   current_location text,
   gps_location jsonb,
+  contact_name text,
+  contact_email text,
+  contact_phone text,
   rfid_tag text,
   last_maintenance_date timestamptz,
   next_maintenance_date timestamptz,
+  inspection_cadence text,
+  last_inspection_at timestamptz,
+  next_inspection_at timestamptz,
   is_active boolean not null default true,
   company_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   metadata jsonb not null default '{}'::jsonb
+);
+
+create table if not exists device_tokens (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid references orgs(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,
+  token text not null,
+  platform text,
+  is_active boolean not null default true,
+  last_seen_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  unique (token)
 );
 
 create table if not exists asset_inspections (
@@ -359,6 +397,77 @@ create table if not exists document_versions (
   metadata jsonb not null default '{}'::jsonb
 );
 
+-- SOPs and templates
+create table if not exists sop_documents (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  title text not null,
+  summary text,
+  category text,
+  tags text[] not null default '{}'::text[],
+  status text not null default 'draft',
+  current_version text,
+  current_version_id uuid,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create table if not exists sop_versions (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version text not null,
+  body text,
+  attachments jsonb not null default '[]'::jsonb,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  unique (sop_id, version)
+);
+
+create table if not exists sop_approvals (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version_id uuid references sop_versions(id) on delete set null,
+  status text not null default 'pending',
+  requested_by uuid references auth.users(id),
+  requested_at timestamptz not null default now(),
+  approved_by uuid references auth.users(id),
+  approved_at timestamptz,
+  notes text,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create table if not exists sop_acknowledgements (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version_id uuid references sop_versions(id) on delete set null,
+  user_id uuid references auth.users(id),
+  acknowledged_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  unique (sop_id, version_id, user_id)
+);
+
+create table if not exists app_templates (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  type text not null,
+  name text not null,
+  description text,
+  payload jsonb not null default '{}'::jsonb,
+  assigned_user_ids uuid[] not null default '{}'::uuid[],
+  assigned_roles text[] not null default '{}'::text[],
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
 -- News, automation, and collaboration extensions
 create table if not exists news_posts (
   id uuid primary key default gen_random_uuid(),
@@ -486,6 +595,18 @@ create table if not exists webhook_endpoints (
   metadata jsonb not null default '{}'::jsonb
 );
 
+create table if not exists integrations (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  provider text not null,
+  status text not null default 'inactive',
+  config jsonb not null default '{}'::jsonb,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (org_id, provider)
+);
+
 create table if not exists export_jobs (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references orgs(id) on delete cascade,
@@ -510,6 +631,18 @@ create table if not exists ai_jobs (
   created_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
   completed_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create table if not exists daily_logs (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  project_id uuid references projects(id) on delete set null,
+  log_date date not null default current_date,
+  title text,
+  content text,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
   metadata jsonb not null default '{}'::jsonb
 );
 
@@ -597,6 +730,9 @@ create table if not exists audit_log (
 alter table orgs enable row level security;
 alter table org_members enable row level security;
 alter table profiles enable row level security;
+alter table teams enable row level security;
+alter table team_members enable row level security;
+alter table device_tokens enable row level security;
 alter table forms enable row level security;
 alter table form_versions enable row level security;
 alter table submissions enable row level security;
@@ -616,8 +752,10 @@ alter table signature_requests enable row level security;
 alter table project_photos enable row level security;
 alter table photo_comments enable row level security;
 alter table webhook_endpoints enable row level security;
+alter table integrations enable row level security;
 alter table export_jobs enable row level security;
 alter table ai_jobs enable row level security;
+alter table daily_logs enable row level security;
 alter table guest_invites enable row level security;
 alter table payment_requests enable row level security;
 alter table reviews enable row level security;
@@ -631,6 +769,11 @@ alter table employees enable row level security;
 alter table training_records enable row level security;
 alter table documents enable row level security;
 alter table document_versions enable row level security;
+alter table sop_documents enable row level security;
+alter table sop_versions enable row level security;
+alter table sop_approvals enable row level security;
+alter table sop_acknowledgements enable row level security;
+alter table app_templates enable row level security;
 alter table notifications enable row level security;
 alter table audit_log enable row level security;
 
@@ -651,6 +794,24 @@ begin
       using (user_id = auth.uid());
   end if;
 
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage teams') then
+    create policy "Org members manage teams"
+      on teams for all
+      using (exists (
+        select 1 from org_members m where m.org_id = teams.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage team members') then
+    create policy "Org members manage team members"
+      on team_members for all
+      using (exists (
+        select 1 from teams t
+        join org_members m on m.org_id = t.org_id and m.user_id = auth.uid()
+        where t.id = team_members.team_id
+      ));
+  end if;
+
   if not exists (select 1 from pg_policies where policyname = 'Org members read profiles') then
     create policy "Org members read profiles"
       on profiles for select
@@ -663,6 +824,30 @@ begin
     create policy "Org members manage own profile"
       on profiles for all
       using (id = auth.uid());
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org admins manage profiles') then
+    create policy "Org admins manage profiles"
+      on profiles for update
+      using (exists (
+        select 1 from org_members m
+        where m.org_id = profiles.org_id
+          and m.user_id = auth.uid()
+          and m.role in ('owner', 'admin')
+      ))
+      with check (exists (
+        select 1 from org_members m
+        where m.org_id = profiles.org_id
+          and m.user_id = auth.uid()
+          and m.role in ('owner', 'admin')
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Users manage device tokens') then
+    create policy "Users manage device tokens"
+      on device_tokens for all
+      using (user_id = auth.uid())
+      with check (user_id = auth.uid());
   end if;
 
   if not exists (select 1 from pg_policies where policyname = 'Org members read forms') then
@@ -984,6 +1169,22 @@ begin
       ));
   end if;
 
+  if not exists (select 1 from pg_policies where policyname = 'Org members read integrations') then
+    create policy "Org members read integrations"
+      on integrations for select
+      using (exists (
+        select 1 from org_members m where m.org_id = integrations.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage integrations') then
+    create policy "Org members manage integrations"
+      on integrations for all
+      using (exists (
+        select 1 from org_members m where m.org_id = integrations.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
   if not exists (select 1 from pg_policies where policyname = 'Org members read export jobs') then
     create policy "Org members read export jobs"
       on export_jobs for select
@@ -1013,6 +1214,22 @@ begin
       on ai_jobs for all
       using (exists (
         select 1 from org_members m where m.org_id = ai_jobs.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members read daily logs') then
+    create policy "Org members read daily logs"
+      on daily_logs for select
+      using (exists (
+        select 1 from org_members m where m.org_id = daily_logs.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage daily logs') then
+    create policy "Org members manage daily logs"
+      on daily_logs for all
+      using (exists (
+        select 1 from org_members m where m.org_id = daily_logs.org_id and m.user_id = auth.uid()
       ));
   end if;
 
@@ -1223,6 +1440,86 @@ begin
         select 1 from org_members m where m.org_id = document_versions.org_id and m.user_id = auth.uid()
       ));
   end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members read SOPs') then
+    create policy "Org members read SOPs"
+      on sop_documents for select
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_documents.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage SOPs') then
+    create policy "Org members manage SOPs"
+      on sop_documents for all
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_documents.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members read SOP versions') then
+    create policy "Org members read SOP versions"
+      on sop_versions for select
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_versions.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage SOP versions') then
+    create policy "Org members manage SOP versions"
+      on sop_versions for all
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_versions.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members read SOP approvals') then
+    create policy "Org members read SOP approvals"
+      on sop_approvals for select
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_approvals.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage SOP approvals') then
+    create policy "Org members manage SOP approvals"
+      on sop_approvals for all
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_approvals.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members read SOP acknowledgements') then
+    create policy "Org members read SOP acknowledgements"
+      on sop_acknowledgements for select
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_acknowledgements.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage SOP acknowledgements') then
+    create policy "Org members manage SOP acknowledgements"
+      on sop_acknowledgements for all
+      using (exists (
+        select 1 from org_members m where m.org_id = sop_acknowledgements.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members read app templates') then
+    create policy "Org members read app templates"
+      on app_templates for select
+      using (exists (
+        select 1 from org_members m where m.org_id = app_templates.org_id and m.user_id = auth.uid()
+      ));
+  end if;
+
+  if not exists (select 1 from pg_policies where policyname = 'Org members manage app templates') then
+    create policy "Org members manage app templates"
+      on app_templates for all
+      using (exists (
+        select 1 from org_members m where m.org_id = app_templates.org_id and m.user_id = auth.uid()
+      ));
+  end if;
 end $$;
 
 -- Storage policies: per-org prefixes (org-{orgId}/...)
@@ -1324,10 +1621,15 @@ create index if not exists idx_project_photos_org on project_photos(org_id);
 create index if not exists idx_project_photos_project on project_photos(project_id);
 create index if not exists idx_photo_comments_photo on photo_comments(photo_id);
 create index if not exists idx_webhook_endpoints_org on webhook_endpoints(org_id);
+create index if not exists idx_integrations_org on integrations(org_id);
+create index if not exists idx_integrations_provider on integrations(provider);
 create index if not exists idx_export_jobs_org on export_jobs(org_id);
 create index if not exists idx_export_jobs_status on export_jobs(status);
 create index if not exists idx_ai_jobs_org on ai_jobs(org_id);
 create index if not exists idx_ai_jobs_status on ai_jobs(status);
+create index if not exists idx_daily_logs_org on daily_logs(org_id);
+create index if not exists idx_daily_logs_project on daily_logs(project_id);
+create index if not exists idx_daily_logs_date on daily_logs(log_date);
 create index if not exists idx_guest_invites_org on guest_invites(org_id);
 create index if not exists idx_guest_invites_status on guest_invites(status);
 create index if not exists idx_payment_requests_org on payment_requests(org_id);

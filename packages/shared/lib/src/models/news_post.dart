@@ -53,22 +53,32 @@ class NewsPost {
   }
 
   factory NewsPost.fromJson(Map<String, dynamic> json) {
+    final publishedAt = json['publishedAt'] ?? json['published_at'];
+    final createdAt = json['createdAt'] ?? json['created_at'];
+    final updatedAt = json['updatedAt'] ?? json['updated_at'];
     return NewsPost(
       id: json['id'] as String,
-      orgId: json['orgId'] as String,
+      orgId: json['orgId'] as String? ?? json['org_id'] as String? ?? '',
       title: json['title'] as String? ?? '',
       body: json['body'] as String?,
       scope: json['scope'] as String? ?? 'company',
-      siteId: json['siteId'] as String?,
+      siteId: json['siteId'] as String? ?? json['site_id'] as String?,
       tags: (json['tags'] as List?)?.map((e) => e.toString()).toList() ?? const [],
-      isPublished: json['isPublished'] as bool? ?? true,
-      publishedAt: DateTime.parse(json['publishedAt'] as String),
+      isPublished:
+          json['isPublished'] as bool? ?? json['is_published'] as bool? ?? true,
+      publishedAt: publishedAt != null
+          ? DateTime.parse(publishedAt.toString())
+          : DateTime.now(),
       attachments: (json['attachments'] as List?)
           ?.map((a) => MediaAttachment.fromJson(a as Map<String, dynamic>))
           .toList(),
-      createdBy: json['createdBy'] as String?,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      createdBy: json['createdBy'] as String? ?? json['created_by'] as String?,
+      createdAt: createdAt != null
+          ? DateTime.parse(createdAt.toString())
+          : DateTime.now(),
+      updatedAt: updatedAt != null
+          ? DateTime.parse(updatedAt.toString())
+          : DateTime.now(),
       metadata: json['metadata'] as Map<String, dynamic>?,
     );
   }

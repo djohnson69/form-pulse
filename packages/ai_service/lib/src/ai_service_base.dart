@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -75,6 +76,53 @@ class AIService {
     final parsed = jsonDecode(text) as Object?;
     if (parsed is Map<String, dynamic>) return parsed;
     throw AIServiceException('Expected JSON object but received: $text');
+  }
+
+  String _guessImageMimeType(Uint8List bytes) {
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47 &&
+        bytes[4] == 0x0D &&
+        bytes[5] == 0x0A &&
+        bytes[6] == 0x1A &&
+        bytes[7] == 0x0A) {
+      return 'image/png';
+    }
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 6) {
+      final header = String.fromCharCodes(bytes.sublist(0, 6));
+      if (header == 'GIF87a' || header == 'GIF89a') {
+        return 'image/gif';
+      }
+    }
+    if (bytes.length >= 12) {
+      final header = String.fromCharCodes(bytes.sublist(4, 12));
+      if (header.startsWith('ftyp')) {
+        final brand = header.substring(4);
+        if (brand.startsWith('avif') || brand.startsWith('avis')) {
+          return 'image/avif';
+        }
+        if (brand.startsWith('heic') ||
+            brand.startsWith('heix') ||
+            brand.startsWith('hevc') ||
+            brand.startsWith('hevx')) {
+          return 'image/heic';
+        }
+        if (brand.startsWith('mif1') ||
+            brand.startsWith('msf1') ||
+            brand.startsWith('heif')) {
+          return 'image/heif';
+        }
+      }
+    }
+    return 'image/jpeg';
   }
 
   List<String> _stringList(dynamic value) {
@@ -236,6 +284,37 @@ class AIService {
     }
   }
 
+  /// Extract text from an image using raw bytes (web-safe).
+  Future<String> extractTextFromImageBytes(Uint8List bytes) async {
+    try {
+      final base64Image = base64Encode(bytes);
+      final mimeType = _guessImageMimeType(bytes);
+      final response = await _postChat(
+        messages: [
+          {
+            'role': 'system',
+            'content': 'You perform OCR and return only the extracted text.',
+          },
+          {
+            'role': 'user',
+            'content': [
+              {'type': 'text', 'text': 'Extract all visible text.'},
+              {
+                'type': 'image_url',
+                'image_url': {'url': 'data:$mimeType;base64,$base64Image'},
+              },
+            ],
+          },
+        ],
+      );
+
+      final content = response['choices']?[0]?['message']?['content'];
+      return _contentToText(content).trim();
+    } catch (error) {
+      return 'OCR failed: $error';
+    }
+  }
+
   /// Extract structured data from unstructured text.
   Future<Map<String, dynamic>> extractStructuredData({
     required String text,
@@ -311,6 +390,51 @@ class AIService {
               {
                 'type': 'image_url',
                 'image_url': {'url': 'data:image/png;base64,$base64Image'},
+              },
+            ],
+          },
+        ],
+        responseFormat: {'type': 'json_object'},
+      );
+
+      final content = response['choices']?[0]?['message']?['content'];
+      final parsed = _contentToJson(content);
+
+      return ImageAnalysis(
+        description: parsed['description']?.toString() ?? 'No description',
+        tags: _stringList(parsed['tags']),
+        confidence: _asDouble(parsed['confidence']) ?? 0.0,
+        metadata: parsed['metadata'] as Map<String, dynamic>?,
+      );
+    } catch (error) {
+      return ImageAnalysis(
+        description: 'Image analysis failed: $error',
+        tags: const [],
+        confidence: 0.0,
+        metadata: {'error': '$error'},
+      );
+    }
+  }
+
+  /// Analyze image content using raw bytes (web-safe).
+  Future<ImageAnalysis> analyzeImageBytes(Uint8List bytes) async {
+    try {
+      final base64Image = base64Encode(bytes);
+      final mimeType = _guessImageMimeType(bytes);
+      final response = await _postChat(
+        messages: [
+          {
+            'role': 'system',
+            'content':
+                'You are an image analyst. Respond with JSON: {"description": string, "tags": string[], "confidence": number 0-1, "metadata"?: object}.',
+          },
+          {
+            'role': 'user',
+            'content': [
+              {'type': 'text', 'text': 'Describe this image and list key tags.'},
+              {
+                'type': 'image_url',
+                'image_url': {'url': 'data:$mimeType;base64,$base64Image'},
               },
             ],
           },
@@ -428,6 +552,223 @@ class AIService {
         score: 0.0,
       );
     }
+  }
+
+  /// Check image quality using raw bytes (web-safe).
+  Future<QualityCheck> checkImageQualityBytes(Uint8List bytes) async {
+    try {
+      final base64Image = base64Encode(bytes);
+      final response = await _postChat(
+        messages: [
+          {
+            'role': 'system',
+            'content':
+                'Assess if an image is acceptable for documentation. Return JSON: {"isAcceptable": bool, "issues": string[], "score": number 0-1}.',
+          },
+          {
+            'role': 'user',
+            'content': [
+              {'type': 'text', 'text': 'Check sharpness, lighting, and legibility.'},
+              {
+                'type': 'image_url',
+                'image_url': {'url': 'data:image/png;base64,$base64Image'},
+              },
+            ],
+          },
+        ],
+        responseFormat: {'type': 'json_object'},
+      );
+
+      final content = response['choices']?[0]?['message']?['content'];
+      final parsed = _contentToJson(content);
+
+      return QualityCheck(
+        isAcceptable: parsed['isAcceptable'] == true,
+        issues: _stringList(parsed['issues']),
+        score: _asDouble(parsed['score']) ?? 0.0,
+      );
+    } catch (error) {
+      return QualityCheck(
+        isAcceptable: false,
+        issues: ['Quality check failed: $error'],
+        score: 0.0,
+      );
+    }
+  }
+
+  /// Summarize text into a concise, action-ready summary.
+  Future<String> summarizeText({
+    required String text,
+    String? tone,
+    int maxWords = 120,
+  }) async {
+    final style = tone == null || tone.trim().isEmpty ? 'neutral' : tone.trim();
+    final response = await _postChat(
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              'You summarize field notes. Output plain text only. Keep it actionable and under $maxWords words. Tone: $style.',
+        },
+        {
+          'role': 'user',
+          'content': text,
+        },
+      ],
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
+  }
+
+  /// Translate text to a target language.
+  Future<String> translateText({
+    required String text,
+    required String targetLanguage,
+  }) async {
+    final response = await _postChat(
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              'You translate text. Output only the translation in the target language.',
+        },
+        {
+          'role': 'user',
+          'content': 'Target language: $targetLanguage\nText: $text',
+        },
+      ],
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
+  }
+
+  /// Generate a checklist from a prompt.
+  Future<List<String>> generateChecklist({
+    required String context,
+    int itemCount = 8,
+  }) async {
+    try {
+      final response = await _postChat(
+        messages: [
+          {
+            'role': 'system',
+            'content':
+                'Return JSON: {"items": string[]}. Items should be concise and actionable.',
+          },
+          {
+            'role': 'user',
+            'content': 'Generate $itemCount checklist items for: $context',
+          },
+        ],
+        responseFormat: {'type': 'json_object'},
+      );
+      final content = response['choices']?[0]?['message']?['content'];
+      final parsed = _contentToJson(content);
+      return _stringList(parsed['items']);
+    } catch (error) {
+      return ['Checklist generation failed: $error'];
+    }
+  }
+
+  /// Generate a progress recap.
+  Future<String> generateProgressRecap({required String text}) async {
+    final response = await _postChat(
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              'Create a concise progress recap with accomplishments, blockers, and next steps.',
+        },
+        {
+          'role': 'user',
+          'content': text,
+        },
+      ],
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
+  }
+
+  /// Generate daily log notes.
+  Future<String> generateDailyLog({required String text}) async {
+    final response = await _postChat(
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              'Write a structured daily log with sections: Work completed, Issues, Safety, Tomorrow.',
+        },
+        {
+          'role': 'user',
+          'content': text,
+        },
+      ],
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
+  }
+
+  /// Generate walkthrough notes.
+  Future<String> generateWalkthroughNotes({required String text}) async {
+    final response = await _postChat(
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              'Generate walkthrough notes with observations and recommended actions.',
+        },
+        {
+          'role': 'user',
+          'content': text,
+        },
+      ],
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
+  }
+
+  /// Generate a field report using notes and optional image context.
+  Future<String> generateFieldReport({
+    required String notes,
+    String? imageContext,
+  }) async {
+    final response = await _postChat(
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              'Generate a professional field report with sections: Summary, Findings, Actions, Risks.',
+        },
+        {
+          'role': 'user',
+          'content': 'Notes: $notes\nImage context: ${imageContext ?? 'n/a'}',
+        },
+      ],
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
+  }
+
+  /// Compose a photo caption using description and tags.
+  Future<String> composeCaption({
+    required String description,
+    List<String> tags = const [],
+  }) async {
+    final response = await _postChat(
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              'Write a short photo caption using the description and tags provided.',
+        },
+        {
+          'role': 'user',
+          'content': 'Description: $description\nTags: ${tags.join(', ')}',
+        },
+      ],
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
   }
 }
 

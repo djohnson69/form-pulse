@@ -498,6 +498,18 @@ CREATE TABLE IF NOT EXISTS ai_jobs (
   metadata jsonb not null default '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS daily_logs (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  project_id uuid references projects(id) on delete set null,
+  log_date date not null default current_date,
+  title text,
+  content text,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
 CREATE TABLE IF NOT EXISTS guest_invites (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references orgs(id) on delete cascade,
@@ -570,6 +582,7 @@ ALTER TABLE photo_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhook_endpoints ENABLE ROW LEVEL SECURITY;
 ALTER TABLE export_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guest_invites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
@@ -615,6 +628,9 @@ CREATE INDEX IF NOT EXISTS idx_export_jobs_org ON export_jobs(org_id);
 CREATE INDEX IF NOT EXISTS idx_export_jobs_status ON export_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_org ON ai_jobs(org_id);
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_status ON ai_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_daily_logs_org ON daily_logs(org_id);
+CREATE INDEX IF NOT EXISTS idx_daily_logs_project ON daily_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_daily_logs_date ON daily_logs(log_date);
 CREATE INDEX IF NOT EXISTS idx_guest_invites_org ON guest_invites(org_id);
 CREATE INDEX IF NOT EXISTS idx_guest_invites_status ON guest_invites(status);
 CREATE INDEX IF NOT EXISTS idx_payment_requests_org ON payment_requests(org_id);
@@ -910,6 +926,25 @@ BEGIN
             ));
     END IF;
 
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read daily logs') THEN
+        CREATE POLICY "Org members read daily logs"
+            ON daily_logs FOR SELECT
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = daily_logs.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members manage daily logs') THEN
+        CREATE POLICY "Org members manage daily logs"
+            ON daily_logs FOR ALL
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = daily_logs.org_id AND m.user_id = auth.uid()
+            ))
+            WITH CHECK (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = daily_logs.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read guest invites') THEN
         CREATE POLICY "Org members read guest invites"
             ON guest_invites FOR SELECT
@@ -1154,6 +1189,171 @@ BEGIN
                 SELECT 1 FROM forms f
                 JOIN org_members m ON m.org_id = f.org_id AND m.user_id = auth.uid()
                 WHERE f.id = form_versions.form_id
+            ));
+    END IF;
+END $$;
+
+-- SOPs and templates
+CREATE TABLE IF NOT EXISTS sop_documents (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  title text not null,
+  summary text,
+  category text,
+  tags text[] not null default '{}'::text[],
+  status text not null default 'draft',
+  current_version text,
+  current_version_id uuid,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS sop_versions (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version text not null,
+  body text,
+  attachments jsonb not null default '[]'::jsonb,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  unique (sop_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS sop_approvals (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version_id uuid references sop_versions(id) on delete set null,
+  status text not null default 'pending',
+  requested_by uuid references auth.users(id),
+  requested_at timestamptz not null default now(),
+  approved_by uuid references auth.users(id),
+  approved_at timestamptz,
+  notes text,
+  metadata jsonb not null default '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS sop_acknowledgements (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  sop_id uuid not null references sop_documents(id) on delete cascade,
+  version_id uuid references sop_versions(id) on delete set null,
+  user_id uuid references auth.users(id),
+  acknowledged_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb,
+  unique (sop_id, version_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS app_templates (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references orgs(id) on delete cascade,
+  type text not null,
+  name text not null,
+  description text,
+  payload jsonb not null default '{}'::jsonb,
+  assigned_user_ids uuid[] not null default '{}'::uuid[],
+  assigned_roles text[] not null default '{}'::text[],
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+ALTER TABLE equipment
+ADD COLUMN IF NOT EXISTS contact_name text,
+ADD COLUMN IF NOT EXISTS contact_email text,
+ADD COLUMN IF NOT EXISTS contact_phone text;
+
+ALTER TABLE sop_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sop_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sop_approvals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sop_acknowledgements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_templates ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read SOPs') THEN
+        CREATE POLICY "Org members read SOPs"
+            ON sop_documents FOR SELECT
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_documents.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members manage SOPs') THEN
+        CREATE POLICY "Org members manage SOPs"
+            ON sop_documents FOR ALL
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_documents.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read SOP versions') THEN
+        CREATE POLICY "Org members read SOP versions"
+            ON sop_versions FOR SELECT
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_versions.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members manage SOP versions') THEN
+        CREATE POLICY "Org members manage SOP versions"
+            ON sop_versions FOR ALL
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_versions.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read SOP approvals') THEN
+        CREATE POLICY "Org members read SOP approvals"
+            ON sop_approvals FOR SELECT
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_approvals.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members manage SOP approvals') THEN
+        CREATE POLICY "Org members manage SOP approvals"
+            ON sop_approvals FOR ALL
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_approvals.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read SOP acknowledgements') THEN
+        CREATE POLICY "Org members read SOP acknowledgements"
+            ON sop_acknowledgements FOR SELECT
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_acknowledgements.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members manage SOP acknowledgements') THEN
+        CREATE POLICY "Org members manage SOP acknowledgements"
+            ON sop_acknowledgements FOR ALL
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = sop_acknowledgements.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members read app templates') THEN
+        CREATE POLICY "Org members read app templates"
+            ON app_templates FOR SELECT
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = app_templates.org_id AND m.user_id = auth.uid()
+            ));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Org members manage app templates') THEN
+        CREATE POLICY "Org members manage app templates"
+            ON app_templates FOR ALL
+            USING (EXISTS (
+                SELECT 1 FROM org_members m WHERE m.org_id = app_templates.org_id AND m.user_id = auth.uid()
             ));
     END IF;
 END $$;

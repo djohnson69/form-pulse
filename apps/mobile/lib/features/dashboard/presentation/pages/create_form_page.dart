@@ -21,6 +21,11 @@ class _CreateFormPageState extends ConsumerState<CreateFormPage> {
   final _descriptionController = TextEditingController();
   final _categoryController = TextEditingController();
   final _tagsController = TextEditingController();
+  bool _limitSharing = false;
+  final Set<shared.UserRole> _sharedRoles = {
+    shared.UserRole.employee,
+    shared.UserRole.manager,
+  };
 
   final List<_FieldDraft> _fields = [
     _FieldDraft(type: shared.FormFieldType.text, label: 'Title'),
@@ -70,6 +75,36 @@ class _CreateFormPageState extends ConsumerState<CreateFormPage> {
                 ),
               ),
               const SizedBox(height: 16),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Limit form access'),
+                subtitle: const Text('Restrict this form to selected roles.'),
+                value: _limitSharing,
+                onChanged: (value) => setState(() => _limitSharing = value),
+              ),
+              if (_limitSharing) ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: shared.UserRole.values.map((role) {
+                    final selected = _sharedRoles.contains(role);
+                    return FilterChip(
+                      label: Text(role.displayName),
+                      selected: selected,
+                      onSelected: (value) {
+                        setState(() {
+                          if (value) {
+                            _sharedRoles.add(role);
+                          } else {
+                            _sharedRoles.remove(role);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+              ],
               Row(
                 children: [
                   Text('Fields', style: Theme.of(context).textTheme.titleLarge),
@@ -163,6 +198,12 @@ class _CreateFormPageState extends ConsumerState<CreateFormPage> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate() || _fields.isEmpty) return;
+    if (_limitSharing && _sharedRoles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one role to share.')),
+      );
+      return;
+    }
     final repo = ref.read(dashboardRepositoryProvider);
     final id = 'form-${Random().nextInt(999999)}';
     final tags = _tagsController.text
@@ -195,7 +236,11 @@ class _CreateFormPageState extends ConsumerState<CreateFormPage> {
       isPublished: true,
       createdBy: 'demo-user',
       createdAt: DateTime.now(),
-      metadata: {'source': 'builder'},
+      metadata: {
+        'source': 'builder',
+        if (_limitSharing)
+          'shared_roles': _sharedRoles.map((role) => role.name).toList(),
+      },
     );
 
     try {
@@ -285,13 +330,21 @@ class _FieldChooserState extends State<_FieldChooser> {
             initialValue: _type,
             decoration: const InputDecoration(labelText: 'Type'),
             items:
-                [
+                    [
                       shared.FormFieldType.text,
+                      shared.FormFieldType.email,
+                      shared.FormFieldType.phone,
                       shared.FormFieldType.textarea,
                       shared.FormFieldType.number,
+                      shared.FormFieldType.date,
+                      shared.FormFieldType.time,
+                      shared.FormFieldType.datetime,
                       shared.FormFieldType.dropdown,
                       shared.FormFieldType.checkbox,
                       shared.FormFieldType.radio,
+                      shared.FormFieldType.toggle,
+                      shared.FormFieldType.file,
+                      shared.FormFieldType.files,
                       shared.FormFieldType.photo,
                       shared.FormFieldType.video,
                       shared.FormFieldType.audio,
@@ -299,6 +352,12 @@ class _FieldChooserState extends State<_FieldChooser> {
                       shared.FormFieldType.signature,
                       shared.FormFieldType.location,
                       shared.FormFieldType.barcode,
+                      shared.FormFieldType.rfid,
+                      shared.FormFieldType.repeater,
+                      shared.FormFieldType.table,
+                      shared.FormFieldType.computed,
+                      shared.FormFieldType.sectionHeader,
+                      shared.FormFieldType.infoText,
                     ]
                     .map(
                       (t) => DropdownMenuItem(

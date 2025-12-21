@@ -148,12 +148,32 @@ class _AssetSummary extends StatelessWidget {
                   _SummaryChip(label: 'RFID', value: asset.rfidTag!),
                 if ((asset.currentLocation ?? '').isNotEmpty)
                   _SummaryChip(label: 'Location', value: asset.currentLocation!),
+                if ((asset.contactName ?? '').isNotEmpty)
+                  _SummaryChip(label: 'Contact', value: asset.contactName!),
+                if ((asset.contactEmail ?? '').isNotEmpty)
+                  _SummaryChip(label: 'Email', value: asset.contactEmail!),
+                if ((asset.contactPhone ?? '').isNotEmpty)
+                  _SummaryChip(label: 'Phone', value: asset.contactPhone!),
+                if ((asset.inspectionCadence ?? '').isNotEmpty)
+                  _SummaryChip(
+                    label: 'Inspection',
+                    value: asset.inspectionCadence!,
+                  ),
+                if (asset.nextInspectionAt != null)
+                  _SummaryChip(
+                    label: 'Next inspection',
+                    value: _formatDate(asset.nextInspectionAt!),
+                  ),
               ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.month}/${date.day}/${date.year}';
   }
 }
 

@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 
+import '../../../../core/ai/ai_assist_sheet.dart';
+import '../../../../core/ai/ai_parsers.dart';
+import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart' as ops_repo;
 import '../../data/training_provider.dart';
 
 class TrainingEditorPage extends ConsumerStatefulWidget {
@@ -291,6 +295,15 @@ class _TrainingEditorPageState extends ConsumerState<TrainingEditorPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: _saving ? null : _openAiAssist,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('AI Assist'),
+                ),
+              ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _documentsController,
@@ -382,6 +395,116 @@ class _TrainingEditorPageState extends ConsumerState<TrainingEditorPage> {
     );
     if (selected == null) return;
     onSelected(selected);
+  }
+
+  Future<void> _openAiAssist() async {
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'AI Training Assist',
+        initialText: _buildAiInput(),
+        initialType: 'summary',
+        options: const [
+          AiAssistOption(id: 'summary', label: 'Summary', allowsAudio: true),
+          AiAssistOption(
+            id: 'checklist_builder',
+            label: 'Checklist builder',
+            requiresChecklist: true,
+            allowsAudio: true,
+          ),
+          AiAssistOption(
+            id: 'translation',
+            label: 'Translation',
+            requiresLanguage: true,
+            allowsAudio: true,
+          ),
+        ],
+        allowImage: false,
+        allowAudio: true,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    final items = parseChecklistItems(output);
+    final nextMaterials = _mergeItems(
+      _parseList(_materialsController.text),
+      items.isEmpty ? [output] : items,
+    );
+    final suggestedTitle = _suggestTitle(output);
+    if (!mounted) return;
+    setState(() {
+      if (_trainingNameController.text.trim().isEmpty &&
+          suggestedTitle.isNotEmpty) {
+        _trainingNameController.text = suggestedTitle;
+      }
+      _materialsController.text = nextMaterials.join(', ');
+    });
+    await _recordAiUsage(result);
+  }
+
+  String _buildAiInput() {
+    final parts = <String>[];
+    final name = _trainingNameController.text.trim();
+    final type = _trainingTypeController.text.trim();
+    final location = _locationController.text.trim();
+    if (name.isNotEmpty) parts.add('Training: $name');
+    if (type.isNotEmpty) parts.add('Type: $type');
+    if (location.isNotEmpty) parts.add('Location: $location');
+    return parts.isEmpty ? '' : parts.join('\n');
+  }
+
+  String _suggestTitle(String output) {
+    final items = parseChecklistItems(output);
+    if (items.isNotEmpty) return items.first;
+    return output.split('\n').first.trim();
+  }
+
+  List<String> _mergeItems(List<String> current, List<String> additions) {
+    final merged = <String>[];
+    final seen = <String>{};
+    for (final item in [...current, ...additions]) {
+      final cleaned = item.trim();
+      if (cleaned.isEmpty) continue;
+      final key = cleaned.toLowerCase();
+      if (seen.add(key)) merged.add(cleaned);
+    }
+    return merged;
+  }
+
+  Future<void> _recordAiUsage(AiAssistResult result) async {
+    try {
+      final attachments = <ops_repo.AttachmentDraft>[];
+      if (result.audioBytes != null) {
+        attachments.add(
+          ops_repo.AttachmentDraft(
+            type: 'audio',
+            bytes: result.audioBytes!,
+            filename: result.audioName ?? 'ai-audio',
+            mimeType: result.audioMimeType ?? 'audio/m4a',
+          ),
+        );
+      }
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            inputMedia: attachments,
+            metadata: {
+              'source': 'training_editor',
+              'status': _status.name,
+              if (result.targetLanguage != null &&
+                  result.targetLanguage!.isNotEmpty)
+                'targetLanguage': result.targetLanguage,
+              if (result.checklistCount != null)
+                'checklistCount': result.checklistCount,
+            },
+          );
+    } catch (_) {
+      // Ignore AI logging failures for training assist.
+    }
   }
 
   Future<void> _submit() async {

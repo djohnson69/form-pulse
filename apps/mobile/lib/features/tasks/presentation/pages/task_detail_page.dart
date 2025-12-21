@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/tasks_provider.dart';
 import '../pages/task_editor_page.dart';
@@ -17,11 +18,13 @@ class TaskDetailPage extends ConsumerStatefulWidget {
 class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
   late Task _task;
   bool _saving = false;
+  late Future<UserRole> _roleFuture;
 
   @override
   void initState() {
     super.initState();
     _task = widget.task;
+    _roleFuture = _fetchUserRole();
   }
 
   @override
@@ -47,41 +50,78 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _InfoTile(
-            icon: Icons.flag,
-            title: 'Status',
-            child: DropdownButtonFormField<TaskStatus>(
-              initialValue: _task.status,
-              decoration: const InputDecoration(border: OutlineInputBorder()),
-              items: TaskStatus.values
-                  .map(
-                    (status) => DropdownMenuItem(
-                      value: status,
-                      child: Text(status.displayName),
-                    ),
-                  )
-                  .toList(),
-              onChanged: _saving
-                  ? null
-                  : (status) async {
-                      if (status == null) return;
-                      setState(() => _saving = true);
-                      final updated = await repo.updateTask(
-                        taskId: _task.id,
-                        status: status,
-                      );
-                      if (!mounted) return;
-                      setState(() {
-                        _task = updated;
-                        _saving = false;
-                      });
-                      ref.invalidate(tasksProvider);
-                    },
-            ),
-          ),
+      body: FutureBuilder<UserRole>(
+        future: _roleFuture,
+        builder: (context, snapshot) {
+          final role = snapshot.data ?? UserRole.viewer;
+          final approval =
+              _task.metadata?['approval'] as Map<String, dynamic>? ?? {};
+          final requiresApproval = approval['required'] == true;
+          final approvalStatus = approval['status']?.toString() ?? 'pending';
+          final approverRole = approval['approverRole']?.toString();
+          final canApprove = _canApprove(role, approverRole);
+          final isApproved = approvalStatus == 'approved';
+          final canChangeStatus = !requiresApproval || isApproved;
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (requiresApproval)
+                _InfoTile(
+                  icon: Icons.verified_user,
+                  title: 'Approval',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isApproved
+                            ? 'Approved'
+                            : 'Approval required${approverRole != null ? ' by $approverRole' : ''}.',
+                      ),
+                      const SizedBox(height: 8),
+                      if (!isApproved && canApprove)
+                        FilledButton.icon(
+                          onPressed: _saving ? null : _approveTask,
+                          icon: const Icon(Icons.check_circle),
+                          label: const Text('Approve task'),
+                        ),
+                      if (!isApproved && !canApprove)
+                        const Text('Waiting for approval.'),
+                    ],
+                  ),
+                ),
+              if (requiresApproval) const SizedBox(height: 12),
+              _InfoTile(
+                icon: Icons.flag,
+                title: 'Status',
+                child: DropdownButtonFormField<TaskStatus>(
+                  initialValue: _task.status,
+                  decoration: const InputDecoration(border: OutlineInputBorder()),
+                  items: TaskStatus.values
+                      .map(
+                        (status) => DropdownMenuItem(
+                          value: status,
+                          child: Text(status.displayName),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _saving || !canChangeStatus
+                      ? null
+                      : (status) async {
+                          if (status == null) return;
+                          setState(() => _saving = true);
+                          final updated = await repo.updateTask(
+                            taskId: _task.id,
+                            status: status,
+                          );
+                          if (!mounted) return;
+                          setState(() {
+                            _task = updated;
+                            _saving = false;
+                          });
+                          ref.invalidate(tasksProvider);
+                        },
+                ),
+              ),
           const SizedBox(height: 12),
           _InfoTile(
             icon: Icons.linear_scale,
@@ -95,7 +135,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
                   max: 100,
                   divisions: 20,
                   label: '${_task.progress}%',
-                  onChanged: _saving
+                  onChanged: _saving || !canChangeStatus
                       ? null
                       : (value) {
                           setState(() {
@@ -120,7 +160,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
                             );
                           });
                         },
-                  onChangeEnd: _saving
+                  onChangeEnd: _saving || !canChangeStatus
                       ? null
                       : (value) async {
                           setState(() => _saving = true);
@@ -183,7 +223,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
           const SizedBox(height: 20),
           FilledButton.icon(
             onPressed:
-                _saving || _task.status == TaskStatus.completed ? null : _markComplete,
+                _saving || _task.status == TaskStatus.completed || !canChangeStatus
+                    ? null
+                    : _markComplete,
             icon: const Icon(Icons.check_circle),
             label: const Text('Mark completed'),
           ),
@@ -194,9 +236,74 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
             icon: const Icon(Icons.notifications_active),
             label: const Text('Send reminder'),
           ),
-        ],
+            ],
+          );
+        },
       ),
     );
+  }
+
+  Future<UserRole> _fetchUserRole() async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) return UserRole.viewer;
+    try {
+      final res = await client
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+      final raw = res?['role']?.toString() ?? UserRole.viewer.name;
+      return UserRole.values.firstWhere(
+        (role) => role.name == raw,
+        orElse: () => UserRole.viewer,
+      );
+    } catch (_) {
+      return UserRole.viewer;
+    }
+  }
+
+  bool _canApprove(UserRole role, String? requiredRole) {
+    if (requiredRole == null || requiredRole.isEmpty) {
+      return role.canManage;
+    }
+    switch (requiredRole) {
+      case 'superAdmin':
+        return role == UserRole.superAdmin;
+      case 'admin':
+        return role.isAdmin;
+      case 'manager':
+        return role.canManage;
+      case 'supervisor':
+        return role.canSupervise;
+      default:
+        return role.canManage;
+    }
+  }
+
+  Future<void> _approveTask() async {
+    setState(() => _saving = true);
+    try {
+      final repo = ref.read(tasksRepositoryProvider);
+      final metadata = Map<String, dynamic>.from(_task.metadata ?? const {});
+      final approval = Map<String, dynamic>.from(
+        metadata['approval'] as Map? ?? const {},
+      );
+      approval['status'] = 'approved';
+      approval['approvedAt'] = DateTime.now().toIso8601String();
+      approval['approvedBy'] =
+          Supabase.instance.client.auth.currentUser?.id;
+      metadata['approval'] = approval;
+      final updated = await repo.updateTask(
+        taskId: _task.id,
+        metadata: metadata,
+      );
+      if (!mounted) return;
+      setState(() => _task = updated);
+      ref.invalidate(tasksProvider);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _pickDueDate() async {

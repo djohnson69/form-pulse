@@ -7,6 +7,7 @@ class AdminRepository {
   AdminRepository(this._client);
 
   final SupabaseClient _client;
+  static const int _aiUsageWindowDays = 30;
 
   Future<AdminStats> fetchStats({String? orgId}) async {
     // Fetch base lists and derive counts client-side to avoid head/count API differences.
@@ -168,6 +169,78 @@ class AdminRepository {
     );
   }
 
+  Future<AdminAiUsageSummary> fetchAiUsageSummary({String? orgId}) async {
+    final cutoff = DateTime.now().subtract(
+      const Duration(days: _aiUsageWindowDays),
+    );
+    var query = _client
+        .from('ai_jobs')
+        .select('id,type,created_by,created_at')
+        .gte('created_at', cutoff.toIso8601String());
+
+    if (orgId != null && orgId.isNotEmpty) {
+      query = query.eq('org_id', orgId);
+    }
+
+    final rows = await query;
+    final byType = <String, int>{};
+    final byUser = <String, int>{};
+
+    for (final row in rows) {
+      final type = row['type']?.toString().trim();
+      if (type != null && type.isNotEmpty) {
+        byType[type] = (byType[type] ?? 0) + 1;
+      }
+      final userId = row['created_by']?.toString().trim();
+      if (userId != null && userId.isNotEmpty) {
+        byUser[userId] = (byUser[userId] ?? 0) + 1;
+      }
+    }
+
+    final sortedUsers = byUser.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final topUserEntries = sortedUsers.take(6).toList();
+    final topUserIds = topUserEntries.map((e) => e.key).toList();
+
+    final profilesById = <String, Map<String, dynamic>>{};
+    if (topUserIds.isNotEmpty) {
+      final profiles = await _client
+          .from('profiles')
+          .select('id,email,first_name,last_name')
+          .inFilter('id', topUserIds);
+      for (final row in profiles) {
+        final id = row['id']?.toString();
+        if (id != null) {
+          profilesById[id] = Map<String, dynamic>.from(row as Map);
+        }
+      }
+    }
+
+    final topUsers = topUserEntries.map((entry) {
+      final profile = profilesById[entry.key];
+      final firstName = profile?['first_name']?.toString() ?? '';
+      final lastName = profile?['last_name']?.toString() ?? '';
+      final email = profile?['email']?.toString() ?? 'unknown';
+      final displayName =
+          ('$firstName $lastName'.trim().isEmpty ? email : '$firstName $lastName')
+              .trim();
+
+      return AdminAiUserUsage(
+        userId: entry.key,
+        displayName: displayName,
+        email: email,
+        jobs: entry.value,
+      );
+    }).toList();
+
+    return AdminAiUsageSummary(
+      totalJobs: rows.length,
+      byType: byType,
+      topUsers: topUsers,
+      windowLabel: 'Last $_aiUsageWindowDays days',
+    );
+  }
+
   Future<List<AdminOrgSummary>> fetchOrganizations() async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return [];
@@ -225,7 +298,7 @@ class AdminRepository {
     UserRole? role,
   }) async {
     var query = _client.from('profiles').select(
-          'id,org_id,email,first_name,last_name,role,created_at,updated_at',
+          'id,org_id,email,first_name,last_name,role,is_active,created_at,updated_at',
         );
 
     if (orgId != null && orgId.isNotEmpty) {
@@ -254,6 +327,7 @@ class AdminRepository {
           (r) => r.name == roleName,
           orElse: () => UserRole.viewer,
         ),
+        isActive: row['is_active'] as bool? ?? true,
         createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
             DateTime.now(),
         updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
@@ -268,6 +342,16 @@ class AdminRepository {
   }) async {
     await _client.from('profiles').update({
       'role': role.name,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', userId);
+  }
+
+  Future<void> updateUserActive({
+    required String userId,
+    required bool isActive,
+  }) async {
+    await _client.from('profiles').update({
+      'is_active': isActive,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', userId);
   }
@@ -330,7 +414,7 @@ class AdminRepository {
     String? status,
   }) async {
     var query = _client.from('submissions').select(
-      'id,form_id,status,submitted_at,submitted_by,attachments,metadata',
+      'id,form_id,status,submitted_at,submitted_by,attachments,metadata,forms(title)',
     )
       ..order('submitted_at', ascending: false)
       ..limit(limit);
@@ -344,23 +428,60 @@ class AdminRepository {
     }
 
     final res = await query;
-    return res
-        .map<AdminSubmissionSummary>((row) {
-          final attachments = row['attachments'];
-          final attCount = attachments is List ? attachments.length : 0;
-          return AdminSubmissionSummary(
-            id: row['id'].toString(),
-            formId: row['form_id']?.toString() ?? '',
-            status: row['status']?.toString() ?? 'submitted',
-            submittedAt:
-                DateTime.tryParse(row['submitted_at']?.toString() ?? '') ??
-                    DateTime.now(),
-            submittedBy: row['submitted_by']?.toString(),
-            attachmentsCount: attCount,
-            metadata: row['metadata'] as Map<String, dynamic>?,
-          );
-        })
-        .toList();
+    final submitterIds = <String>{};
+    for (final row in res) {
+      final userId = row['submitted_by']?.toString();
+      if (userId != null && userId.isNotEmpty) {
+        submitterIds.add(userId);
+      }
+    }
+
+    final profilesById = <String, Map<String, dynamic>>{};
+    if (submitterIds.isNotEmpty) {
+      final profiles = await _client
+          .from('profiles')
+          .select('id, role, first_name, last_name, email')
+          .inFilter('id', submitterIds.toList());
+      for (final row in profiles) {
+        final id = row['id']?.toString();
+        if (id != null) {
+          profilesById[id] = Map<String, dynamic>.from(row as Map);
+        }
+      }
+    }
+
+    return res.map<AdminSubmissionSummary>((row) {
+      final attachments = row['attachments'];
+      final attCount = attachments is List ? attachments.length : 0;
+      final submitterId = row['submitted_by']?.toString();
+      final profile = submitterId != null ? profilesById[submitterId] : null;
+      final roleName = profile?['role']?.toString();
+      final role = roleName == null
+          ? null
+          : UserRole.values.firstWhere(
+              (value) => value.name == roleName,
+              orElse: () => UserRole.viewer,
+            );
+      final firstName = profile?['first_name']?.toString() ?? '';
+      final lastName = profile?['last_name']?.toString() ?? '';
+      final email = profile?['email']?.toString() ?? '';
+      final displayName = ('$firstName $lastName').trim();
+
+      return AdminSubmissionSummary(
+        id: row['id'].toString(),
+        formId: row['form_id']?.toString() ?? '',
+        formTitle: row['forms']?['title']?.toString(),
+        status: row['status']?.toString() ?? 'submitted',
+        submittedAt:
+            DateTime.tryParse(row['submitted_at']?.toString() ?? '') ??
+                DateTime.now(),
+        submittedBy: submitterId,
+        submittedByName: displayName.isNotEmpty ? displayName : email,
+        submittedByRole: role,
+        attachmentsCount: attCount,
+        metadata: row['metadata'] as Map<String, dynamic>?,
+      );
+    }).toList();
   }
 
   Future<FormSubmission> fetchSubmissionDetail(String submissionId) async {

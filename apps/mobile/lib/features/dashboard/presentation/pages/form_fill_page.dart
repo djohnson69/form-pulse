@@ -16,10 +16,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared/shared.dart' as shared;
 
+import '../../../../core/ai/ai_assist_sheet.dart';
 import '../../data/dashboard_provider.dart';
 import '../../data/pending_queue.dart';
 import '../../data/user_profile_provider.dart';
+import '../../../../core/utils/automation_scheduler.dart';
 import '../../../../core/utils/file_bytes_loader.dart';
+import '../../../../core/utils/submission_utils.dart';
+import '../../../ops/data/ops_provider.dart';
 import 'photo_annotator_page.dart';
 import 'signature_pad_page.dart';
 
@@ -58,6 +62,7 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
   String? _dictationFieldId;
   String? _pendingAudioLabel;
   String? _orgId;
+  String _accessLevel = 'org';
 
   @override
   void initState() {
@@ -114,6 +119,8 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
               _buildAttachmentsCard(context),
               const SizedBox(height: 12),
               _buildLocationCard(context),
+              const SizedBox(height: 12),
+              _buildAccessLevelCard(context),
               const SizedBox(height: 24),
               FilledButton.icon(
                 onPressed: _submitting ? null : _submit,
@@ -136,12 +143,13 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
   Widget _buildField(shared.FormField field) {
     switch (field.type) {
       case shared.FormFieldType.text:
+        return _buildTextField(field, enableAi: true);
       case shared.FormFieldType.email:
       case shared.FormFieldType.phone:
       case shared.FormFieldType.number:
         return _buildTextField(field);
       case shared.FormFieldType.textarea:
-        return _buildTextField(field, maxLines: 4);
+        return _buildTextField(field, maxLines: 4, enableAi: true);
       case shared.FormFieldType.dropdown:
         return _buildDropdown(field);
       case shared.FormFieldType.checkbox:
@@ -194,6 +202,7 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
     shared.FormField field, {
     int maxLines = 1,
     String? hint,
+    bool enableAi = false,
   }) {
     final controller = _controllerFor(field.id);
     final preferred = widget.preferredField == field.id;
@@ -208,6 +217,13 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
           hintText: hint ?? field.placeholder,
           prefixIcon: _iconFor(field.type) != null
               ? Icon(_iconFor(field.type))
+              : null,
+          suffixIcon: enableAi
+              ? IconButton(
+                  tooltip: 'AI assist',
+                  icon: const Icon(Icons.auto_awesome),
+                  onPressed: () => _openAiAssistForField(field),
+                )
               : null,
         ),
         autofocus: preferred,
@@ -704,6 +720,49 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
         trailing: IconButton(
           icon: const Icon(Icons.add_location_alt),
           onPressed: _captureLocation,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAccessLevelCard(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Access level',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Controls who can view this record.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              key: ValueKey(_accessLevel),
+              initialValue: _accessLevel,
+              decoration: const InputDecoration(
+                labelText: 'Visibility',
+                border: OutlineInputBorder(),
+              ),
+              items: submissionAccessLevelLabels.entries
+                  .map(
+                    (entry) => DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() => _accessLevel = value);
+              },
+            ),
+          ],
         ),
       ),
     );
@@ -1390,6 +1449,124 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
     return null;
   }
 
+  Future<void> _openAiAssistForField(shared.FormField field) async {
+    final controller = _controllerFor(field.id);
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'AI Assist',
+        initialText: controller.text.trim(),
+        initialType: 'summary',
+        allowImage: false,
+        allowAudio: false,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    setState(() {
+      controller.text = output;
+      _values[field.id] = output;
+    });
+    await _recordAiUsage(result, field);
+  }
+
+  Future<void> _recordAiUsage(
+    AiAssistResult result,
+    shared.FormField field,
+  ) async {
+    try {
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            metadata: {
+              'source': 'form_fill',
+              'formId': widget.form.id,
+              'formTitle': widget.form.title,
+              'fieldId': field.id,
+              'fieldLabel': field.label,
+              'fieldType': field.type.name,
+              if (result.targetLanguage != null &&
+                  result.targetLanguage!.isNotEmpty)
+                'targetLanguage': result.targetLanguage,
+              if (result.checklistCount != null)
+                'checklistCount': result.checklistCount,
+            },
+          );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI log failed: $e')),
+      );
+    }
+  }
+
+  Map<String, dynamic> _buildSubmissionMetadata() {
+    final types = <String>{};
+    final hasText = _values.values.any((value) {
+      if (value == null) return false;
+      final text = value.toString().trim();
+      return text.isNotEmpty && text != 'null';
+    });
+    if (hasText) {
+      types.add('text');
+    }
+    for (final attachment in _attachments) {
+      switch (attachment.type) {
+        case 'photo':
+          types.add('photo');
+          break;
+        case 'video':
+          types.add('video');
+          break;
+        case 'audio':
+          types.add('audio');
+          break;
+        case 'signature':
+          types.add('signature');
+          break;
+        case 'file':
+          types.add('document');
+          break;
+        default:
+          types.add(attachment.type);
+          break;
+      }
+    }
+    if (_locationData != null) {
+      types.add('geo');
+    }
+    if (types.isEmpty) {
+      types.add('text');
+    }
+    final provider = _resolveAuthProvider();
+    return {
+      'visibility': _accessLevel,
+      'inputTypes': types.toList(),
+      'submissionSource': 'mobile',
+      if (provider != null && provider.isNotEmpty) 'provider': provider,
+    };
+  }
+
+  String? _resolveAuthProvider() {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return null;
+    final appMeta = user.appMetadata;
+    final provider = appMeta['provider'];
+    if (provider is String && provider.trim().isNotEmpty) {
+      return provider.trim();
+    }
+    final providers = appMeta['providers'];
+    if (providers is List && providers.isNotEmpty) {
+      final value = providers.first.toString().trim();
+      if (value.isNotEmpty) return value;
+    }
+    return null;
+  }
+
   Future<void> _submit() async {
     final formState = _formKey.currentState;
     if (formState == null) return;
@@ -1411,9 +1588,16 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
 
     final repo = ref.read(dashboardRepositoryProvider);
     final uploaded = await _uploadAttachments(_attachments);
-    final attachmentJson = uploaded.map((a) => a.toJson()).toList();
+    final attachmentJson = uploaded.map((a) {
+      final json = a.toJson();
+      if (_locationData != null && json['location'] == null) {
+        json['location'] = _locationData;
+      }
+      return json;
+    }).toList();
     final currentUser = _supabase.auth.currentUser;
     final submittedBy = currentUser?.email ?? currentUser?.id ?? 'anonymous';
+    final submissionMetadata = _buildSubmissionMetadata();
 
     try {
       await repo.createSubmission(
@@ -1422,6 +1606,10 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
         submittedBy: submittedBy,
         attachments: attachmentJson,
         location: _locationData,
+        metadata: submissionMetadata,
+      );
+      await AutomationScheduler.runIfDue(
+        ops: ref.read(opsRepositoryProvider),
       );
       if (!mounted) return;
       ref.invalidate(dashboardDataProvider);
@@ -1443,6 +1631,7 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
           submittedBy: submittedBy,
           attachments: _attachments.map((a) => a.toQueueJson()).toList(),
           location: _locationData,
+          metadata: submissionMetadata,
         ),
       );
       if (!mounted) return;

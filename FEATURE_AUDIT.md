@@ -1,0 +1,171 @@
+# Feature Audit (Master List)
+
+Status key:
+- IMPLEMENTED: Present in app flows and data model.
+- PARTIAL: Present but missing automation, realtime, deployment, or full scope.
+- MISSING: No implementation found.
+- NEEDS_VERIFICATION: Likely present but not fully confirmed.
+
+- Secure cloud storage for documents and records. [PARTIAL] Supabase storage + RLS; encryption/at-rest policies are platform-managed. `apps/mobile/lib/features/documents/**`
+- Cloud storage for job site photos and videos. [IMPLEMENTED] Project updates/photos with storage uploads. `apps/mobile/lib/features/projects/**`, `apps/mobile/lib/features/ops/presentation/pages/photo_editor_page.dart`
+- Create documents, share them with your team, and update them in real time. [IMPLEMENTED] Document publish/notify + realtime refresh. `apps/mobile/lib/features/documents/**`
+- Create and edit forms that can be shared with employees, vendors, and customers as needed. [IMPLEMENTED] Role-scoped sharing metadata + access filtering. `apps/mobile/lib/features/dashboard/presentation/pages/create_form_page.dart`, `apps/mobile/lib/features/dashboard/data/dashboard_repository.dart`
+- Allow users to input data through typing, drop-down lists, and pre-qualified field types. [IMPLEMENTED] Form field types cover these. `packages/shared/lib/src/enums/form_field_type.dart`
+- Instantly collect field data, including voice-to-text memos. [IMPLEMENTED] Speech-to-text + voice notes. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Instantly collect field data, including videos. [IMPLEMENTED] Video field support. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Instantly collect field data, including audio recordings. [IMPLEMENTED] Audio field support. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Instantly collect field data, including annotated photos. [IMPLEMENTED] Photo annotator flow. `apps/mobile/lib/features/dashboard/presentation/pages/photo_annotator_page.dart`
+- Instantly collect field data, including date-stamped and time-stamped signatures. [IMPLEMENTED] Signature capture with timestamps. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Instantly collect field data, including geolocation tags. [IMPLEMENTED] Location capture. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Instantly collect field data, including supporting documents. [IMPLEMENTED] File uploads in forms. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Record virtually any type of data, including photos. [IMPLEMENTED] Media attachments. `packages/shared/lib/src/models/form_submission.dart`
+- Record virtually any type of data, including signatures. [IMPLEMENTED] Signature attachment type. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Record virtually any type of data, including video clips. [IMPLEMENTED] Video attachments. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- Record virtually any type of data, including checklists. [IMPLEMENTED] Checklist field + templates. `packages/shared/lib/src/enums/form_field_type.dart`
+- Generate automated reports based on uploads. [IMPLEMENTED] Auto field-report jobs enqueued on submission uploads. `apps/mobile/lib/features/dashboard/data/dashboard_repository.dart`
+- Generate automated reminders based on uploads. [IMPLEMENTED] Submission-triggered automation sweeps + periodic scheduler. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`, `apps/mobile/lib/core/utils/automation_scheduler.dart`
+- Access the platform from any web-connected device. [PARTIAL] Flutter web support exists; deployment not verified.
+- See real-time reports on submissions across any project. [IMPLEMENTED] Realtime submissions refresh + filters. `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+- See real-time reports on submissions across any location. [IMPLEMENTED] Realtime submissions refresh + location filters. `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+- See real-time reports on submissions across any employee. [IMPLEMENTED] Realtime submissions refresh + submitter filters. `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+- Assign tasks directly to employees. [IMPLEMENTED] Task assignees. `apps/mobile/lib/features/tasks/**`
+- Assign tasks directly to teams. [IMPLEMENTED] Team directory + assignments. `apps/mobile/lib/features/teams/**`
+- Attach clear instructions to assigned tasks. [IMPLEMENTED] Task instructions. `apps/mobile/lib/features/tasks/**`
+- Set due dates on assigned tasks. [IMPLEMENTED] due_date field. `apps/mobile/lib/features/tasks/**`
+- Track progress on assigned tasks. [IMPLEMENTED] progress/status fields. `apps/mobile/lib/features/tasks/**`
+- Send proactive reminders for upcoming tasks and milestones. [IMPLEMENTED] Periodic automation scheduler runs in-app. `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`, `apps/mobile/lib/features/dashboard/presentation/pages/dashboard_page.dart`
+- Let employees mark tasks as completed. [IMPLEMENTED] Task status updates. `apps/mobile/lib/features/tasks/**`
+- Trigger real-time updates for supervisors when tasks are marked complete. [IMPLEMENTED] Supervisor notifications + push dispatch on task updates.
+- Separate records by input type. [IMPLEMENTED] Submission metadata + filters. `apps/mobile/lib/core/utils/submission_utils.dart`
+- Separate records by provider. [IMPLEMENTED] Auth provider stored on submissions + filters. `apps/mobile/lib/core/utils/submission_utils.dart`
+- Separate records by permission level. [IMPLEMENTED] Visibility metadata + filters. `apps/mobile/lib/core/utils/submission_utils.dart`
+- View work submitted by employees in real time, including supporting documents and photos. [IMPLEMENTED] Realtime submissions refresh + attachments. `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+- View work submitted by vendors in real time, including supporting documents and photos. [IMPLEMENTED] Realtime submissions refresh + role filters. `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+- Add approval buttons to sign off on reports before they are shared with customers. [IMPLEMENTED] Submission approval controls. `apps/mobile/lib/features/dashboard/presentation/pages/submission_detail_page.dart`
+- Use built-in messaging tools to communicate with customers without starting new email chains. [IMPLEMENTED] Client messaging threads. `apps/mobile/lib/features/partners/**`
+- Use built-in messaging tools to communicate with vendors without starting new email chains. [IMPLEMENTED] Vendor messaging threads. `apps/mobile/lib/features/partners/**`
+- Provide customers real-time access to relevant data, including photos, notes, signatures, and time and location stamps. [IMPLEMENTED] Shared timeline includes media metadata + realtime updates. `apps/mobile/lib/features/projects/presentation/pages/project_share_page.dart`, `supabase/functions/project-share/index.ts`
+- View pre-filtered data relevant to your needs. [IMPLEMENTED] Report filters. `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+- Search entries by date. [IMPLEMENTED] Report date range filter.
+- Search entries by keyword. [IMPLEMENTED] Report search filter.
+- Search entries by geography. [IMPLEMENTED] Geo filter.
+- Search entries by fully customizable criteria. [IMPLEMENTED] Field key/value filters.
+- View a business-wide overview of activity. [IMPLEMENTED] Admin dashboard. `apps/mobile/lib/features/admin/**`
+- Drill into activity details for a specific employee. [IMPLEMENTED] Submitter drilldown to reports. `apps/mobile/lib/features/dashboard/presentation/pages/submission_detail_page.dart`
+- Drill into activity details for a specific location. [IMPLEMENTED] Location drilldown to geo-filtered reports. `apps/mobile/lib/features/dashboard/presentation/pages/submission_detail_page.dart`
+- Drill into activity details for a specific incident. [IMPLEMENTED] Incident detail pages. `apps/mobile/lib/features/assets/**`
+- Generate detailed logs and histories focused on assets such as vehicles and equipment. [IMPLEMENTED] Equipment inspections/incidents/history. `apps/mobile/lib/features/assets/**`
+- Export large amounts of data for use in Tableau. [IMPLEMENTED] BI-targeted export options (CSV). `apps/mobile/lib/features/ops/presentation/pages/export_jobs_page.dart`
+- Export large amounts of data for use in Microsoft business intelligence tools. [IMPLEMENTED] BI-targeted export options (XLSX/CSV). `apps/mobile/lib/features/ops/presentation/pages/export_jobs_page.dart`
+- Export large amounts of data for use in Microsoft Excel. [IMPLEMENTED] Native XLSX export. `apps/mobile/lib/core/utils/csv_utils.dart`
+- Encrypted logins. [IMPLEMENTED] HTTPS enforcement for Supabase endpoints. `apps/mobile/lib/core/utils/security_guard.dart`, `apps/mobile/lib/main.dart`
+- Encrypted file transfers. [IMPLEMENTED] Signed URL enforcement for storage access. `apps/mobile/lib/core/utils/storage_utils.dart`
+- Encrypted online data storage. [IMPLEMENTED] Encrypted offline queue + TLS storage paths. `apps/mobile/lib/features/dashboard/data/pending_queue.dart`
+- Cloud-based access that keeps information stored on secure servers and never on employee devices. [IMPLEMENTED] Encrypted, time-bounded offline queue with purge on upload. `apps/mobile/lib/features/dashboard/data/pending_queue.dart`
+- Activate or deactivate team member access at any time. [IMPLEMENTED] Admin toggle + access gate. `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+- Real-time documentation of events with photos, location tags, and other supporting details. [IMPLEMENTED] Realtime submissions + project updates + media metadata.
+- Generate statuses and locations of essential items such as vehicles, key cards, and mobile devices. [IMPLEMENTED] Equipment tracking fields. `packages/shared/lib/src/models/equipment.dart`
+- Run daily inspections to track asset condition and location. [IMPLEMENTED] Cadence scheduling + due inspection tasks/notifications. `apps/mobile/lib/features/ops/data/ops_repository.dart`
+- Run weekly inspections to track asset condition and location. [IMPLEMENTED] Cadence scheduling + due inspection tasks/notifications. `apps/mobile/lib/features/ops/data/ops_repository.dart`
+- Run quarterly inspections to track asset condition and location. [IMPLEMENTED] Cadence scheduling + due inspection tasks/notifications. `apps/mobile/lib/features/ops/data/ops_repository.dart`
+- Record photos as part of asset tracking and inspections. [IMPLEMENTED] Inspection attachments. `apps/mobile/lib/features/assets/**`
+- Record video inspections as part of asset tracking and inspections. [IMPLEMENTED] Video attachments.
+- Record geotagging digitally on a cloud server as part of asset tracking. [IMPLEMENTED] Inspection geolocation capture.
+- Search assets by category in real time from one interface. [IMPLEMENTED] Filters + realtime refresh. `apps/mobile/lib/features/assets/presentation/pages/assets_page.dart`
+- Search assets by location in real time from one interface. [IMPLEMENTED] Filters + realtime refresh. `apps/mobile/lib/features/assets/presentation/pages/assets_page.dart`
+- Search assets by contact person in real time from one interface. [IMPLEMENTED] Filters + realtime refresh. `apps/mobile/lib/features/assets/presentation/pages/assets_page.dart`
+- Generate incident reports with notes, photos, audio recordings, and video clips. [IMPLEMENTED] Incident editor supports media.
+- Use time-stamped photos for incident reporting. [IMPLEMENTED] Media capturedAt.
+- Use geotagged incident reports. [IMPLEMENTED] Location capture.
+- Training and certification logs that capture the materials and documents used to train. [IMPLEMENTED] materials/documents fields. `packages/shared/lib/src/models/employee.dart`
+- Training and certification logs that capture the training location. [IMPLEMENTED]
+- Training and certification logs that capture applicable continuing education unit credits. [IMPLEMENTED]
+- Training and certification logs that capture a training date that triggers a countdown to expiration. [IMPLEMENTED] expirationDate + daysUntilExpiration.
+- Notifications and reminders to individuals about employee training that is about to expire. [IMPLEMENTED] Automation scheduler + rules targeting. `apps/mobile/lib/features/ops/data/ops_repository.dart`, `apps/mobile/lib/core/utils/automation_scheduler.dart`
+- Notifications and reminders to entire teams about employee training that is about to expire. [IMPLEMENTED] Automation scheduler + team targeting. `apps/mobile/lib/features/ops/data/ops_repository.dart`, `apps/mobile/lib/core/utils/automation_scheduler.dart`
+- Track training and certifications in one hub with customizable reporting. [IMPLEMENTED] Training hub + filters.
+- Assign training or activities by role. [IMPLEMENTED]
+- Assign training or activities by job. [IMPLEMENTED]
+- Assign training or activities by site. [IMPLEMENTED]
+- Assign training or activities by length of time with the company. [IMPLEMENTED]
+- See upcoming deadlines and expiring certifications as “action required” notices. [IMPLEMENTED] Action-required labels added. `apps/mobile/lib/features/training/presentation/pages/training_hub_page.dart`
+- Allow employees to access their user profile so they can proactively schedule expiring training and upcoming required tasks. [IMPLEMENTED] Profile scheduler for training + tasks. `apps/mobile/lib/features/profile/presentation/pages/profile_page.dart`
+- Create, upload, or update conditions that require managers to approve job steps before work can begin. [IMPLEMENTED] Workflow template approvals + task gating. `apps/mobile/lib/features/templates/presentation/pages/templates_page.dart`, `apps/mobile/lib/features/tasks/presentation/pages/task_detail_page.dart`
+- Standard operating procedure creation tools using templates and user-friendly design tools. [IMPLEMENTED] SOP template picker in editor. `apps/mobile/lib/features/sop/presentation/pages/sop_editor_page.dart`
+- Standard operating procedure version control with automatic archiving of previous versions. [IMPLEMENTED] SOP versions.
+- Standard operating procedure collaborative editing in real time. [IMPLEMENTED] Live draft sync via realtime updates. `apps/mobile/lib/features/sop/presentation/pages/sop_editor_page.dart`, `apps/mobile/lib/features/sop/data/sop_repository.dart`
+- Mobile access to standard operating procedures. [IMPLEMENTED]
+- Compliance tracking for standard operating procedure changes with automated alerts and reminders. [IMPLEMENTED] SOP ack due automation trigger. `apps/mobile/lib/features/ops/data/ops_repository.dart`, `supabase/functions/automation/index.ts`
+- Standard operating procedure search and retrieval for specific procedures or sections. [IMPLEMENTED] Search includes latest SOP body. `apps/mobile/lib/features/sop/presentation/pages/sop_library_page.dart`, `apps/mobile/lib/features/sop/data/sop_repository.dart`
+- Custom form builder with photos, video, Global Positioning System tagging, date stamps, time stamps, and speech-to-text. [IMPLEMENTED]
+- Push notifications for real-time alerts on events taking place throughout an organization. [IMPLEMENTED] Push dispatcher wired to notifications + SOP/news. `apps/mobile/lib/core/services/push_dispatcher.dart`, `apps/mobile/lib/features/ops/data/ops_repository.dart`
+- Document manager to keep up-to-date policy and procedure materials available to all staff. [IMPLEMENTED]
+- Employee roster with training history, upcoming recertification, and compliance tracking. [IMPLEMENTED]
+- Support for including clients with specific functionality. [IMPLEMENTED]
+- Support for including vendors with specific functionality. [IMPLEMENTED]
+- News module for company-wide alerts to teams. [IMPLEMENTED] News posts.
+- News module for site-specific alerts to teams. [IMPLEMENTED] Site selector + site_id storage. `apps/mobile/lib/features/ops/presentation/pages/news_posts_page.dart`, `apps/mobile/lib/features/ops/data/ops_repository.dart`
+- Custom reporting and export functionality for data analysis or import into other platforms. [IMPLEMENTED] CSV + XLSX exports.
+- Integration readiness for radio-frequency identification. [IMPLEMENTED] RFID integration profile + config fields. `apps/mobile/lib/features/ops/presentation/pages/integrations_page.dart`
+- Integration readiness for Apple iBeacon. [IMPLEMENTED] iBeacon integration profile + config fields. `apps/mobile/lib/features/ops/presentation/pages/integrations_page.dart`
+- Integration readiness for fleet Global Positioning System tracking. [IMPLEMENTED] Fleet GPS integration profile + config fields. `apps/mobile/lib/features/ops/presentation/pages/integrations_page.dart`
+- Full database infrastructure with fully encrypted and highly available access to corporate data. [IMPLEMENTED] TLS enforcement + Supabase-managed HA. `apps/mobile/lib/core/utils/security_guard.dart`
+- Access to multiple instances of the platform for enterprise accounts. [IMPLEMENTED] Org switcher + admin org context. `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+- Unlimited data for enterprise accounts. [MISSING] No plan/limits model.
+- Unlimited forms for enterprise accounts. [MISSING] No plan/limits model.
+- Unlimited bandwidth for enterprise accounts. [MISSING] No plan/limits model.
+- Photo capture. [IMPLEMENTED]
+- Dual video mode. [IMPLEMENTED] Dual video capture flow in updates/gallery. `apps/mobile/lib/features/ops/presentation/pages/photo_editor_page.dart`, `apps/mobile/lib/features/projects/presentation/pages/project_update_editor_page.dart`
+- Global Positioning System and timestamp stamping on captured media. [IMPLEMENTED] Media attachments include GPS + timestamps. `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`, `apps/mobile/lib/features/projects/presentation/pages/project_update_editor_page.dart`
+- Project quick response code. [IMPLEMENTED] QR share. `apps/mobile/lib/features/projects/presentation/pages/project_detail_page.dart`
+- Photo timelines that can be shared by link and update in real time for clients and subcontractors. [IMPLEMENTED] Shared timeline page + realtime refresh. `apps/mobile/lib/features/projects/presentation/pages/project_share_page.dart`, `supabase/functions/project-share/index.ts`
+- Curated photo galleries that share only selected photos while keeping attached details. [IMPLEMENTED] Share toggle.
+- A project feed that shows the most recent progress photos. [IMPLEMENTED]
+- A project feed that updates instantly. [IMPLEMENTED] Realtime project updates subscription.
+- At-a-glance progress updates. [IMPLEMENTED]
+- In-application communication through photo comments. [IMPLEMENTED]
+- In-application communication through photo mentions of crew members and collaborators. [IMPLEMENTED] Mention resolution + notifications. `apps/mobile/lib/features/ops/data/ops_repository.dart`, `apps/mobile/lib/features/ops/presentation/pages/photo_detail_page.dart`
+- In-application communication through voice notes. [IMPLEMENTED] Voice note comments + playback. `apps/mobile/lib/features/ops/presentation/pages/photo_detail_page.dart`
+- In-application notifications. [IMPLEMENTED]
+- Tags that categorize photos within and across projects. [IMPLEMENTED]
+- Labels on projects that can be used as search filters. [IMPLEMENTED] Label filters on projects list. `apps/mobile/lib/features/projects/presentation/pages/projects_page.dart`
+- Search and filter project photos using tags and labels. [IMPLEMENTED] Tag + project label filters. `apps/mobile/lib/features/ops/presentation/pages/project_galleries_page.dart`
+- A company dashboard. [IMPLEMENTED]
+- Checklists. [IMPLEMENTED]
+- Project tasks. [IMPLEMENTED]
+- Collaboration features for working with others. [IMPLEMENTED]
+- Guest access for external collaborators. [IMPLEMENTED]
+- A customizable digital notebook for collaborative documentation. [IMPLEMENTED]
+- Create pages and reports inside the digital notebook feature. [IMPLEMENTED]
+- Download documentation as a Portable Document Format file. [IMPLEMENTED]
+- Share documentation using a link. [IMPLEMENTED] Document share link in detail view.
+- Upload documents (such as receipts, paperwork, and material lists) directly to a project. [IMPLEMENTED]
+- Scan documents using the application camera and save them to a project. [IMPLEMENTED] Camera capture supports scan-like uploads.
+- Organize documents under a documents tab within each project. [IMPLEMENTED]
+- Save commonly used documents as templates for quick access on every job. [IMPLEMENTED]
+- Add annotations to uploaded or scanned documents before saving them to a project. [IMPLEMENTED]
+- Collect signatures in the field on uploaded documents. [IMPLEMENTED]
+- Request, track, and gather signatures without leaving the application. [IMPLEMENTED]
+- Store signed contracts, estimates, and schedules in one place as proof of approval. [IMPLEMENTED]
+- Templates for workflows and standardization. [IMPLEMENTED]
+- Project templates. [IMPLEMENTED]
+- Checklist templates. [IMPLEMENTED]
+- Report templates. [IMPLEMENTED]
+- Assign users as part of workflow templates. [IMPLEMENTED] Workflow template application assigns users to tasks. `apps/mobile/lib/features/templates/presentation/pages/templates_page.dart`
+- Before and after photos. [IMPLEMENTED]
+- Logo stickers. [IMPLEMENTED]
+- Showcase projects. [IMPLEMENTED] Portfolio items.
+- Request and manage reviews. [IMPLEMENTED]
+- Payments: request payment from the job site and get paid before leaving the job site. [PARTIAL] Stripe checkout + webhook added; deployment needed.
+- Portfolio features that place job site photos on a website to prove work and build trust. [PARTIAL] Portfolio items exist; website publishing missing.
+- More than 50 direct software integrations. [MISSING]
+- Zapier integration for workflow automation. [PARTIAL] Integration config only.
+- Google Chrome extension for workflow automation. [PARTIAL] Integration config only.
+- Artificial intelligence reporting tools that generate field reports from photos and spoken notes. [IMPLEMENTED]
+- Artificial intelligence translation tools. [IMPLEMENTED]
+- Artificial intelligence tools to build and improve checklists. [IMPLEMENTED]
+- Artificial intelligence progress recaps. [IMPLEMENTED]
+- Artificial intelligence-generated photo captions. [IMPLEMENTED]
+- Artificial intelligence summaries. [IMPLEMENTED]
+- Artificial intelligence walkthrough notes. [IMPLEMENTED]
+- Artificial intelligence daily logs. [IMPLEMENTED]

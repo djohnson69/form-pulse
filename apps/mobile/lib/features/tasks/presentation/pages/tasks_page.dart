@@ -18,6 +18,34 @@ class _TasksPageState extends ConsumerState<TasksPage> {
   TaskStatus? _statusFilter;
   bool _mineOnly = false;
   bool _sendingReminders = false;
+  RealtimeChannel? _tasksChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToTaskChanges();
+  }
+
+  @override
+  void dispose() {
+    _tasksChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToTaskChanges() {
+    final client = Supabase.instance.client;
+    _tasksChannel = client.channel('tasks-changes')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'tasks',
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(tasksProvider);
+        },
+      )
+      ..subscribe();
+  }
 
   @override
   Widget build(BuildContext context) {

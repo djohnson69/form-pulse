@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared/shared.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/projects_provider.dart';
 import '../../../documents/presentation/pages/documents_page.dart';
+import 'project_share_page.dart';
 import 'project_update_editor_page.dart';
 
 class ProjectDetailPage extends ConsumerStatefulWidget {
@@ -22,11 +26,39 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
   late Project _project;
   String? _selectedTag;
   bool _showSharedOnly = false;
+  RealtimeChannel? _updatesChannel;
 
   @override
   void initState() {
     super.initState();
     _project = widget.project;
+    _subscribeToUpdates();
+  }
+
+  @override
+  void dispose() {
+    _updatesChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToUpdates() {
+    final client = Supabase.instance.client;
+    _updatesChannel = client.channel('project-updates-${_project.id}')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'project_updates',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'project_id',
+          value: _project.id,
+        ),
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(projectUpdatesProvider(_project.id));
+        },
+      )
+      ..subscribe();
   }
 
   @override
@@ -40,6 +72,11 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
             tooltip: 'Share gallery',
             icon: const Icon(Icons.share),
             onPressed: _shareProject,
+          ),
+          IconButton(
+            tooltip: 'Show QR code',
+            icon: const Icon(Icons.qr_code_2),
+            onPressed: _showShareQr,
           ),
         ],
       ),
@@ -115,6 +152,12 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
                   project: _project,
                   updates: grouped.mainUpdates,
                 ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _openSharedTimeline,
+                  icon: const Icon(Icons.public),
+                  label: const Text('Open shared timeline'),
+                ),
                 const SizedBox(height: 16),
                 if (tags.isNotEmpty) _buildTagFilters(tags),
                 if (tags.isNotEmpty) const SizedBox(height: 12),
@@ -181,6 +224,73 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
       ..writeln('Project: ${updated.name}')
       ..writeln('Client gallery: $link');
     await SharePlus.instance.share(ShareParams(text: message.toString()));
+  }
+
+  Future<void> _openSharedTimeline() async {
+    final repo = ref.read(projectsRepositoryProvider);
+    final updated = await repo.ensureShareToken(_project);
+    if (!mounted) return;
+    setState(() => _project = updated);
+    final token = updated.shareToken;
+    if (token == null || token.isEmpty) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProjectSharePage(shareToken: token),
+      ),
+    );
+  }
+
+  Future<void> _showShareQr() async {
+    final repo = ref.read(projectsRepositoryProvider);
+    final updated = await repo.ensureShareToken(_project);
+    if (!mounted) return;
+    setState(() => _project = updated);
+    final token = updated.shareToken ?? '';
+    final link = '$_shareBaseUrl/$token';
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Client gallery link',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16),
+              QrImageView(
+                data: link,
+                size: 220,
+                backgroundColor: Colors.white,
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                link,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: link));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link copied.')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.copy),
+                label: const Text('Copy link'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   List<ProjectUpdate> _applyUpdateFilters(List<ProjectUpdate> updates) {

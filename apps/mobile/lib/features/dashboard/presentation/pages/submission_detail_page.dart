@@ -6,8 +6,13 @@ import 'package:shared/shared.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/ai/ai_assist_sheet.dart';
 import '../../../../core/utils/csv_utils.dart';
+import '../../../../core/utils/submission_utils.dart';
+import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart';
 import '../../data/dashboard_provider.dart';
+import 'reports_page.dart';
 
 class SubmissionDetailPage extends ConsumerStatefulWidget {
   const SubmissionDetailPage({required this.submission, super.key});
@@ -23,6 +28,7 @@ class _SubmissionDetailPageState
     extends ConsumerState<SubmissionDetailPage> {
   late FormSubmission _submission;
   bool _updatingStatus = false;
+  String? _aiSummary;
 
   @override
   void initState() {
@@ -37,26 +43,42 @@ class _SubmissionDetailPageState
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               OutlinedButton.icon(
                 onPressed: () => _exportCsv(),
                 icon: const Icon(Icons.file_download),
                 label: const Text('CSV'),
               ),
-              const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: () => _exportCsv(label: 'Excel'),
                 icon: const Icon(Icons.grid_on),
                 label: const Text('Excel'),
               ),
-              const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: () => _share(context),
                 icon: const Icon(Icons.share),
                 label: const Text('Share'),
               ),
+              OutlinedButton.icon(
+                onPressed: _openAiSummary,
+                icon: const Icon(Icons.auto_awesome),
+                label: const Text('AI'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _openSubmitterActivity,
+                icon: const Icon(Icons.person_search),
+                label: const Text('Submitter activity'),
+              ),
+              if (_submission.location != null)
+                OutlinedButton.icon(
+                  onPressed: _openLocationActivity,
+                  icon: const Icon(Icons.location_searching),
+                  label: const Text('Location activity'),
+                ),
             ],
           ),
           const SizedBox(height: 8),
@@ -90,6 +112,8 @@ class _SubmissionDetailPageState
             ),
           ),
           const SizedBox(height: 12),
+          _SubmissionMetaCard(submission: _submission),
+          const SizedBox(height: 12),
           Text('Fields', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           ..._submission.data.entries.map(
@@ -104,6 +128,17 @@ class _SubmissionDetailPageState
             Text('Attachments', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             _AttachmentCarousel(attachments: _submission.attachments!),
+            const SizedBox(height: 12),
+          ],
+          if (_aiSummary != null && _aiSummary!.isNotEmpty) ...[
+            Text('AI Summary', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(_aiSummary!),
+              ),
+            ),
             const SizedBox(height: 12),
           ],
           if (_submission.location != null)
@@ -156,6 +191,123 @@ class _SubmissionDetailPageState
       )
       ..writeln('Status: ${_submission.status.displayName}');
     await SharePlus.instance.share(ShareParams(text: summary.toString()));
+  }
+
+  Future<void> _openAiSummary() async {
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'AI Summary',
+        initialText: _buildAiInput(_submission),
+        initialType: 'summary',
+        allowImage: false,
+        allowAudio: false,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    setState(() => _aiSummary = output);
+    await _recordAiUsage(result);
+  }
+
+  Future<void> _openSubmitterActivity() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReportsPage(
+          initialSubmittedBy: _submission.submittedBy,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openLocationActivity() async {
+    final location = _submission.location;
+    if (location == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReportsPage(
+          initialHasLocation: true,
+          initialLat: location.latitude,
+          initialLng: location.longitude,
+          initialRadiusKm: 1.0,
+        ),
+      ),
+    );
+  }
+
+  String _buildAiInput(FormSubmission submission) {
+    final buffer = StringBuffer()
+      ..writeln('Form: ${submission.formTitle}')
+      ..writeln(
+        'Submitted by: ${submission.submittedByName ?? submission.submittedBy}',
+      )
+      ..writeln('Status: ${submission.status.displayName}')
+      ..writeln('Submitted at: ${submission.submittedAt.toLocal()}')
+      ..writeln('Fields:');
+    submission.data.forEach((key, value) {
+      buffer.writeln('- $key: $value');
+    });
+    if (submission.location != null) {
+      buffer.writeln(
+        'Location: ${submission.location!.latitude}, ${submission.location!.longitude}',
+      );
+    }
+    if (submission.attachments?.isNotEmpty ?? false) {
+      buffer.writeln(
+        'Attachments: ${submission.attachments!.length} items',
+      );
+    }
+    return buffer.toString();
+  }
+
+  Future<void> _recordAiUsage(AiAssistResult result) async {
+    try {
+      final attachments = <AttachmentDraft>[];
+      if (result.imageBytes != null) {
+        attachments.add(
+          AttachmentDraft(
+            type: 'photo',
+            bytes: result.imageBytes!,
+            filename: result.imageName ?? 'ai-image',
+            mimeType: result.imageMimeType ?? 'image/jpeg',
+          ),
+        );
+      }
+      if (result.audioBytes != null) {
+        attachments.add(
+          AttachmentDraft(
+            type: 'audio',
+            bytes: result.audioBytes!,
+            filename: result.audioName ?? 'ai-audio',
+            mimeType: result.audioMimeType ?? 'audio/m4a',
+          ),
+        );
+      }
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            inputMedia: attachments,
+            metadata: {
+              'source': 'submission_detail',
+              'submissionId': _submission.id,
+              'formId': _submission.formId,
+              if (result.targetLanguage != null &&
+                  result.targetLanguage!.isNotEmpty)
+                'targetLanguage': result.targetLanguage,
+              if (result.checklistCount != null)
+                'checklistCount': result.checklistCount,
+            },
+          );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI log failed: $e')),
+      );
+    }
   }
 
   Future<void> _updateStatus(SubmissionStatus status) async {
@@ -212,6 +364,55 @@ class _SubmissionDetailPageState
     );
     controller.dispose();
     return result?.isNotEmpty == true ? result : null;
+  }
+}
+
+class _SubmissionMetaCard extends StatelessWidget {
+  const _SubmissionMetaCard({required this.submission});
+
+  final FormSubmission submission;
+
+  @override
+  Widget build(BuildContext context) {
+    final inputTypes = resolveSubmissionInputTypes(submission)
+        .map(submissionInputTypeLabel)
+        .toList();
+    final accessLevel =
+        submissionAccessLevelLabel(resolveSubmissionAccessLevel(submission));
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Record details',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ...inputTypes.map(
+                  (label) => Chip(
+                    label: Text(label),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.lock_outline, size: 16),
+                  label: Text(accessLevel),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

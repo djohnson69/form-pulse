@@ -502,6 +502,16 @@ class SupabaseTrainingRepository implements TrainingRepositoryBase {
         'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
+      await _client.functions.invoke(
+        'push',
+        body: {
+          'orgId': orgId,
+          'userId': userId,
+          'title': title,
+          'body': body,
+          'data': {'type': type},
+        },
+      );
     } catch (e, st) {
       developer.log(
         'Supabase createNotification failed',

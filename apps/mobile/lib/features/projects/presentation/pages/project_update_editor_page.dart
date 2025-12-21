@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -11,7 +12,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../dashboard/presentation/pages/photo_annotator_page.dart';
+import '../../../../core/ai/ai_assist_sheet.dart';
 import '../../../../core/utils/file_bytes_loader.dart';
+import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart';
 import '../../data/projects_provider.dart';
 
 class ProjectUpdateEditorPage extends ConsumerStatefulWidget {
@@ -28,6 +32,7 @@ class _ProjectUpdateEditorPageState
     extends ConsumerState<ProjectUpdateEditorPage> {
   static const _bucketName =
       String.fromEnvironment('SUPABASE_BUCKET', defaultValue: 'formbridge-attachments');
+  static const int _maxAiMediaBytes = 8 * 1024 * 1024;
 
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
@@ -96,6 +101,15 @@ class _ProjectUpdateEditorPageState
                 decoration: const InputDecoration(
                   labelText: 'Details',
                   border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: _openAiAssist,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('AI Assist'),
                 ),
               ),
               const SizedBox(height: 12),
@@ -168,6 +182,11 @@ class _ProjectUpdateEditorPageState
               label: const Text('Record'),
             ),
             OutlinedButton.icon(
+              onPressed: _pickDualVideo,
+              icon: const Icon(Icons.switch_video),
+              label: const Text('Dual video'),
+            ),
+            OutlinedButton.icon(
               onPressed: () => _pickVideo(ImageSource.gallery),
               icon: const Icon(Icons.video_library),
               label: const Text('Library'),
@@ -195,6 +214,115 @@ class _ProjectUpdateEditorPageState
       _attachments.clear();
       _recording = false;
     });
+  }
+
+  Future<void> _openAiAssist() async {
+    final latestAudio = _latestAudioAttachment();
+    Uint8List? audioBytes;
+    String? audioName;
+    String? audioMime;
+    if (latestAudio != null) {
+      audioName = latestAudio.filename ?? 'voice-note';
+      audioMime = latestAudio.mimeType ?? 'audio/m4a';
+      if (latestAudio.bytes != null) {
+        audioBytes = latestAudio.bytes;
+      } else if (latestAudio.path != null) {
+        audioBytes = await loadFileBytes(latestAudio.path!);
+      }
+      if (!mounted) return;
+      if (audioBytes != null && audioBytes.length > _maxAiMediaBytes) {
+        audioBytes = null;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Audio file is too large.')),
+        );
+      }
+    }
+    if (!mounted) return;
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'AI Assist',
+        initialText: _bodyController.text.trim(),
+        allowImage: true,
+        initialAudioBytes: audioBytes,
+        initialAudioName: audioName,
+        initialAudioMimeType: audioMime,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    setState(() {
+      if (result.type == 'photo_caption') {
+        if (_titleController.text.trim().isEmpty) {
+          _titleController.text = output;
+        }
+        if (_bodyController.text.trim().isEmpty) {
+          _bodyController.text = output;
+        }
+      } else {
+        _bodyController.text = output;
+      }
+    });
+    await _recordAiUsage(result);
+  }
+
+  Future<void> _recordAiUsage(AiAssistResult result) async {
+    try {
+      final attachments = <AttachmentDraft>[];
+      if (result.imageBytes != null) {
+        attachments.add(
+          AttachmentDraft(
+            type: 'photo',
+            bytes: result.imageBytes!,
+            filename: result.imageName ?? 'ai-image',
+            mimeType: result.imageMimeType ?? 'image/jpeg',
+          ),
+        );
+      }
+      if (result.audioBytes != null) {
+        attachments.add(
+          AttachmentDraft(
+            type: 'audio',
+            bytes: result.audioBytes!,
+            filename: result.audioName ?? 'ai-audio',
+            mimeType: result.audioMimeType ?? 'audio/m4a',
+          ),
+        );
+      }
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            inputMedia: attachments,
+            metadata: {
+              'source': 'project_update',
+              'projectId': widget.project.id,
+              'updateType': _type,
+              'shareWithClient': _shareWithClient,
+              if (result.targetLanguage != null &&
+                  result.targetLanguage!.isNotEmpty)
+                'targetLanguage': result.targetLanguage,
+              if (result.checklistCount != null)
+                'checklistCount': result.checklistCount,
+            },
+          );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI log failed: $e')),
+      );
+    }
+  }
+
+  _UpdateAttachment? _latestAudioAttachment() {
+    for (var i = _attachments.length - 1; i >= 0; i--) {
+      final attachment = _attachments[i];
+      if (attachment.type == 'audio') return attachment;
+    }
+    return null;
   }
 
   Widget _buildAttachmentList() {
@@ -263,6 +391,44 @@ class _ProjectUpdateEditorPageState
       capturedAt: DateTime.now(),
     );
     setState(() => _attachments.add(item));
+  }
+
+  Future<void> _pickDualVideo() async {
+    final pairId = const Uuid().v4();
+    final first = await _picker.pickVideo(source: ImageSource.camera);
+    if (first == null) return;
+    final firstSize = await first.length();
+    final firstItem = _UpdateAttachment(
+      id: const Uuid().v4(),
+      type: 'video',
+      label: 'Dual video (1/2)',
+      path: first.path,
+      filename: first.name,
+      fileSize: firstSize,
+      mimeType: _guessMimeType(first.path) ?? 'video/mp4',
+      capturedAt: DateTime.now(),
+      metadata: {'dualMode': true, 'pairId': pairId, 'slot': 'primary'},
+    );
+    setState(() => _attachments.add(firstItem));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Record second angle.')),
+    );
+    final second = await _picker.pickVideo(source: ImageSource.camera);
+    if (second == null) return;
+    final secondSize = await second.length();
+    final secondItem = _UpdateAttachment(
+      id: const Uuid().v4(),
+      type: 'video',
+      label: 'Dual video (2/2)',
+      path: second.path,
+      filename: second.name,
+      fileSize: secondSize,
+      mimeType: _guessMimeType(second.path) ?? 'video/mp4',
+      capturedAt: DateTime.now(),
+      metadata: {'dualMode': true, 'pairId': pairId, 'slot': 'secondary'},
+    );
+    setState(() => _attachments.add(secondItem));
   }
 
   Future<void> _toggleRecording() async {
@@ -375,6 +541,7 @@ class _ProjectUpdateEditorPageState
     if (items.isEmpty) return const [];
     final supabase = Supabase.instance.client;
     final orgId = await _getOrgId(supabase);
+    final location = await _captureLocation();
     final results = <MediaAttachment>[];
     for (final item in items) {
       var bytes = item.bytes;
@@ -409,6 +576,7 @@ class _ProjectUpdateEditorPageState
           fileSize: item.fileSize ?? bytes.length,
           mimeType: item.mimeType,
           capturedAt: item.capturedAt,
+          location: location,
           metadata: {
             'storagePath': storagePath,
             'bucket': _bucketName,
@@ -418,6 +586,33 @@ class _ProjectUpdateEditorPageState
       );
     }
     return results;
+  }
+
+  Future<LocationData?> _captureLocation() async {
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null;
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      return LocationData(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        altitude: position.altitude,
+        accuracy: position.accuracy,
+        timestamp: position.timestamp,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> _getOrgId(SupabaseClient client) async {

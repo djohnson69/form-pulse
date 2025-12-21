@@ -55,12 +55,21 @@ final webhookEndpointsProvider =
   return ref.read(opsRepositoryProvider).fetchWebhookEndpoints();
 });
 
+final integrationsProvider =
+    FutureProvider.autoDispose<List<IntegrationProfile>>((ref) {
+  return ref.read(opsRepositoryProvider).fetchIntegrations();
+});
+
 final exportJobsProvider = FutureProvider.autoDispose<List<ExportJob>>((ref) {
   return ref.read(opsRepositoryProvider).fetchExportJobs();
 });
 
 final aiJobsProvider = FutureProvider.autoDispose<List<AiJob>>((ref) {
   return ref.read(opsRepositoryProvider).fetchAiJobs();
+});
+
+final dailyLogsProvider = FutureProvider.autoDispose<List<DailyLog>>((ref) {
+  return ref.read(opsRepositoryProvider).fetchDailyLogs();
 });
 
 final guestInvitesProvider = FutureProvider.autoDispose<List<GuestInvite>>((ref) {

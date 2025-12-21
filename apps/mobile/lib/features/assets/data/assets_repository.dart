@@ -182,6 +182,10 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
           .select()
           .single();
       final inspection = _mapInspection(Map<String, dynamic>.from(res as Map));
+      await _updateInspectionSchedule(
+        equipmentId: equipmentId,
+        inspectedAt: inspection.inspectedAt,
+      );
       return _signInspectionAttachments(inspection);
     } on PostgrestException catch (e, st) {
       developer.log(
@@ -346,9 +350,15 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
               Map<String, dynamic>.from(row['gps_location'] as Map),
             )
           : null,
+      contactName: row['contact_name'] as String?,
+      contactEmail: row['contact_email'] as String?,
+      contactPhone: row['contact_phone'] as String?,
       rfidTag: row['rfid_tag'] as String?,
       lastMaintenanceDate: _parseNullableDate(row['last_maintenance_date']),
       nextMaintenanceDate: _parseNullableDate(row['next_maintenance_date']),
+      inspectionCadence: row['inspection_cadence'] as String?,
+      lastInspectionAt: _parseNullableDate(row['last_inspection_at']),
+      nextInspectionAt: _parseNullableDate(row['next_inspection_at']),
       isActive: row['is_active'] as bool? ?? true,
       companyId: row['company_id'] as String?,
       createdAt: _parseNullableDate(row['created_at']),
@@ -515,13 +525,65 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
       'assigned_to': equipment.assignedTo,
       'current_location': equipment.currentLocation,
       'gps_location': equipment.gpsLocation?.toJson(),
+      'contact_name': equipment.contactName,
+      'contact_email': equipment.contactEmail,
+      'contact_phone': equipment.contactPhone,
       'rfid_tag': equipment.rfidTag,
       'last_maintenance_date': equipment.lastMaintenanceDate?.toIso8601String(),
       'next_maintenance_date': equipment.nextMaintenanceDate?.toIso8601String(),
+      'inspection_cadence': equipment.inspectionCadence,
+      'last_inspection_at': equipment.lastInspectionAt?.toIso8601String(),
+      'next_inspection_at': equipment.nextInspectionAt?.toIso8601String(),
       'is_active': equipment.isActive,
       'metadata': equipment.metadata ?? const {},
       'updated_at': DateTime.now().toIso8601String(),
     };
+  }
+
+  Future<void> _updateInspectionSchedule({
+    required String equipmentId,
+    required DateTime inspectedAt,
+  }) async {
+    try {
+      final row = await _client
+          .from('equipment')
+          .select('inspection_cadence')
+          .eq('id', equipmentId)
+          .maybeSingle();
+      final cadence = row?['inspection_cadence']?.toString();
+      if (cadence == null || cadence.trim().isEmpty) {
+        await _client.from('equipment').update({
+          'last_inspection_at': inspectedAt.toIso8601String(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', equipmentId);
+        return;
+      }
+      final nextAt = _computeNextInspection(cadence, inspectedAt);
+      await _client.from('equipment').update({
+        'last_inspection_at': inspectedAt.toIso8601String(),
+        'next_inspection_at': nextAt?.toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', equipmentId);
+    } catch (e, st) {
+      developer.log(
+        'Failed to update inspection schedule',
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
+  DateTime? _computeNextInspection(String cadence, DateTime inspectedAt) {
+    switch (cadence) {
+      case 'daily':
+        return inspectedAt.add(const Duration(days: 1));
+      case 'weekly':
+        return inspectedAt.add(const Duration(days: 7));
+      case 'quarterly':
+        return inspectedAt.add(const Duration(days: 90));
+      default:
+        return null;
+    }
   }
 
   DateTime _parseDate(dynamic value) {

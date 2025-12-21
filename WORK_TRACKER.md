@@ -1,0 +1,284 @@
+# Work Tracker
+
+Last updated: 2025-12-21 01:52 -0800
+
+## Quick Resume
+- Read this file first.
+- Run `git status -sb` to see uncommitted work.
+- Apply pending Supabase SQL before testing.
+
+## Supabase State (non-secret)
+- Project ref: `xpcibptzncfmifaneoop`
+- Project URL: `https://xpcibptzncfmifaneoop.supabase.co`
+- Pooler host: `aws-0-us-west-2.pooler.supabase.com`
+- Direct host: `db.xpcibptzncfmifaneoop.supabase.co`
+- Database: `postgres`
+- Secrets are NOT stored in repo. Use env vars:
+  - `SUPABASE_SERVICE_ROLE_KEY` (service key)
+  - `SUPABASE_DB_PASSWORD` (db password)
+  - `SUPABASE_URL` (project URL)
+- AI secrets live in Supabase Edge Function secrets (see below).
+
+## AI Edge Function Setup
+- Edge Function: `supabase/functions/ai/index.ts`
+- Store OpenAI secrets in Supabase (not the repo):
+  - `OPENAI_API_KEY`
+  - optional: `OPENAI_MODEL`, `OPENAI_BASE_URL`, `OPENAI_ORG`
+  - optional: `OPENAI_TRANSCRIBE_MODEL` (defaults to `whisper-1`)
+- The app calls the Edge Function via:
+  - `apps/mobile/lib/core/ai/ai_function_service.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/ai_tools_page.dart`
+
+## Pending Supabase Updates
+- `supabase/schema.sql` is the full reference for new environments.
+- `supabase/complete_setup.sql` now includes SOP + templates + asset contact fields.
+- Deploy new Edge Function: `supabase/functions/project-share/index.ts`
+- Deploy updated Edge Function: `supabase/functions/automation/index.ts` (inspection_due)
+
+## Work Completed (this block)
+- SOP schema + CRUD + approvals + acknowledgements:
+  - `apps/mobile/lib/features/sop/**`
+  - `packages/shared/lib/src/models/sop_document.dart`
+- Templates schema + CRUD (workflow/checklist/project/report):
+  - `apps/mobile/lib/features/templates/**`
+  - `packages/shared/lib/src/models/app_template.dart`
+- Ops Hub navigation updated:
+  - `apps/mobile/lib/features/ops/presentation/pages/ops_hub_page.dart`
+- Form builder field types expanded:
+  - `apps/mobile/lib/features/dashboard/presentation/pages/create_form_page.dart`
+- Asset contact info (search + fields):
+  - `packages/shared/lib/src/models/equipment.dart`
+  - `apps/mobile/lib/features/assets/**`
+- Photo tag filtering:
+  - `apps/mobile/lib/features/ops/presentation/pages/project_galleries_page.dart`
+- AI job generation (text + optional image), new AI service methods:
+  - `apps/mobile/lib/features/ops/presentation/pages/ai_tools_page.dart`
+  - `packages/ai_service/lib/src/ai_service_base.dart`
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+- AI Edge Function wiring:
+  - `supabase/functions/ai/index.ts`
+  - `apps/mobile/lib/core/ai/ai_function_service.dart`
+  - `apps/mobile/lib/core/ai/ai_providers.dart`
+- Admin overview AI usage insights:
+  - `apps/mobile/lib/features/admin/data/admin_repository.dart`
+  - `apps/mobile/lib/features/admin/data/admin_models.dart`
+  - `apps/mobile/lib/features/admin/data/admin_providers.dart`
+  - `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+- User-facing AI assist (submission summaries + project updates):
+  - `apps/mobile/lib/core/ai/ai_assist_sheet.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/submission_detail_page.dart`
+  - `apps/mobile/lib/features/projects/presentation/pages/project_update_editor_page.dart`
+- User-facing AI assist (forms, inspections, incidents):
+  - `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+  - `apps/mobile/lib/features/assets/presentation/pages/inspection_editor_page.dart`
+  - `apps/mobile/lib/features/assets/presentation/pages/incident_editor_page.dart`
+- AI Tools exposed to all dashboard roles:
+  - `apps/mobile/lib/features/dashboard/presentation/pages/dashboard_page.dart`
+- AI audio transcription + daily logs:
+  - `supabase/functions/ai/index.ts`
+  - `apps/mobile/lib/core/ai/ai_function_service.dart`
+  - `apps/mobile/lib/core/ai/ai_assist_sheet.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/ai_tools_page.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/daily_logs_page.dart`
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `apps/mobile/lib/features/ops/data/ops_provider.dart`
+  - `packages/shared/lib/src/models/daily_log.dart`
+  - `supabase/migrations/20251220203000_add_daily_logs.sql`
+- AI spoken-note pickup + media size guards:
+  - `apps/mobile/lib/core/ai/ai_assist_sheet.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/ai_tools_page.dart`
+  - `apps/mobile/lib/features/assets/presentation/pages/inspection_editor_page.dart`
+  - `apps/mobile/lib/features/assets/presentation/pages/incident_editor_page.dart`
+  - `apps/mobile/lib/features/projects/presentation/pages/project_update_editor_page.dart`
+- AI assist expanded to notebook, tasks, training, messaging, and checklist templates:
+  - `apps/mobile/lib/features/ops/presentation/pages/notebook_editor_page.dart`
+  - `apps/mobile/lib/features/tasks/presentation/pages/task_editor_page.dart`
+  - `apps/mobile/lib/features/training/presentation/pages/training_editor_page.dart`
+  - `apps/mobile/lib/features/partners/presentation/pages/thread_detail_page.dart`
+  - `apps/mobile/lib/features/templates/presentation/pages/template_editor_page.dart`
+- AI checklist parser + tests:
+  - `apps/mobile/lib/core/ai/ai_parsers.dart`
+  - `apps/mobile/test/ai_parsers_test.dart`
+- Realtime refresh for tasks and training:
+  - `apps/mobile/lib/features/tasks/presentation/pages/tasks_page.dart`
+  - `apps/mobile/lib/features/training/presentation/pages/training_hub_page.dart`
+- Realtime refresh for messages, notebook pages, and daily logs:
+  - `apps/mobile/lib/features/partners/presentation/pages/messages_page.dart`
+  - `apps/mobile/lib/features/partners/presentation/pages/thread_detail_page.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/notebook_pages_page.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/daily_logs_page.dart`
+- Realtime refresh for AI jobs:
+  - `apps/mobile/lib/features/ops/presentation/pages/ai_tools_page.dart`
+- Automation sweep + multi-target notifications:
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/notification_rules_page.dart`
+- SOP compliance alerts + audit logging:
+  - `apps/mobile/lib/features/sop/data/sop_repository.dart`
+- CSV exports + downloadable export jobs:
+  - `apps/mobile/lib/core/utils/csv_utils.dart`
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/export_jobs_page.dart`
+- Project share QR codes:
+  - `apps/mobile/lib/features/projects/presentation/pages/project_detail_page.dart`
+  - `apps/mobile/pubspec.yaml`
+- Before/after photo tags + logo sticker tags:
+  - `apps/mobile/lib/features/ops/presentation/pages/photo_editor_page.dart`
+- Submission role filters (client/vendor/etc.):
+  - `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+- Admin AI usage alerts + avg metrics:
+  - `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+- Automation scheduler (app-triggered reminders):
+  - `apps/mobile/lib/core/utils/automation_scheduler.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/dashboard_page.dart`
+  - `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+- Submission metadata + reporting filters:
+  - `apps/mobile/lib/core/utils/submission_utils.dart`
+  - `apps/mobile/lib/core/utils/csv_utils.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/submission_detail_page.dart`
+- Photo tags UI polish (before/after/logo sticker):
+  - `apps/mobile/lib/features/ops/presentation/pages/project_galleries_page.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/photo_detail_page.dart`
+- Admin submissions role filter + vendor submission view polish:
+  - `apps/mobile/lib/features/admin/data/admin_models.dart`
+  - `apps/mobile/lib/features/admin/data/admin_repository.dart`
+  - `apps/mobile/lib/features/admin/data/admin_providers.dart`
+  - `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+- AI job background processing:
+  - `apps/mobile/lib/core/utils/ai_job_scheduler.dart`
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/dashboard_page.dart`
+  - `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+- Server-side automation runner (cron-ready):
+  - `supabase/functions/automation/index.ts`
+- Realtime notifications refresh:
+  - `apps/mobile/lib/features/dashboard/presentation/pages/dashboard_page.dart`
+- Payments (Stripe checkout + webhook):
+  - `supabase/functions/payments/index.ts`
+  - `supabase/functions/stripe-webhook/index.ts`
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/payment_requests_page.dart`
+- Integrations catalog + config storage:
+  - `supabase/migrations/20251220225000_add_integrations.sql`
+  - `supabase/schema.sql`
+  - `packages/shared/lib/src/models/integration_profile.dart`
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `apps/mobile/lib/features/ops/data/ops_provider.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/integrations_page.dart`
+- Master feature audit (status matrix):
+  - `FEATURE_AUDIT.md`
+- Realtime updates for submissions, documents, projects, and assets:
+  - `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+  - `apps/mobile/lib/features/documents/presentation/pages/documents_page.dart`
+  - `apps/mobile/lib/features/projects/presentation/pages/project_detail_page.dart`
+  - `apps/mobile/lib/features/assets/presentation/pages/assets_page.dart`
+- Provider metadata + filters for submissions:
+  - `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/reports_page.dart`
+  - `apps/mobile/lib/features/dashboard/data/dashboard_repository.dart`
+  - `apps/mobile/lib/core/utils/submission_utils.dart`
+- User activation controls + access gate:
+  - `apps/mobile/lib/features/admin/presentation/pages/admin_dashboard_page.dart`
+  - `apps/mobile/lib/features/admin/data/admin_repository.dart`
+  - `apps/mobile/lib/features/admin/data/admin_models.dart`
+  - `apps/mobile/lib/app/app_navigator.dart`
+  - `apps/mobile/lib/features/auth/presentation/pages/account_disabled_page.dart`
+  - `supabase/migrations/20251220231100_add_profile_admin_policy.sql`
+- Inspection cadence scheduling for assets:
+  - `packages/shared/lib/src/models/equipment.dart`
+  - `apps/mobile/lib/features/assets/data/assets_repository.dart`
+  - `apps/mobile/lib/features/assets/presentation/pages/asset_editor_page.dart`
+  - `apps/mobile/lib/features/assets/presentation/pages/asset_detail_page.dart`
+  - `supabase/migrations/20251220231000_add_profile_status_device_tokens_inspection_cadence.sql`
+- XLSX exports (native Dart):
+  - `apps/mobile/lib/core/utils/csv_utils.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/export_jobs_page.dart`
+  - `apps/mobile/pubspec.yaml`
+- Push notification scaffolding:
+  - `apps/mobile/lib/core/services/push_notifications_service.dart`
+  - `apps/mobile/lib/features/tasks/data/tasks_repository.dart`
+  - `apps/mobile/lib/features/training/data/training_repository.dart`
+  - `supabase/functions/push/index.ts`
+- Submission auto-reporting + automation triggers:
+  - `apps/mobile/lib/features/dashboard/data/dashboard_repository.dart`
+  - `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart`
+- SOP realtime drafts + template picker + search body index:
+  - `apps/mobile/lib/features/sop/presentation/pages/sop_editor_page.dart`
+  - `apps/mobile/lib/features/sop/data/sop_repository.dart`
+  - `apps/mobile/lib/features/sop/presentation/pages/sop_library_page.dart`
+- SOP acknowledgement automation trigger:
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `supabase/functions/automation/index.ts`
+  - `apps/mobile/lib/features/ops/presentation/pages/notification_rules_page.dart`
+- Shared project timeline (link + realtime):
+  - `supabase/functions/project-share/index.ts`
+  - `apps/mobile/lib/features/projects/presentation/pages/project_share_page.dart`
+  - `apps/mobile/lib/app/app.dart`
+  - `apps/mobile/lib/features/projects/presentation/pages/project_detail_page.dart`
+- Photo mentions + voice note comments:
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `apps/mobile/lib/features/ops/presentation/pages/photo_detail_page.dart`
+- Role-scoped form sharing + filtering:
+  - `apps/mobile/lib/features/dashboard/presentation/pages/create_form_page.dart`
+  - `apps/mobile/lib/features/dashboard/data/dashboard_repository.dart`
+- Inspection cadence enforcement tasks:
+  - `apps/mobile/lib/features/ops/data/ops_repository.dart`
+  - `supabase/functions/automation/index.ts`
+- Shared timeline metadata (timestamps/location):
+  - `apps/mobile/lib/features/projects/presentation/pages/project_share_page.dart`
+- Profile scheduler for training + tasks:
+  - `apps/mobile/lib/features/profile/presentation/pages/profile_page.dart`
+- Dual video capture:
+  - `apps/mobile/lib/features/ops/presentation/pages/photo_editor_page.dart`
+  - `apps/mobile/lib/features/projects/presentation/pages/project_update_editor_page.dart`
+- Workflow templates apply to tasks + approvals:
+  - `apps/mobile/lib/features/templates/presentation/pages/templates_page.dart`
+  - `apps/mobile/lib/features/tasks/presentation/pages/task_detail_page.dart`
+  - `apps/mobile/lib/features/tasks/data/tasks_repository.dart`
+- Secure offline queue + HTTPS enforcement:
+  - `apps/mobile/lib/features/dashboard/data/pending_queue.dart`
+  - `apps/mobile/lib/core/utils/security_guard.dart`
+  - `apps/mobile/lib/core/utils/storage_utils.dart`
+- BI export targeting:
+  - `apps/mobile/lib/features/ops/presentation/pages/export_jobs_page.dart`
+- Project photo label filters:
+  - `apps/mobile/lib/features/ops/presentation/pages/project_galleries_page.dart`
+  - `supabase/schema.sql`
+- Teams directory + task assignment support:
+  - `apps/mobile/lib/features/teams/data/teams_repository.dart`
+  - `apps/mobile/lib/features/teams/data/teams_provider.dart`
+  - `apps/mobile/lib/features/teams/presentation/pages/teams_page.dart`
+  - `apps/mobile/lib/features/tasks/presentation/pages/task_editor_page.dart`
+  - `apps/mobile/lib/features/tasks/data/tasks_repository.dart`
+  - `supabase/migrations/20251220232500_add_teams.sql`
+
+## Functional Walkthrough Checklist (manual)
+- Auth: sign up, login, role-based routing.
+- Forms: create form, fill with media, submit, view submissions.
+- Tasks/Training: create + edit, reminders, status updates.
+- Ops Hub: notebook, daily logs, project updates, photos/comments, AI tools.
+- Admin: org switcher, stats, AI usage, user and org views.
+
+## Remaining Work (ordered)
+1) Apply new migrations:
+   - `20251220231000_add_profile_status_device_tokens_inspection_cadence.sql`
+   - `20251220231100_add_profile_admin_policy.sql`
+   - `20251220232500_add_teams.sql`
+2) Deploy Edge Functions: `automation`, `payments`, `stripe-webhook`, `push`.
+3) Set Edge Function env vars: `FCM_SERVER_KEY`, Stripe keys, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL`.
+4) Schedule `automation` Edge Function via Supabase cron.
+
+## Open Notes
+- Do not commit secrets (service key/password).
+- Re-run `flutter analyze` after schema updates are applied.
+- AI Edge Function deployed and OPENAI secrets set in Supabase.
+- `supabase/add_missing_columns.sql` applied via migration `supabase/migrations/20251220192000_add_missing_columns.sql`.
+- `supabase/migrations/20251220203000_add_daily_logs.sql` applied and AI function redeployed for audio transcription.
+- `flutter test` passed after updating widget smoke test.
+- `flutter analyze` clean.
+- Exports currently generate CSV (XLSX still pending).
+- Submissions now store `metadata.visibility` and `metadata.inputTypes` for reporting filters.
+- `supabase/functions/automation` added; deploy + schedule with Supabase cron.
+- `supabase/functions/payments` + `supabase/functions/stripe-webhook` added; set Stripe env vars and webhook secret.
+- `integrations` table added; apply migration to Supabase.

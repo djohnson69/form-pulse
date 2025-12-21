@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared/shared.dart';
 
 import '../../data/ops_provider.dart';
+import '../../../projects/data/projects_provider.dart';
 
 class NewsPostsPage extends ConsumerWidget {
   const NewsPostsPage({super.key});
@@ -9,6 +11,11 @@ class NewsPostsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final newsAsync = ref.watch(newsPostsProvider);
+    final projectsAsync = ref.watch(projectsProvider);
+    final projects = projectsAsync.asData?.value ?? const [];
+    final projectNames = {
+      for (final project in projects) project.id: project.name,
+    };
     return Scaffold(
       appBar: AppBar(title: const Text('News & Alerts')),
       floatingActionButton: FloatingActionButton.extended(
@@ -39,7 +46,12 @@ class NewsPostsPage extends ConsumerWidget {
                   ),
                   title: Text(post.title),
                   subtitle: Text(
-                    '${post.scope.toUpperCase()} • ${_formatDate(post.publishedAt)}',
+                    [
+                      post.scope.toUpperCase(),
+                      if (post.scope == 'site' && post.siteId != null)
+                        projectNames[post.siteId] ?? 'Site',
+                      _formatDate(post.publishedAt),
+                    ].join(' • '),
                   ),
                 ),
               );
@@ -54,7 +66,16 @@ class NewsPostsPage extends ConsumerWidget {
     final titleController = TextEditingController();
     final bodyController = TextEditingController();
     String scope = 'company';
+    String? siteId;
     bool isPublished = true;
+    final projects = await ref
+        .read(projectsProvider.future)
+        .catchError((_) => const <Project>[]);
+    if (!context.mounted) {
+      titleController.dispose();
+      bodyController.dispose();
+      return;
+    }
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -105,6 +126,29 @@ class NewsPostsPage extends ConsumerWidget {
                     onChanged: (value) =>
                         setState(() => scope = value ?? 'company'),
                   ),
+                  if (scope == 'site') ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      initialValue: siteId,
+                      decoration: const InputDecoration(
+                        labelText: 'Site',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Select site'),
+                        ),
+                        ...projects.map((project) {
+                          return DropdownMenuItem<String?>(
+                            value: project.id,
+                            child: Text(project.name),
+                          );
+                        }),
+                      ],
+                      onChanged: (value) => setState(() => siteId = value),
+                    ),
+                  ],
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Publish now'),
@@ -117,12 +161,14 @@ class NewsPostsPage extends ConsumerWidget {
                     onPressed: () async {
                       final title = titleController.text.trim();
                       if (title.isEmpty) return;
+                      if (scope == 'site' && siteId == null) return;
                       await ref.read(opsRepositoryProvider).createNewsPost(
                             title: title,
                             body: bodyController.text.trim().isEmpty
                                 ? null
                                 : bodyController.text.trim(),
                             scope: scope,
+                            siteId: scope == 'site' ? siteId : null,
                             isPublished: isPublished,
                             tags: const [],
                           );

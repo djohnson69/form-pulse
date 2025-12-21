@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app/app.dart';
 import 'app/app_navigator.dart';
 import 'core/di/injection.dart';
+import 'core/services/push_notifications_service.dart';
+import 'core/utils/security_guard.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
 const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
@@ -15,6 +17,7 @@ void main() async {
   if (_supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty) {
     throw StateError('Missing Supabase configuration. Provide SUPABASE_URL and SUPABASE_ANON_KEY via --dart-define.');
   }
+  SecurityGuard.ensureHttps(_supabaseUrl);
 
   // Initialize Supabase
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
@@ -22,7 +25,10 @@ void main() async {
   // Initialize dependency injection
   await configureDependencies();
 
-  runApp(const AppEntry());
+  // Register push notifications (non-blocking if Firebase isn't configured).
+  await PushNotificationsService().initialize();
+
+  runApp(const ProviderScope(child: AppEntry()));
 }
 
 class FormBridgeApp extends ConsumerWidget {

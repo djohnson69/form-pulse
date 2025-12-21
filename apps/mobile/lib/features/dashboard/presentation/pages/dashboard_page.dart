@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' as legacy;
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -27,9 +30,15 @@ import '../../../partners/presentation/pages/clients_page.dart';
 import '../../../partners/presentation/pages/vendors_page.dart';
 import '../../../assets/presentation/pages/assets_page.dart';
 import '../../../ops/presentation/pages/ops_hub_page.dart';
+import '../../../ops/presentation/pages/ai_tools_page.dart';
+import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart';
+import '../../../profile/presentation/pages/profile_page.dart';
 import 'submission_detail_page.dart';
 import 'template_gallery_page.dart';
 import 'reports_page.dart';
+import '../../../../core/utils/automation_scheduler.dart';
+import '../../../../core/utils/ai_job_scheduler.dart';
 
 final _navToAlertsProvider = legacy.StateProvider<bool>((ref) => false);
 final _navToTasksProvider = legacy.StateProvider<bool>((ref) => false);
@@ -51,6 +60,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   ProviderSubscription<bool>? _navSubscription;
   ProviderSubscription<bool>? _taskNavSubscription;
   PendingSubmissionQueue? _pendingQueue;
+  late final OpsRepositoryBase _opsRepository;
+  Timer? _automationTimer;
   static const _supabaseBucket =
       String.fromEnvironment('SUPABASE_BUCKET', defaultValue: 'formbridge-attachments');
 
@@ -67,6 +78,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   void initState() {
     super.initState();
     ref.read(dashboardPrefsProvider.notifier).ensureLoaded();
+    _opsRepository = ref.read(opsRepositoryProvider);
     final supabaseClient = Supabase.instance.client;
     _pendingQueue = PendingSubmissionQueue(
       ref.read(dashboardRepositoryProvider),
@@ -75,6 +87,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
     // Attempt to flush any pending offline submissions.
     _pendingQueue?.flush();
+    Future.microtask(() async {
+      if (!mounted) return;
+      await AutomationScheduler.runIfDue(ops: _opsRepository);
+      await AiJobScheduler.runIfDue(ops: _opsRepository);
+    });
+    _automationTimer = Timer.periodic(const Duration(minutes: 30), (_) async {
+      if (!mounted) return;
+      await AutomationScheduler.runIfDue(ops: _opsRepository);
+      await AiJobScheduler.runIfDue(ops: _opsRepository);
+    });
     _navSubscription = ref.listenManual<bool>(
       _navToAlertsProvider,
       (previous, next) {
@@ -99,110 +121,114 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   void dispose() {
     _navSubscription?.close();
     _taskNavSubscription?.close();
+    _automationTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final showAppBar = _currentIndex != 0;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Form Bridge'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.tune),
-            tooltip: 'Customize dashboard',
-            onPressed: _openPrefsSheet,
-          ),
-          IconButton(
-            icon: const Icon(Icons.view_comfy_alt),
-            tooltip: 'Templates',
-            onPressed: () async {
-              final data = await ref.read(dashboardDataProvider.future);
-              if (!context.mounted) return;
-              await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => TemplateGalleryPage(forms: data.forms),
+      appBar: showAppBar
+          ? AppBar(
+              title: const Text('Form Bridge'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.tune),
+                  tooltip: 'Customize dashboard',
+                  onPressed: _openPrefsSheet,
                 ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.insights),
-            tooltip: 'Reports',
-            onPressed: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ReportsPage()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.add_box_outlined),
-            tooltip: 'Create form',
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const CreateFormPage()),
-              );
-              if (!mounted) return;
-              ref.invalidate(dashboardDataProvider);
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: 'Search forms',
-            onPressed: () async {
-              await showSearch<String?>(
-                context: context,
-                delegate: _FormSearchDelegate(ref),
-              );
-            },
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              switch (value) {
-                case 'settings':
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsPage()),
-                  );
-                  break;
-                case 'profile':
-                  setState(() => _currentIndex = 5);
-                  break;
-                case 'logout':
-                  Supabase.instance.client.auth.signOut();
-                  break;
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'settings',
-                child: ListTile(
-                  leading: Icon(Icons.settings),
-                  title: Text('Settings'),
-                  contentPadding: EdgeInsets.zero,
+                IconButton(
+                  icon: const Icon(Icons.view_comfy_alt),
+                  tooltip: 'Templates',
+                  onPressed: () async {
+                    final data = await ref.read(dashboardDataProvider.future);
+                    if (!context.mounted) return;
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => TemplateGalleryPage(forms: data.forms),
+                      ),
+                    );
+                  },
                 ),
-              ),
-              PopupMenuItem(
-                value: 'profile',
-                child: ListTile(
-                  leading: Icon(Icons.person),
-                  title: Text('Profile'),
-                  contentPadding: EdgeInsets.zero,
+                IconButton(
+                  icon: const Icon(Icons.insights),
+                  tooltip: 'Reports',
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ReportsPage()),
+                    );
+                  },
                 ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'logout',
-                child: ListTile(
-                  leading: Icon(Icons.logout, color: Colors.red),
-                  title: Text('Logout', style: TextStyle(color: Colors.red)),
-                  contentPadding: EdgeInsets.zero,
+                IconButton(
+                  icon: const Icon(Icons.add_box_outlined),
+                  tooltip: 'Create form',
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const CreateFormPage()),
+                    );
+                    if (!mounted) return;
+                    ref.invalidate(dashboardDataProvider);
+                  },
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
+                IconButton(
+                  icon: const Icon(Icons.search),
+                  tooltip: 'Search forms',
+                  onPressed: () async {
+                    await showSearch<String?>(
+                      context: context,
+                      delegate: _FormSearchDelegate(ref),
+                    );
+                  },
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'settings':
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const SettingsPage()),
+                        );
+                        break;
+                      case 'profile':
+                        setState(() => _currentIndex = 5);
+                        break;
+                      case 'logout':
+                        Supabase.instance.client.auth.signOut();
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'settings',
+                      child: ListTile(
+                        leading: Icon(Icons.settings),
+                        title: Text('Settings'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'profile',
+                      child: ListTile(
+                        leading: Icon(Icons.person),
+                        title: Text('Profile'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                    PopupMenuDivider(),
+                    PopupMenuItem(
+                      value: 'logout',
+                      child: ListTile(
+                        leading: Icon(Icons.logout, color: Colors.red),
+                        title: Text('Logout', style: TextStyle(color: Colors.red)),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          : null,
       body: _pages[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
@@ -401,6 +427,8 @@ class DashboardHomeView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final prefs = ref.watch(dashboardPrefsProvider);
     final dashboard = ref.watch(dashboardDataProvider);
+    final projects = ref.watch(projectsProvider);
+    final tasks = ref.watch(tasksProvider);
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -408,55 +436,55 @@ class DashboardHomeView extends ConsumerWidget {
         await ref.read(dashboardDataProvider.future);
       },
       child: dashboard.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, st) => ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            color: Theme.of(context).colorScheme.errorContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Dashboard Load Error',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, st) => ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Card(
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.error_outline,
                           color: Theme.of(context).colorScheme.error,
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
+                        const SizedBox(width: 8),
+                        Text(
+                          'Dashboard Load Error',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
                       'Unable to load dashboard data from database.',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Error: ${e.toString()}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontFamily: 'monospace',
+                    const SizedBox(height: 8),
+                    Text(
+                      'Error: ${e.toString()}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                          ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Try: pull to refresh, check network, or sign out/in. If you just added the user to an org, restart the app to refresh the session.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Text(
+                      'Try: pull to refresh, check network, or sign out/in. If you just added the user to an org, restart the app to refresh the session.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
+            const SizedBox(height: 12),
+            FilledButton.icon(
               onPressed: () => ref.invalidate(dashboardDataProvider),
               icon: const Icon(Icons.refresh),
               label: const Text('Retry'),
@@ -476,7 +504,10 @@ class DashboardHomeView extends ConsumerWidget {
                       children: [
                         const Text(
                           'No templates yet',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         const Text(
@@ -490,7 +521,8 @@ class DashboardHomeView extends ConsumerWidget {
                             ElevatedButton.icon(
                               icon: const Icon(Icons.refresh),
                               label: const Text('Reload'),
-                              onPressed: () => ref.invalidate(dashboardDataProvider),
+                              onPressed: () =>
+                                  ref.invalidate(dashboardDataProvider),
                             ),
                             OutlinedButton.icon(
                               icon: const Icon(Icons.view_comfy_alt),
@@ -498,7 +530,8 @@ class DashboardHomeView extends ConsumerWidget {
                               onPressed: () async {
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => TemplateGalleryPage(forms: data.forms),
+                                    builder: (_) =>
+                                        TemplateGalleryPage(forms: data.forms),
                                   ),
                                 );
                               },
@@ -512,32 +545,51 @@ class DashboardHomeView extends ConsumerWidget {
               ],
             );
           }
+
+          final activeProjects = projects.asData?.value.length;
+          final openTasks = tasks.asData?.value
+              .where((task) => !task.isComplete)
+              .length;
+          final submissionsLastWeek = _countRecentSubmissions(
+            data.submissions,
+            days: 7,
+          );
+          final scheme = Theme.of(context).colorScheme;
           final summaryCards = [
             _StatCardData(
-              icon: Icons.assignment,
+              icon: Icons.folder_open,
+              title: 'Active Projects',
+              value: _formatCount(activeProjects),
+              color: scheme.primary,
+              subtitle: 'Active pipelines',
+            ),
+            _StatCardData(
+              icon: Icons.description_outlined,
               title: 'Active Forms',
-              value: data.activeForms.toString(),
-              color: Colors.blue,
+              value: _formatCount(data.activeForms),
+              color: scheme.secondary,
+              subtitle: 'Published templates',
             ),
             _StatCardData(
-              icon: Icons.check_circle,
+              icon: Icons.check_circle_outline,
+              title: 'Open Tasks',
+              value: _formatCount(openTasks),
+              color: scheme.tertiary,
+              subtitle: 'Awaiting review',
+            ),
+            _StatCardData(
+              icon: Icons.assignment_turned_in_outlined,
               title: 'Submissions',
-              value: data.completedSubmissions.toString(),
-              color: Colors.green,
+              value: _formatCount(data.completedSubmissions),
+              color: scheme.primary,
+              subtitle: 'Last 7d: ${_formatCount(submissionsLastWeek)}',
             ),
             _StatCardData(
-              icon: Icons.notifications_active,
-              title: 'Unread Alerts',
-              value: data.unreadNotifications.toString(),
-              color: Colors.orange,
-            ),
-            _StatCardData(
-              icon: Icons.schedule,
-              title: 'Latest Sync',
-              value:
-                  _formatTimeAgo(data.submissions.map((s) => s.submittedAt)) ??
-                  'N/A',
-              color: Colors.purple,
+              icon: Icons.notifications_active_outlined,
+              title: 'Alerts',
+              value: _formatCount(data.unreadNotifications),
+              color: Colors.orange.shade600,
+              subtitle: 'Unread alerts',
             ),
           ];
           final filteredCards = prefs.enabledStats
@@ -548,36 +600,1057 @@ class DashboardHomeView extends ConsumerWidget {
               .map((i) => i < filteredCards.length ? filteredCards[i] : null)
               .whereType<_StatCardData>()
               .toList();
+          final statCards = orderedCards.isEmpty ? filteredCards : orderedCards;
+          final latestSubmissions = _latestSubmissions(data.submissions);
+          final alerts = _latestAlerts(data.notifications);
+          final categorySummary = _categorySummary(data.forms);
 
-          final horizontalPadding = prefs.compactCards ? 12.0 : 16.0;
-          return ListView(
-            padding: EdgeInsets.all(horizontalPadding),
-            children: [
-              if (prefs.showStats)
-                _StatisticsGrid(
-                  cards: orderedCards.isEmpty ? filteredCards : orderedCards,
-                  compact: prefs.compactCards,
-                ),
-              if (prefs.showStats) const SizedBox(height: 24),
-              if (prefs.showQuickActions)
-                _buildQuickActions(
-                  context,
-                  ref,
-                  data,
-                  compact: prefs.compactCards,
-                ),
-              if (prefs.showQuickActions) const SizedBox(height: 24),
-              if (prefs.showRecentActivity)
-                _buildRecentActivity(
-                  context,
-                  data,
-                  compact: prefs.compactCards,
-                ),
-            ],
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              final showSidebar = width >= 1400;
+              final showRightRail = width >= 1000;
+              final isWide = width >= 900;
+              final horizontalPadding = prefs.compactCards ? 16.0 : 20.0;
+
+              final workspacePanel = _buildWorkspacePanel(
+                context,
+                data,
+                activeProjects: activeProjects,
+                openTasks: openTasks,
+              );
+              final quickActions = prefs.showQuickActions
+                  ? _buildQuickActions(
+                      context,
+                      ref,
+                      data,
+                      compact: prefs.compactCards,
+                    )
+                  : null;
+
+              final mainColumn = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildLatestSubmissionsCard(context, latestSubmissions),
+                  const SizedBox(height: 16),
+                  _buildProjectHighlightsCard(context, projects),
+                  const SizedBox(height: 16),
+                  _buildFormsSnapshotCard(
+                    context,
+                    categorySummary,
+                    data.forms,
+                  ),
+                  if (prefs.showRecentActivity) ...[
+                    const SizedBox(height: 16),
+                    _buildRecentActivity(
+                      context,
+                      data,
+                      compact: prefs.compactCards,
+                    ),
+                  ],
+                ],
+              );
+
+              final rightColumn = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildAlertsCard(context, ref, alerts),
+                  const SizedBox(height: 16),
+                  _buildTaskPulseCard(context, tasks),
+                  const SizedBox(height: 16),
+                  _buildAiAssistantCard(context, ref),
+                ],
+              );
+
+              final sidebarColumn = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  workspacePanel,
+                  if (quickActions != null) const SizedBox(height: 16),
+                  if (quickActions != null) quickActions,
+                ],
+              );
+
+              return ListView(
+                padding: EdgeInsets.all(horizontalPadding),
+                children: [
+                  _buildCommandBar(
+                    context,
+                    ref,
+                    data,
+                    isWide: isWide,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildDashboardHeader(
+                    context,
+                    ref,
+                    data,
+                    isWide: isWide,
+                  ),
+                  const SizedBox(height: 16),
+                  if (prefs.showStats)
+                    _StatisticsGrid(
+                      cards: statCards,
+                      compact: prefs.compactCards,
+                    ),
+                  if (prefs.showStats) const SizedBox(height: 20),
+                  if (!showSidebar) ...[
+                    workspacePanel,
+                    if (quickActions != null) const SizedBox(height: 16),
+                    if (quickActions != null) quickActions,
+                    const SizedBox(height: 16),
+                  ],
+                  if (showSidebar)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(width: 260, child: sidebarColumn),
+                        const SizedBox(width: 16),
+                        Expanded(flex: 4, child: mainColumn),
+                        const SizedBox(width: 16),
+                        Expanded(flex: 2, child: rightColumn),
+                      ],
+                    )
+                  else if (showRightRail)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 3, child: mainColumn),
+                        const SizedBox(width: 16),
+                        Expanded(flex: 2, child: rightColumn),
+                      ],
+                    )
+                  else
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        mainColumn,
+                        const SizedBox(height: 16),
+                        rightColumn,
+                      ],
+                    ),
+                ],
+              );
+            },
           );
         },
       ),
     );
+  }
+
+  Widget _buildDashboardHeader(
+    BuildContext context,
+    WidgetRef ref,
+    DashboardData data, {
+    required bool isWide,
+  }) {
+    final titleStyle = Theme.of(context)
+        .textTheme
+        .headlineSmall
+        ?.copyWith(fontWeight: FontWeight.w700);
+    final actions = [
+      FilledButton.icon(
+        onPressed: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const CreateFormPage()),
+          );
+          ref.invalidate(dashboardDataProvider);
+        },
+        icon: const Icon(Icons.add_box_outlined),
+        label: const Text('Create form'),
+      ),
+      const SizedBox(width: 8),
+      OutlinedButton.icon(
+        onPressed: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TemplateGalleryPage(forms: data.forms),
+            ),
+          );
+        },
+        icon: const Icon(Icons.view_comfy_alt),
+        label: const Text('Templates'),
+      ),
+      const SizedBox(width: 8),
+      OutlinedButton.icon(
+        onPressed: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ReportsPage()),
+          );
+        },
+        icon: const Icon(Icons.insights),
+        label: const Text('Reports'),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('User Dashboard', style: titleStyle),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Track submissions, tasks, and compliance performance.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: actions,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCommandBar(
+    BuildContext context,
+    WidgetRef ref,
+    DashboardData data, {
+    required bool isWide,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final searchField = TextField(
+      readOnly: true,
+      onTap: () {
+        showSearch<String?>(
+          context: context,
+          delegate: _FormSearchDelegate(ref),
+        );
+      },
+      decoration: InputDecoration(
+        hintText: 'Search forms, submissions, or people',
+        prefixIcon: const Icon(Icons.search),
+        filled: true,
+        fillColor: scheme.surfaceContainerHighest,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+    final navPills = [
+      const _DashboardNavPill(label: 'Dashboard', selected: true),
+      _DashboardNavPill(
+        label: 'Forms',
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TemplateGalleryPage(forms: data.forms),
+            ),
+          );
+        },
+      ),
+      _DashboardNavPill(
+        label: 'Account',
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ProfileView()),
+          );
+        },
+      ),
+      _DashboardNavPill(
+        label: 'Audit Log',
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ReportsPage()),
+          );
+        },
+      ),
+    ];
+    final actions = [
+      _CommandIcon(
+        icon: Icons.notifications_none,
+        label: 'Alerts',
+        count: data.unreadNotifications,
+        onTap: () => ref.read(_navToAlertsProvider.notifier).state = true,
+      ),
+      _CommandIcon(
+        icon: Icons.assignment_turned_in_outlined,
+        label: 'Entries',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ReportsPage()),
+        ),
+      ),
+      PopupMenuButton<String>(
+        tooltip: 'Account',
+        onSelected: (value) async {
+          switch (value) {
+            case 'preferences':
+              await showModalBottomSheet<void>(
+                context: context,
+                useSafeArea: true,
+                builder: (_) => const _DashboardPrefsSheet(),
+              );
+              break;
+            case 'settings':
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              );
+              break;
+            case 'profile':
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ProfileView()),
+              );
+              break;
+            case 'logout':
+              await Supabase.instance.client.auth.signOut();
+              break;
+          }
+        },
+        itemBuilder: (context) => const [
+          PopupMenuItem(
+            value: 'preferences',
+            child: ListTile(
+              leading: Icon(Icons.tune),
+              title: Text('Customize dashboard'),
+            ),
+          ),
+          PopupMenuItem(
+            value: 'settings',
+            child: ListTile(
+              leading: Icon(Icons.settings),
+              title: Text('Settings'),
+            ),
+          ),
+          PopupMenuItem(
+            value: 'profile',
+            child: ListTile(
+              leading: Icon(Icons.person),
+              title: Text('Profile'),
+            ),
+          ),
+          PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'logout',
+            child: ListTile(
+              leading: Icon(Icons.logout, color: Colors.red),
+              title: Text('Logout', style: TextStyle(color: Colors.red)),
+            ),
+          ),
+        ],
+        child: const CircleAvatar(
+          radius: 16,
+          child: Icon(Icons.person, size: 18),
+        ),
+      ),
+    ];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 900 && isWide;
+            if (wide) {
+              return Row(
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: scheme.primaryContainer,
+                        child: Icon(
+                          Icons.dashboard_outlined,
+                          color: scheme.primary,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Form Bridge',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: searchField),
+                  const SizedBox(width: 12),
+                  Wrap(spacing: 8, children: navPills),
+                  const SizedBox(width: 12),
+                  Wrap(spacing: 8, children: actions),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: scheme.primaryContainer,
+                      child: Icon(
+                        Icons.dashboard_outlined,
+                        color: scheme.primary,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Form Bridge',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const Spacer(),
+                    ...actions,
+                  ],
+                ),
+                const SizedBox(height: 12),
+                searchField,
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: navPills,
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  List<FormSubmission> _latestSubmissions(List<FormSubmission> submissions) {
+    final sorted = [...submissions]
+      ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+    return sorted.take(6).toList();
+  }
+
+  int _countRecentSubmissions(
+    List<FormSubmission> submissions, {
+    required int days,
+  }) {
+    final cutoff = DateTime.now().subtract(Duration(days: days));
+    return submissions.where((s) => s.submittedAt.isAfter(cutoff)).length;
+  }
+
+  List<AppNotification> _latestAlerts(List<AppNotification> notifications) {
+    final sorted = [...notifications]
+      ..sort((a, b) {
+        if (a.isRead != b.isRead) {
+          return a.isRead ? 1 : -1;
+        }
+        return b.createdAt.compareTo(a.createdAt);
+      });
+    return sorted.take(6).toList();
+  }
+
+  Map<String, int> _categorySummary(List<FormDefinition> forms) {
+    final summary = <String, int>{};
+    for (final form in forms) {
+      final category = (form.category ?? 'Other').trim();
+      summary[category] = (summary[category] ?? 0) + 1;
+    }
+    final entries = summary.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return {for (final entry in entries) entry.key: entry.value};
+  }
+
+  Widget _buildLatestSubmissionsCard(
+    BuildContext context,
+    List<FormSubmission> submissions,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Latest Submissions',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ReportsPage()),
+                  ),
+                  child: const Text('View reports'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (submissions.isEmpty)
+              const Text('No submissions yet.')
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isCompact = constraints.maxWidth < 640;
+                  if (isCompact) {
+                    return Column(
+                      children: submissions.map((submission) {
+                        final name =
+                            submission.submittedByName ?? submission.submittedBy;
+                        final timeLabel =
+                            _formatTimeAgo([submission.submittedAt]) ??
+                                DateFormat('MMM d').format(submission.submittedAt);
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: CircleAvatar(
+                            backgroundColor: Theme.of(context)
+                                .colorScheme
+                                .primaryContainer,
+                            child: const Icon(Icons.assignment_outlined),
+                          ),
+                          title: Text(submission.formTitle),
+                          subtitle: Text('$name • $timeLabel'),
+                          trailing: _StatusPill(
+                            label: submission.status.displayName,
+                            color: _statusColor(context, submission.status),
+                          ),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    SubmissionDetailPage(submission: submission),
+                              ),
+                            );
+                          },
+                        );
+                      }).toList(),
+                    );
+                  }
+
+                  return Column(
+                    children: [
+                      _buildSubmissionTableHeader(context),
+                      const Divider(),
+                      ...submissions.map(
+                        (submission) =>
+                            _buildSubmissionTableRow(context, submission),
+                      ),
+                    ],
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProjectHighlightsCard(
+    BuildContext context,
+    AsyncValue<List<Project>> projects,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Active Projects',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ProjectsPage()),
+                  ),
+                  child: const Text('View all'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            projects.when(
+              loading: () => const LinearProgressIndicator(minHeight: 2),
+              error: (e, _) => const Text('Unable to load projects.'),
+              data: (items) {
+                if (items.isEmpty) {
+                  return const Text('No active projects yet.');
+                }
+                final sorted = [...items]
+                  ..sort(
+                    (a, b) => (b.updatedAt ?? b.createdAt)
+                        .compareTo(a.updatedAt ?? a.createdAt),
+                  );
+                final preview = sorted.take(4).toList();
+                return Column(
+                  children: preview.map((project) {
+                    final updated = DateFormat('MMM d')
+                        .format(project.updatedAt ?? project.createdAt);
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: CircleAvatar(
+                        backgroundColor: Theme.of(context)
+                            .colorScheme
+                            .primaryContainer,
+                        child: const Icon(Icons.work_outline),
+                      ),
+                      title: Text(project.name),
+                      subtitle: Text(
+                        '${project.status.toUpperCase()} • Updated $updated',
+                      ),
+                      trailing: const Icon(Icons.chevron_right, size: 18),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const ProjectsPage()),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubmissionTableHeader(BuildContext context) {
+    final headerStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        );
+    return Row(
+      children: [
+        Expanded(flex: 3, child: Text('Form', style: headerStyle)),
+        Expanded(flex: 2, child: Text('Submitted by', style: headerStyle)),
+        Expanded(flex: 2, child: Text('Status', style: headerStyle)),
+        Expanded(flex: 2, child: Text('Updated', style: headerStyle)),
+        const SizedBox(width: 32),
+      ],
+    );
+  }
+
+  Widget _buildSubmissionTableRow(
+    BuildContext context,
+    FormSubmission submission,
+  ) {
+    final name = submission.submittedByName ?? submission.submittedBy;
+    final timeLabel = _formatTimeAgo([submission.submittedAt]) ??
+        DateFormat('MMM d').format(submission.submittedAt);
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SubmissionDetailPage(submission: submission),
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Text(
+                submission.formTitle,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            Expanded(flex: 2, child: Text(name)),
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _StatusPill(
+                  label: submission.status.displayName,
+                  color: _statusColor(context, submission.status),
+                ),
+              ),
+            ),
+            Expanded(flex: 2, child: Text(timeLabel)),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAlertsCard(
+    BuildContext context,
+    WidgetRef ref,
+    List<AppNotification> alerts,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Incidents & Alerts',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () =>
+                      ref.read(_navToAlertsProvider.notifier).state = true,
+                  child: const Text('View all'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (alerts.isEmpty)
+              const Text('No alerts right now.')
+            else
+              Column(
+                children: alerts.map((alert) {
+                  final timeLabel =
+                      _formatTimeAgo([alert.createdAt]) ?? 'Just now';
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(
+                      backgroundColor: alert.isRead
+                          ? Colors.grey.shade200
+                          : Theme.of(context)
+                              .colorScheme
+                              .secondaryContainer,
+                      child: Icon(
+                        alert.isRead
+                            ? Icons.notifications_none
+                            : Icons.notifications,
+                        color: alert.isRead
+                            ? Colors.grey
+                            : Theme.of(context).colorScheme.secondary,
+                      ),
+                    ),
+                    title: Text(alert.title),
+                    subtitle: Text('${alert.body} • $timeLabel'),
+                    trailing: alert.isRead
+                        ? null
+                        : const Icon(Icons.fiber_manual_record, size: 10),
+                    onTap: () =>
+                        ref.read(_navToAlertsProvider.notifier).state = true,
+                  );
+                }).toList(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspacePanel(
+    BuildContext context,
+    DashboardData data, {
+    required int? activeProjects,
+    required int? openTasks,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Workspace',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            _WorkspaceMetricRow(
+              icon: Icons.folder_open,
+              label: 'Projects',
+              value: _formatCount(activeProjects),
+              color: scheme.primary,
+            ),
+            _WorkspaceMetricRow(
+              icon: Icons.description_outlined,
+              label: 'Forms',
+              value: _formatCount(data.activeForms),
+              color: scheme.secondary,
+            ),
+            _WorkspaceMetricRow(
+              icon: Icons.checklist,
+              label: 'Tasks',
+              value: _formatCount(openTasks),
+              color: scheme.tertiary,
+            ),
+            _WorkspaceMetricRow(
+              icon: Icons.notifications_active_outlined,
+              label: 'Alerts',
+              value: _formatCount(data.unreadNotifications),
+              color: Colors.orange.shade600,
+            ),
+            const Divider(height: 24),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ProjectsPage()),
+                  ),
+                  icon: const Icon(Icons.work_outline),
+                  label: const Text('Projects'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const TasksPage()),
+                  ),
+                  icon: const Icon(Icons.checklist_outlined),
+                  label: const Text('Tasks'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DocumentsPage()),
+                  ),
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('Documents'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AssetsPage()),
+                  ),
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('Assets'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const TrainingHubPage()),
+                  ),
+                  icon: const Icon(Icons.school_outlined),
+                  label: const Text('Training'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const MessagesPage()),
+                  ),
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: const Text('Messaging'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AiToolsPage()),
+                  ),
+                  icon: const Icon(Icons.auto_awesome_outlined),
+                  label: const Text('AI'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTaskPulseCard(
+    BuildContext context,
+    AsyncValue<List<Task>> tasks,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Task Pulse',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const TasksPage()),
+                  ),
+                  child: const Text('View tasks'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            tasks.when(
+              loading: () => const LinearProgressIndicator(minHeight: 2),
+              error: (e, _) => const Text('Unable to load tasks.'),
+              data: (items) {
+                final openTasks = items.where((task) => !task.isComplete).toList();
+                if (openTasks.isEmpty) {
+                  return const Text('No active tasks right now.');
+                }
+                return Column(
+                  children: openTasks.take(5).map((task) {
+                    final dueLabel = task.dueDate == null
+                        ? 'No due date'
+                        : DateFormat('MMM d').format(task.dueDate!);
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: CircleAvatar(
+                        backgroundColor: Theme.of(context)
+                            .colorScheme
+                            .primaryContainer,
+                        child: const Icon(Icons.checklist_outlined),
+                      ),
+                      title: Text(task.title),
+                      subtitle: Text('${task.status.name} • $dueLabel'),
+                      trailing: const Icon(Icons.chevron_right, size: 18),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => TaskDetailPage(task: task),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAiAssistantCard(BuildContext context, WidgetRef ref) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.auto_awesome, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'AI Assistant',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AiToolsPage()),
+                  ),
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Generate summaries, autofill common fields, and draft responses for your team.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AiToolsPage()),
+                  ),
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Open AI tools'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const OpsHubPage()),
+                  ),
+                  icon: const Icon(Icons.hub_outlined),
+                  label: const Text('Automation hub'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFormsSnapshotCard(
+    BuildContext context,
+    Map<String, int> categories,
+    List<FormDefinition> forms,
+  ) {
+    final sortedForms = [...forms]
+      ..sort((a, b) => (b.updatedAt ?? b.createdAt)
+          .compareTo(a.updatedAt ?? a.createdAt));
+    final topForms = sortedForms.take(3).toList();
+    final entries = categories.entries.take(8).toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Form Library Snapshot',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            if (entries.isEmpty)
+              const Text('No form categories yet.')
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: entries
+                    .map(
+                      (entry) => Chip(
+                        label: Text('${entry.key} (${entry.value})'),
+                      ),
+                    )
+                    .toList(),
+              ),
+            if (topForms.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('Recently updated'),
+              const SizedBox(height: 6),
+              Column(
+                children: topForms
+                    .map(
+                      (form) => ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.description_outlined),
+                        title: Text(form.title),
+                        subtitle: Text(form.category ?? 'General'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => FormDetailPage(form: form),
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _statusColor(BuildContext context, SubmissionStatus status) {
+    switch (status) {
+      case SubmissionStatus.approved:
+        return Colors.green.shade600;
+      case SubmissionStatus.rejected:
+        return Colors.red.shade400;
+      case SubmissionStatus.underReview:
+        return Colors.orange.shade600;
+      case SubmissionStatus.requiresChanges:
+        return Colors.deepOrange.shade400;
+      case SubmissionStatus.pendingSync:
+        return Colors.blueGrey.shade400;
+      case SubmissionStatus.archived:
+        return Colors.grey.shade500;
+      case SubmissionStatus.draft:
+        return Colors.blueGrey.shade300;
+      case SubmissionStatus.submitted:
+        return Theme.of(context).colorScheme.primary;
+    }
   }
 
   Widget _buildQuickActions(
@@ -693,6 +1766,15 @@ class DashboardHomeView extends ConsumerWidget {
             () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const OpsHubPage()),
+              );
+            },
+          ),
+          'ai_tools': (
+            Icons.auto_awesome,
+            'AI Tools',
+            () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AiToolsPage()),
               );
             },
           ),
@@ -860,6 +1942,7 @@ class FormsListView extends ConsumerStatefulWidget {
 
 class _FormsListViewState extends ConsumerState<FormsListView> {
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   String? _categoryFilter;
   String _savedFilter = 'All';
 
@@ -874,6 +1957,7 @@ class _FormsListViewState extends ConsumerState<FormsListView> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -888,6 +1972,7 @@ class _FormsListViewState extends ConsumerState<FormsListView> {
         for (final form in payload.forms) {
           categories.add(form.category ?? 'Other');
         }
+        final categoriesList = categories.toList()..sort();
         final query = _searchController.text.toLowerCase();
         final filtered = payload.forms.where((form) {
           final matchesQuery =
@@ -908,50 +1993,139 @@ class _FormsListViewState extends ConsumerState<FormsListView> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            TextField(
-              controller: _searchController,
-              decoration: const InputDecoration(
-                labelText: 'Search forms',
-                prefixIcon: Icon(Icons.search),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _savedFilters.keys.map((key) {
-                  final selected = _savedFilter == key;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(_savedFilters[key]!),
-                      selected: selected,
-                      onSelected: (_) {
-                        setState(() => _savedFilter = key);
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Search & Filters',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    RawAutocomplete<String>(
+                      textEditingController: _searchController,
+                      focusNode: _searchFocusNode,
+                      optionsBuilder: (value) {
+                        final input = value.text.trim().toLowerCase();
+                        if (input.isEmpty) {
+                          return const Iterable<String>.empty();
+                        }
+                        final options = payload.forms
+                            .map((form) => form.title)
+                            .where(
+                              (title) => title.toLowerCase().contains(input),
+                            );
+                        return options.take(8);
+                      },
+                      onSelected: (selection) {
+                        _searchController.text = selection;
+                        _searchController.selection = TextSelection.fromPosition(
+                          TextPosition(offset: _searchController.text.length),
+                        );
+                        setState(() {});
+                      },
+                      fieldViewBuilder: (
+                        context,
+                        textEditingController,
+                        focusNode,
+                        onFieldSubmitted,
+                      ) {
+                        return TextField(
+                          controller: textEditingController,
+                          focusNode: focusNode,
+                          decoration: InputDecoration(
+                            labelText: 'Search forms, tags, or templates',
+                            prefixIcon: const Icon(Icons.search),
+                            suffixIcon: _searchController.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    icon: const Icon(Icons.close),
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() {});
+                                    },
+                                  ),
+                          ),
+                          onChanged: (_) => setState(() {}),
+                          onSubmitted: (_) => onFieldSubmitted(),
+                        );
+                      },
+                      optionsViewBuilder: (context, onSelected, options) {
+                        return Align(
+                          alignment: Alignment.topLeft,
+                          child: Material(
+                            elevation: 4,
+                            borderRadius: BorderRadius.circular(12),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 240),
+                              child: ListView(
+                                padding: const EdgeInsets.all(8),
+                                shrinkWrap: true,
+                                children: options.map((option) {
+                                  return ListTile(
+                                    title: Text(option),
+                                    onTap: () => onSelected(option),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ),
+                        );
                       },
                     ),
-                  );
-                }).toList(),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Master filters',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: _savedFilters.keys.map((key) {
+                          final selected = _savedFilter == key;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(_savedFilters[key]!),
+                              selected: selected,
+                              onSelected: (_) {
+                                setState(() => _savedFilter = key);
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Categories',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: categoriesList.map((cat) {
+                        final selected = _categoryFilter == null
+                            ? cat == 'All'
+                            : _categoryFilter == cat;
+                        return ChoiceChip(
+                          label: Text(cat),
+                          selected: selected,
+                          onSelected: (_) {
+                            setState(() {
+                              _categoryFilter = cat == 'All' ? null : cat;
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: categories.map((cat) {
-                final selected =
-                    _categoryFilter == null ? cat == 'All' : _categoryFilter == cat;
-                return ChoiceChip(
-                  label: Text(cat),
-                  selected: selected,
-                  onSelected: (_) {
-                    setState(() {
-                      _categoryFilter = cat == 'All' ? null : cat;
-                    });
-                  },
-                );
-              }).toList(),
             ),
             const SizedBox(height: 12),
             if (filtered.isEmpty)
@@ -1044,6 +2218,7 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
   final TextEditingController _searchController = TextEditingController();
   bool _showUnreadOnly = false;
   String _typeFilter = 'All';
+  RealtimeChannel? _notificationsChannel;
 
   static const List<String> _types = [
     'All',
@@ -1056,8 +2231,38 @@ class _NotificationsViewState extends ConsumerState<NotificationsView> {
 
   @override
   void dispose() {
+    _notificationsChannel?.unsubscribe();
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToNotifications();
+  }
+
+  void _subscribeToNotifications() {
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return;
+    _notificationsChannel = client
+        .channel('notifications-$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: (_) {
+            if (!mounted) return;
+            ref.invalidate(dashboardDataProvider);
+          },
+        )
+        .subscribe();
   }
 
   @override
@@ -1151,198 +2356,7 @@ class ProfileView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const SizedBox(height: 20),
-        Center(
-          child: Column(
-            children: [
-              CircleAvatar(
-                radius: 50,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: const Icon(Icons.person, size: 50, color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'John Doe',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'john.doe@formpulse.com',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-              ),
-              const SizedBox(height: 8),
-              const Chip(
-                label: Text('Manager'),
-                avatar: Icon(Icons.badge, size: 16),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.folder_copy),
-            title: const Text('Documents'),
-            subtitle: const Text('Manage SOPs, templates, and files'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DocumentsPage()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.school),
-            title: const Text('Training Hub'),
-            subtitle: const Text('View certifications and compliance'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const TrainingHubPage()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.inventory_2),
-            title: const Text('Assets'),
-            subtitle: const Text('Track equipment inspections and incidents'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const AssetsPage()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.hub),
-            title: const Text('Operations Hub'),
-            subtitle: const Text('Automation, AI, exports, and marketing'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const OpsHubPage()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.chat_bubble_outline),
-            title: const Text('Messages'),
-            subtitle: const Text('Communicate with clients and vendors'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const MessagesPage()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.business),
-            title: const Text('Clients'),
-            subtitle: const Text('Manage client contacts and portals'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ClientsPage()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.handshake),
-            title: const Text('Vendors'),
-            subtitle: const Text('Manage vendor contacts and access'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const VendorsPage()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 32),
-        Card(
-          child: Column(
-            children: [
-              _ProfileTile(
-                icon: Icons.person,
-                text: 'Edit Profile',
-                message: 'Edit profile coming soon',
-              ),
-              const Divider(height: 1),
-              _ProfileTile(
-                icon: Icons.notifications,
-                text: 'Notifications',
-                message: 'Notification settings coming soon',
-              ),
-              const Divider(height: 1),
-              _ProfileTile(
-                icon: Icons.security,
-                text: 'Security',
-                message: 'Security settings coming soon',
-              ),
-              const Divider(height: 1),
-              _ProfileTile(
-                icon: Icons.help,
-                text: 'Help & Support',
-                message: 'Help coming soon',
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.info),
-                title: const Text('About'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  showAboutDialog(
-                    context: context,
-                    applicationName: 'Form Bridge',
-                    applicationVersion: '2.0.0',
-                    applicationIcon: const Icon(
-                      Icons.assignment_turned_in,
-                      size: 48,
-                    ),
-                    children: const [
-                      Text('Intelligent Form Management Platform'),
-                    ],
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text('Logout', style: TextStyle(color: Colors.red)),
-            onTap: () => Supabase.instance.client.auth.signOut(),
-          ),
-        ),
-      ],
-    );
+    return const ProfilePage();
   }
 }
 
@@ -1443,12 +2457,14 @@ class _StatCardData {
   final String title;
   final String value;
   final Color color;
+  final String? subtitle;
 
   _StatCardData({
     required this.icon,
     required this.title,
     required this.value,
     required this.color,
+    this.subtitle,
   });
 }
 
@@ -1464,7 +2480,9 @@ class _StatisticsGrid extends StatelessWidget {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         int crossAxisCount = 2;
-        if (width > 1100) {
+        if (width > 1400) {
+          crossAxisCount = 5;
+        } else if (width > 1100) {
           crossAxisCount = 4;
         } else if (width > 800) {
           crossAxisCount = 3;
@@ -1521,18 +2539,221 @@ class _StatCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 32, color: color),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, size: 20, color: color),
+                ),
+                const Spacer(),
+                Icon(
+                  Icons.trending_up,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
             SizedBox(height: compact ? 8 : 12),
             Text(
               value,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 4),
             Text(title, style: Theme.of(context).textTheme.bodyMedium),
+            if (subtitle != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                subtitle!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+      ),
+    );
+  }
+}
+
+class _CommandIcon extends StatelessWidget {
+  const _CommandIcon({
+    required this.icon,
+    required this.label,
+    this.count,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final int? count;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final displayCount = (count ?? 0) > 0 ? count! : null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, size: 18, color: scheme.onSurfaceVariant),
+                if (displayCount != null)
+                  Positioned(
+                    right: -6,
+                    top: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: scheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+                      child: Text(
+                        displayCount > 9 ? '9+' : displayCount.toString(),
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: scheme.onPrimary,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardNavPill extends StatelessWidget {
+  const _DashboardNavPill({
+    required this.label,
+    this.selected = false,
+    this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final background =
+        selected ? scheme.primaryContainer : scheme.surfaceContainerHighest;
+    final foreground =
+        selected ? scheme.primary : scheme.onSurfaceVariant;
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: foreground,
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceMetricRow extends StatelessWidget {
+  const _WorkspaceMetricRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 14,
+            backgroundColor: color.withValues(alpha: 0.15),
+            child: Icon(icon, size: 16, color: color),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(label)),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
       ),
     );
   }
@@ -1572,32 +2793,6 @@ class _ActionChip extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _ProfileTile extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  final String message;
-
-  const _ProfileTile({
-    required this.icon,
-    required this.text,
-    required this.message,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon),
-      title: Text(text),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
-      },
     );
   }
 }
@@ -1659,6 +2854,11 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
+String _formatCount(int? value) {
+  if (value == null) return '--';
+  return NumberFormat.compact().format(value);
+}
+
 String? _formatTimeAgo(Iterable<DateTime> timestamps) {
   if (timestamps.isEmpty) return null;
   final latest = timestamps.reduce((a, b) => a.isAfter(b) ? a : b);
@@ -1667,6 +2867,30 @@ String? _formatTimeAgo(Iterable<DateTime> timestamps) {
   if (diff.inHours < 1) return '${diff.inMinutes}m ago';
   if (diff.inDays < 1) return '${diff.inHours}h ago';
   return '${diff.inDays}d ago';
+}
+
+const _legacyQuickActions = [
+  'capture',
+  'scan',
+  'start',
+  'documents',
+  'tasks',
+  'assets',
+  'ops',
+  'training',
+  'alerts',
+  'reports',
+  'messages',
+  'clients',
+  'vendors',
+];
+
+bool _listEquals(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var i = 0; i < left.length; i++) {
+    if (left[i] != right[i]) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1679,8 +2903,8 @@ class DashboardPreferences {
     this.showQuickActions = true,
     this.showRecentActivity = true,
     this.compactCards = true,
-    this.statOrder = const [0, 1, 2, 3],
-    this.enabledStats = const [0, 1, 2, 3],
+    this.statOrder = const [0, 1, 2, 3, 4],
+    this.enabledStats = const [0, 1, 2, 3, 4],
     this.quickActions = const [
       'capture',
       'scan',
@@ -1689,6 +2913,7 @@ class DashboardPreferences {
       'tasks',
       'assets',
       'ops',
+      'ai_tools',
       'training',
       'alerts',
       'reports',
@@ -1749,6 +2974,13 @@ class DashboardPrefsNotifier extends legacy.StateNotifier<DashboardPreferences> 
     if (_loaded) return;
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
+    final storedQuickActions = prefs.getStringList('dash.quickActions');
+    var mergedQuickActions = storedQuickActions ?? state.quickActions;
+    if (storedQuickActions != null &&
+        !mergedQuickActions.contains('ai_tools') &&
+        _listEquals(storedQuickActions, _legacyQuickActions)) {
+      mergedQuickActions = [...storedQuickActions, 'ai_tools'];
+    }
     state = DashboardPreferences(
       showStats: prefs.getBool('dash.showStats') ?? state.showStats,
       showQuickActions:
@@ -1762,9 +2994,14 @@ class DashboardPrefsNotifier extends legacy.StateNotifier<DashboardPreferences> 
       enabledStats:
           prefs.getStringList('dash.enabledStats')?.map(int.parse).toList() ??
           state.enabledStats,
-      quickActions:
-          prefs.getStringList('dash.quickActions') ?? state.quickActions,
+      quickActions: mergedQuickActions,
     );
+    if (!state.statOrder.contains(4)) {
+      state = state.copyWith(statOrder: [...state.statOrder, 4]);
+    }
+    if (!state.enabledStats.contains(4)) {
+      state = state.copyWith(enabledStats: [...state.enabledStats, 4]);
+    }
   }
 
   Future<void> _persist() async {
@@ -1844,12 +3081,13 @@ class _DashboardPrefsSheet extends ConsumerWidget {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: List.generate(4, (i) {
+              children: List.generate(5, (i) {
                 final labels = [
+                  'Active Projects',
                   'Active Forms',
+                  'Open Tasks',
                   'Submissions',
-                  'Unread',
-                  'Latest',
+                  'Alerts',
                 ];
                 final enabled = prefs.enabledStats.contains(i);
                 return FilterChip(
@@ -1912,6 +3150,7 @@ class _DashboardPrefsSheet extends ConsumerWidget {
                     ('tasks', 'Tasks'),
                     ('assets', 'Assets'),
                     ('ops', 'Ops Hub'),
+                    ('ai_tools', 'AI Tools'),
                     ('training', 'Training'),
                     ('alerts', 'Alerts'),
                     ('reports', 'Reports'),

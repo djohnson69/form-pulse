@@ -8,12 +8,26 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/utils/csv_utils.dart';
+import '../../../../core/utils/submission_utils.dart';
 import '../../data/dashboard_provider.dart';
 import '../../data/dashboard_repository.dart';
 import 'submission_detail_page.dart';
 
 class ReportsPage extends ConsumerStatefulWidget {
-  const ReportsPage({super.key});
+  const ReportsPage({
+    super.key,
+    this.initialSubmittedBy,
+    this.initialHasLocation,
+    this.initialLat,
+    this.initialLng,
+    this.initialRadiusKm,
+  });
+
+  final String? initialSubmittedBy;
+  final bool? initialHasLocation;
+  final double? initialLat;
+  final double? initialLng;
+  final double? initialRadiusKm;
 
   @override
   ConsumerState<ReportsPage> createState() => _ReportsPageState();
@@ -24,13 +38,18 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
   SubmissionStatus? _status;
   String? _formId;
   String? _submittedBy;
+  UserRole? _submitterRole;
+  String? _provider;
   bool _hasLocation = false;
+  String? _inputType;
+  String? _accessLevel;
   String _query = '';
   String _fieldKey = '';
   String _fieldValue = '';
   double? _centerLat;
   double? _centerLng;
   double? _radiusKm;
+  Map<String, UserRole> _submitterRoles = const {};
 
   late Future<List<FormSubmission>> _future;
   final _queryController = TextEditingController();
@@ -39,15 +58,33 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
   final _latController = TextEditingController();
   final _lngController = TextEditingController();
   final _radiusController = TextEditingController();
+  RealtimeChannel? _submissionsChannel;
 
   @override
   void initState() {
     super.initState();
+    _submittedBy = widget.initialSubmittedBy;
+    _centerLat = widget.initialLat;
+    _centerLng = widget.initialLng;
+    _radiusKm = widget.initialRadiusKm;
+    _hasLocation = widget.initialHasLocation ??
+        (widget.initialLat != null && widget.initialLng != null);
+    if (_centerLat != null) {
+      _latController.text = _centerLat!.toString();
+    }
+    if (_centerLng != null) {
+      _lngController.text = _centerLng!.toString();
+    }
+    if (_radiusKm != null) {
+      _radiusController.text = _radiusKm!.toString();
+    }
     _future = _load();
+    _subscribeToSubmissionChanges();
   }
 
   @override
   void dispose() {
+    _submissionsChannel?.unsubscribe();
     _queryController.dispose();
     _fieldKeyController.dispose();
     _fieldValueController.dispose();
@@ -55,6 +92,21 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     _lngController.dispose();
     _radiusController.dispose();
     super.dispose();
+  }
+
+  void _subscribeToSubmissionChanges() {
+    final client = Supabase.instance.client;
+    _submissionsChannel = client.channel('report-submissions')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'submissions',
+        callback: (_) {
+          if (!mounted) return;
+          _refresh();
+        },
+      )
+      ..subscribe();
   }
 
   Future<List<FormSubmission>> _load() {
@@ -66,7 +118,10 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         startDate: _range?.start,
         endDate: _range?.end,
       ),
-    );
+    ).then((submissions) async {
+      await _refreshSubmitterRoles(submissions);
+      return submissions;
+    });
   }
 
   void _refresh() {
@@ -104,6 +159,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
             );
           }
           final submissions = snapshot.data ?? const <FormSubmission>[];
+          final providerOptions = _providerOptions(submissions);
           final filtered = _applyClientFilters(submissions);
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -115,9 +171,14 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                 status: _status,
                 formId: _formId,
                 submittedBy: _submittedBy,
+                submitterRole: _submitterRole,
+                provider: _provider,
                 hasLocation: _hasLocation,
+                inputType: _inputType,
+                accessLevel: _accessLevel,
                 forms: forms,
                 submitters: _submitterOptions(submissions),
+                providers: providerOptions,
                 queryController: _queryController,
                 fieldKeyController: _fieldKeyController,
                 fieldValueController: _fieldValueController,
@@ -139,8 +200,20 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                 onSubmittedByChanged: (value) {
                   setState(() => _submittedBy = value);
                 },
+                onSubmitterRoleChanged: (role) {
+                  setState(() => _submitterRole = role);
+                },
+                onProviderChanged: (value) {
+                  setState(() => _provider = value);
+                },
                 onHasLocationChanged: (value) {
                   setState(() => _hasLocation = value);
+                },
+                onInputTypeChanged: (value) {
+                  setState(() => _inputType = value);
+                },
+                onAccessLevelChanged: (value) {
+                  setState(() => _accessLevel = value);
                 },
                 onQueryChanged: (value) => setState(() => _query = value),
                 onFieldKeyChanged: (value) => setState(() => _fieldKey = value),
@@ -158,7 +231,11 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                     _status = null;
                     _formId = null;
                     _submittedBy = null;
+                    _submitterRole = null;
+                    _provider = null;
                     _hasLocation = false;
+                    _inputType = null;
+                    _accessLevel = null;
                     _query = '';
                     _fieldKey = '';
                     _fieldValue = '';
@@ -310,6 +387,49 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     return {for (final key in sortedKeys) key: options[key]!};
   }
 
+  Map<String, String> _providerOptions(List<FormSubmission> submissions) {
+    final providers = submissions
+        .map(resolveSubmissionProvider)
+        .where((provider) => provider.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return {for (final provider in providers) provider: provider};
+  }
+
+  Future<void> _refreshSubmitterRoles(List<FormSubmission> submissions) async {
+    final ids = submissions
+        .map((submission) => submission.submittedBy)
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) {
+      if (!mounted) return;
+      setState(() => _submitterRoles = const {});
+      return;
+    }
+    try {
+      final rows = await Supabase.instance.client
+          .from('profiles')
+          .select('id, role')
+          .inFilter('id', ids);
+      final roles = <String, UserRole>{};
+      for (final row in rows) {
+        final id = row['id']?.toString();
+        if (id == null) continue;
+        final rawRole = row['role']?.toString() ?? UserRole.viewer.name;
+        roles[id] = UserRole.values.firstWhere(
+          (role) => role.name == rawRole,
+          orElse: () => UserRole.viewer,
+        );
+      }
+      if (!mounted) return;
+      setState(() => _submitterRoles = roles);
+    } catch (_) {
+      // Ignore role lookup failures; filter will be unavailable.
+    }
+  }
+
   List<FormSubmission> _applyClientFilters(List<FormSubmission> submissions) {
     final query = _query.trim().toLowerCase();
     final fieldKey = _fieldKey.trim().toLowerCase();
@@ -317,6 +437,22 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     final submittedBy = _submittedBy?.toLowerCase();
 
     return submissions.where((submission) {
+      if (_submitterRole != null) {
+        final role = _submitterRoles[submission.submittedBy];
+        if (role != _submitterRole) return false;
+      }
+      if (_provider != null && _provider!.isNotEmpty) {
+        final provider = resolveSubmissionProvider(submission);
+        if (provider != _provider) return false;
+      }
+      if (_inputType != null && _inputType!.isNotEmpty) {
+        final types = resolveSubmissionInputTypes(submission);
+        if (!types.contains(_inputType)) return false;
+      }
+      if (_accessLevel != null && _accessLevel!.isNotEmpty) {
+        final access = resolveSubmissionAccessLevel(submission);
+        if (access != _accessLevel) return false;
+      }
       if (submittedBy != null && submittedBy.isNotEmpty) {
         final byName = submission.submittedByName?.toLowerCase();
         final byId = submission.submittedBy.toLowerCase();
@@ -411,9 +547,14 @@ class _FiltersCard extends StatelessWidget {
     required this.status,
     required this.formId,
     required this.submittedBy,
+    required this.submitterRole,
+    required this.provider,
     required this.hasLocation,
+    required this.inputType,
+    required this.accessLevel,
     required this.forms,
     required this.submitters,
+    required this.providers,
     required this.queryController,
     required this.fieldKeyController,
     required this.fieldValueController,
@@ -424,7 +565,11 @@ class _FiltersCard extends StatelessWidget {
     required this.onStatusChanged,
     required this.onFormChanged,
     required this.onSubmittedByChanged,
+    required this.onSubmitterRoleChanged,
+    required this.onProviderChanged,
     required this.onHasLocationChanged,
+    required this.onInputTypeChanged,
+    required this.onAccessLevelChanged,
     required this.onQueryChanged,
     required this.onFieldKeyChanged,
     required this.onFieldValueChanged,
@@ -436,9 +581,14 @@ class _FiltersCard extends StatelessWidget {
   final SubmissionStatus? status;
   final String? formId;
   final String? submittedBy;
+  final UserRole? submitterRole;
+  final String? provider;
   final bool hasLocation;
+  final String? inputType;
+  final String? accessLevel;
   final List<FormDefinition> forms;
   final Map<String, String> submitters;
+  final Map<String, String> providers;
   final TextEditingController queryController;
   final TextEditingController fieldKeyController;
   final TextEditingController fieldValueController;
@@ -449,7 +599,11 @@ class _FiltersCard extends StatelessWidget {
   final ValueChanged<SubmissionStatus?> onStatusChanged;
   final ValueChanged<String?> onFormChanged;
   final ValueChanged<String?> onSubmittedByChanged;
+  final ValueChanged<UserRole?> onSubmitterRoleChanged;
+  final ValueChanged<String?> onProviderChanged;
   final ValueChanged<bool> onHasLocationChanged;
+  final ValueChanged<String?> onInputTypeChanged;
+  final ValueChanged<String?> onAccessLevelChanged;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<String> onFieldKeyChanged;
   final ValueChanged<String> onFieldValueChanged;
@@ -549,6 +703,87 @@ class _FiltersCard extends StatelessWidget {
                 ),
               ],
               onChanged: onSubmittedByChanged,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<UserRole?>(
+              decoration: const InputDecoration(labelText: 'Submitter role'),
+              initialValue: submitterRole,
+              items: [
+                const DropdownMenuItem(
+                  value: null,
+                  child: Text('All roles'),
+                ),
+                ...UserRole.values.map(
+                  (role) => DropdownMenuItem(
+                    value: role,
+                    child: Text(role.displayName),
+                  ),
+                ),
+              ],
+              onChanged: onSubmitterRoleChanged,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String?>(
+              decoration: const InputDecoration(labelText: 'Auth provider'),
+              initialValue: provider,
+              items: [
+                const DropdownMenuItem(
+                  value: null,
+                  child: Text('All providers'),
+                ),
+                ...providers.entries.map(
+                  (entry) => DropdownMenuItem(
+                    value: entry.key,
+                    child: Text(entry.value),
+                  ),
+                ),
+              ],
+              onChanged: onProviderChanged,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String?>(
+                    decoration: const InputDecoration(labelText: 'Input type'),
+                    initialValue: inputType,
+                    items: [
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text('All types'),
+                      ),
+                      ...submissionInputTypeLabels.entries.map(
+                        (entry) => DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                      ),
+                    ],
+                    onChanged: onInputTypeChanged,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String?>(
+                    decoration:
+                        const InputDecoration(labelText: 'Access level'),
+                    initialValue: accessLevel,
+                    items: [
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text('All access levels'),
+                      ),
+                      ...submissionAccessLevelLabels.entries.map(
+                        (entry) => DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
+                      ),
+                    ],
+                    onChanged: onAccessLevelChanged,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Row(
@@ -832,6 +1067,12 @@ class _SubmissionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final inputTypes = resolveSubmissionInputTypes(submission)
+        .map(submissionInputTypeLabel)
+        .toList();
+    final accessLevel =
+        submissionAccessLevelLabel(resolveSubmissionAccessLevel(submission));
+    final showTags = inputTypes.isNotEmpty || accessLevel.isNotEmpty;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -844,13 +1085,40 @@ class _SubmissionTile extends StatelessWidget {
           ),
         ),
         title: Text(submission.formTitle),
-        subtitle: Text(
-          '${submission.status.displayName} • ${submission.submittedByName ?? submission.submittedBy}',
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${submission.status.displayName} • ${submission.submittedByName ?? submission.submittedBy}',
+            ),
+            if (showTags) const SizedBox(height: 6),
+            if (showTags)
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  ...inputTypes.map(
+                    (label) => Chip(
+                      label: Text(label),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                  Chip(
+                    avatar: const Icon(Icons.lock_outline, size: 16),
+                    label: Text(accessLevel),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ],
+              ),
+          ],
         ),
         trailing: Text(
           _formatDate(submission.submittedAt),
           style: Theme.of(context).textTheme.bodySmall,
         ),
+        isThreeLine: showTags,
         onTap: onTap,
       ),
     );

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared/shared.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/ops_provider.dart';
 
@@ -29,26 +32,43 @@ class PaymentRequestsPage extends ConsumerWidget {
             itemBuilder: (context, index) {
               final req = payments[index];
               final isPaid = req.status == 'paid';
+              final checkoutUrl = _checkoutUrl(req);
+              final statusLabel = _formatStatus(req.status);
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
                   leading: const Icon(Icons.payment),
                   title: Text('\$${req.amount.toStringAsFixed(2)} ${req.currency}'),
-                  subtitle: Text(req.description ?? req.status),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(req.description ?? 'Status: $statusLabel'),
+                      const SizedBox(height: 4),
+                      Text(
+                        checkoutUrl == null
+                            ? 'Status: $statusLabel'
+                            : 'Status: $statusLabel • Link ready',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                   trailing: isPaid
                       ? const Icon(Icons.check_circle, color: Colors.green)
-                      : TextButton(
-                          onPressed: () async {
-                            await ref
-                                .read(opsRepositoryProvider)
-                                .updatePaymentStatus(
-                                  id: req.id,
-                                  status: 'paid',
-                                );
-                            ref.invalidate(paymentRequestsProvider);
-                          },
-                          child: const Text('Mark paid'),
+                      : PopupMenuButton<_PaymentAction>(
+                          tooltip: 'Actions',
+                          onSelected: (action) => _handleAction(
+                            context,
+                            ref,
+                            action,
+                            req,
+                            checkoutUrl,
+                          ),
+                          itemBuilder: (_) => _buildActions(
+                            hasLink: checkoutUrl != null,
+                          ),
+                          icon: const Icon(Icons.more_vert),
                         ),
+                  isThreeLine: true,
                 ),
               );
             },
@@ -130,4 +150,91 @@ class PaymentRequestsPage extends ConsumerWidget {
       ref.invalidate(paymentRequestsProvider);
     }
   }
+
+  List<PopupMenuEntry<_PaymentAction>> _buildActions({
+    required bool hasLink,
+  }) {
+    final entries = <PopupMenuEntry<_PaymentAction>>[];
+    if (hasLink) {
+      entries.add(
+        const PopupMenuItem(
+          value: _PaymentAction.openLink,
+          child: Text('Open payment link'),
+        ),
+      );
+      entries.add(
+        const PopupMenuItem(
+          value: _PaymentAction.shareLink,
+          child: Text('Share payment link'),
+        ),
+      );
+    } else {
+      entries.add(
+        const PopupMenuItem(
+          value: _PaymentAction.generateLink,
+          child: Text('Generate payment link'),
+        ),
+      );
+    }
+    entries.add(
+      const PopupMenuItem(
+        value: _PaymentAction.markPaid,
+        child: Text('Mark paid'),
+      ),
+    );
+    return entries;
+  }
+
+  Future<void> _handleAction(
+    BuildContext context,
+    WidgetRef ref,
+    _PaymentAction action,
+    PaymentRequest req,
+    String? checkoutUrl,
+  ) async {
+    final repo = ref.read(opsRepositoryProvider);
+    switch (action) {
+      case _PaymentAction.generateLink:
+        try {
+          await repo.createPaymentCheckout(request: req);
+          ref.invalidate(paymentRequestsProvider);
+        } catch (e) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Payment link failed: $e')),
+          );
+        }
+        break;
+      case _PaymentAction.openLink:
+        if (checkoutUrl == null) return;
+        final uri = Uri.parse(checkoutUrl);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+        break;
+      case _PaymentAction.shareLink:
+        if (checkoutUrl == null) return;
+        await SharePlus.instance.share(
+          ShareParams(text: 'Payment link: $checkoutUrl'),
+        );
+        break;
+      case _PaymentAction.markPaid:
+        await repo.updatePaymentStatus(id: req.id, status: 'paid');
+        ref.invalidate(paymentRequestsProvider);
+        break;
+    }
+  }
+
+  String? _checkoutUrl(dynamic req) {
+    final meta = req.metadata;
+    final raw = meta?['checkoutUrl'] ?? meta?['checkout_url'];
+    final url = raw?.toString();
+    return (url == null || url.isEmpty) ? null : url;
+  }
+
+  String _formatStatus(String status) {
+    return status.replaceAll('_', ' ');
+  }
 }
+
+enum _PaymentAction { generateLink, openLink, shareLink, markPaid }

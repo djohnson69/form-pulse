@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'ai_tools_page.dart';
+import 'daily_logs_page.dart';
 import 'export_jobs_page.dart';
 import 'guest_invites_page.dart';
 import 'integrations_page.dart';
@@ -13,6 +14,9 @@ import 'portfolio_items_page.dart';
 import 'project_galleries_page.dart';
 import 'reviews_page.dart';
 import 'signature_requests_page.dart';
+import '../../../sop/presentation/pages/sop_library_page.dart';
+import '../../../templates/presentation/pages/templates_page.dart';
+import '../../../teams/presentation/pages/teams_page.dart';
 
 class OpsHubPage extends StatelessWidget {
   const OpsHubPage({super.key});
@@ -20,6 +24,18 @@ class OpsHubPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <_HubItem>[
+      _HubItem(
+        icon: Icons.menu_book,
+        title: 'SOP Library',
+        subtitle: 'Policies, procedures, and approvals',
+        page: const SopLibraryPage(),
+      ),
+      _HubItem(
+        icon: Icons.layers,
+        title: 'Templates',
+        subtitle: 'Workflows, checklists, and reports',
+        page: const TemplatesPage(),
+      ),
       _HubItem(
         icon: Icons.campaign,
         title: 'News & Alerts',
@@ -31,6 +47,12 @@ class OpsHubPage extends StatelessWidget {
         title: 'Automation Rules',
         subtitle: 'Reminders and triggers',
         page: const NotificationRulesPage(),
+      ),
+      _HubItem(
+        icon: Icons.groups,
+        title: 'Teams',
+        subtitle: 'Manage team assignments',
+        page: const TeamsPage(),
       ),
       _HubItem(
         icon: Icons.menu_book,
@@ -67,6 +89,12 @@ class OpsHubPage extends StatelessWidget {
         title: 'AI Tools',
         subtitle: 'Summaries, captions, recaps',
         page: const AiToolsPage(),
+      ),
+      _HubItem(
+        icon: Icons.event_note,
+        title: 'Daily Logs',
+        subtitle: 'Field reports and AI logs',
+        page: const DailyLogsPage(),
       ),
       _HubItem(
         icon: Icons.group_add,

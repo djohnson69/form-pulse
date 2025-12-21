@@ -8,7 +8,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:shared/shared.dart';
 
+import '../../../../core/ai/ai_assist_sheet.dart';
 import '../../../../core/utils/file_bytes_loader.dart';
+import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart' as ops_repo;
 import '../../data/assets_provider.dart';
 import '../../data/assets_repository.dart';
 
@@ -78,6 +81,15 @@ class _InspectionEditorPageState extends ConsumerState<InspectionEditorPage> {
                 decoration: const InputDecoration(
                   labelText: 'Notes',
                   border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: _openAiAssist,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('AI Assist'),
                 ),
               ),
               const SizedBox(height: 12),
@@ -259,6 +271,81 @@ class _InspectionEditorPageState extends ConsumerState<InspectionEditorPage> {
 
   void _addAttachment(AttachmentDraft draft, {required String label}) {
     setState(() => _attachments.add(_AttachmentEntry(label: label, draft: draft)));
+  }
+
+  Future<void> _openAiAssist() async {
+    final audioDraft = _latestAudioDraft();
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'Inspection AI Assist',
+        initialText: _notesController.text.trim(),
+        initialType: 'walkthrough_notes',
+        allowImage: true,
+        initialAudioBytes: audioDraft?.bytes,
+        initialAudioName: audioDraft?.filename,
+        initialAudioMimeType: audioDraft?.mimeType,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    setState(() => _notesController.text = output);
+    await _recordAiUsage(result);
+  }
+
+  Future<void> _recordAiUsage(AiAssistResult result) async {
+    try {
+      final attachments = <ops_repo.AttachmentDraft>[];
+      if (result.imageBytes != null) {
+        attachments.add(
+          ops_repo.AttachmentDraft(
+            type: 'photo',
+            bytes: result.imageBytes!,
+            filename: result.imageName ?? 'ai-image',
+            mimeType: result.imageMimeType ?? 'image/jpeg',
+          ),
+        );
+      }
+      if (result.audioBytes != null) {
+        attachments.add(
+          ops_repo.AttachmentDraft(
+            type: 'audio',
+            bytes: result.audioBytes!,
+            filename: result.audioName ?? 'ai-audio',
+            mimeType: result.audioMimeType ?? 'audio/m4a',
+          ),
+        );
+      }
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            inputMedia: attachments,
+            metadata: {
+              'source': 'asset_inspection',
+              'equipmentId': widget.asset.id,
+              'status': _status,
+              'inspectedAt': _inspectedAt.toIso8601String(),
+              'hasLocation': _location != null,
+            },
+          );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI log failed: $e')),
+      );
+    }
+  }
+
+  AttachmentDraft? _latestAudioDraft() {
+    for (var i = _attachments.length - 1; i >= 0; i--) {
+      final draft = _attachments[i].draft;
+      if (draft.type == 'audio') return draft;
+    }
+    return null;
   }
 
   Future<void> _pickDateTime() async {

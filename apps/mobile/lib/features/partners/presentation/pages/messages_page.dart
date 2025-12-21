@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/partners_provider.dart';
 import '../../data/partners_repository.dart';
@@ -15,6 +16,43 @@ class MessagesPage extends ConsumerStatefulWidget {
 class _MessagesPageState extends ConsumerState<MessagesPage> {
   String _query = '';
   String _typeFilter = 'all';
+  RealtimeChannel? _threadsChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToThreadChanges();
+  }
+
+  @override
+  void dispose() {
+    _threadsChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToThreadChanges() {
+    final client = Supabase.instance.client;
+    _threadsChannel = client.channel('message-threads')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'message_threads',
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(messageThreadsProvider);
+        },
+      )
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'messages',
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(messageThreadsProvider);
+        },
+      )
+      ..subscribe();
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/training_provider.dart';
 import 'training_editor_page.dart';
@@ -83,6 +84,43 @@ class _TrainingRecordsTabState extends ConsumerState<TrainingRecordsTab> {
   TrainingStatus? _statusFilter;
   bool _expiringOnly = false;
   bool _sendingReminders = false;
+  RealtimeChannel? _trainingChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToTrainingChanges();
+  }
+
+  @override
+  void dispose() {
+    _trainingChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToTrainingChanges() {
+    final client = Supabase.instance.client;
+    _trainingChannel = client.channel('training-changes')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'training_records',
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(trainingRecordsProvider(null));
+        },
+      )
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'employees',
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(employeesProvider);
+        },
+      )
+      ..subscribe();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -448,21 +486,38 @@ class _TrainingRecordCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = _effectiveStatus(training).displayName;
+    final effectiveStatus = _effectiveStatus(training);
+    final status = effectiveStatus.displayName;
     final expires = training.expirationDate;
     final expiresText = expires == null
         ? 'No expiration'
         : 'Expires ${expires.month}/${expires.day}/${expires.year}';
+    final actionRequired =
+        effectiveStatus == TrainingStatus.dueForRecert ||
+            effectiveStatus == TrainingStatus.expired;
     return Card(
       child: ListTile(
         leading: const Icon(Icons.school),
         title: Text(training.trainingName),
-        subtitle: Text(
-          [
-            if (employee != null) employee!.fullName,
-            status,
-            expiresText,
-          ].join(' • '),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              [
+                if (employee != null) employee!.fullName,
+                status,
+                expiresText,
+              ].join(' • '),
+            ),
+            if (actionRequired)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Chip(
+                  label: const Text('Action required'),
+                  backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                ),
+              ),
+          ],
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: onTap,

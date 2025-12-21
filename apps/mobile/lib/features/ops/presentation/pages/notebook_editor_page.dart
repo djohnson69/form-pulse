@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 
+import '../../../../core/ai/ai_assist_sheet.dart';
 import '../../data/ops_provider.dart';
+import '../../data/ops_repository.dart' as ops_repo;
 import '../../../projects/data/projects_provider.dart';
 
 class NotebookEditorPage extends ConsumerStatefulWidget {
@@ -71,6 +73,15 @@ class _NotebookEditorPageState extends ConsumerState<NotebookEditorPage> {
                 decoration: const InputDecoration(
                   labelText: 'Notes',
                   border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: _saving ? null : _openAiAssist,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('AI Assist'),
                 ),
               ),
               const SizedBox(height: 12),
@@ -152,6 +163,80 @@ class _NotebookEditorPageState extends ConsumerState<NotebookEditorPage> {
       );
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _openAiAssist() async {
+    final result = await showModalBottomSheet<AiAssistResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => AiAssistSheet(
+        title: 'AI Notebook Assist',
+        initialText: _bodyController.text.trim(),
+        initialType: 'summary',
+        options: const [
+          AiAssistOption(id: 'summary', label: 'Summary', allowsAudio: true),
+          AiAssistOption(
+            id: 'field_report',
+            label: 'Field report',
+            allowsAudio: true,
+          ),
+          AiAssistOption(
+            id: 'walkthrough_notes',
+            label: 'Walkthrough notes',
+            allowsAudio: true,
+          ),
+          AiAssistOption(id: 'daily_log', label: 'Daily log', allowsAudio: true),
+          AiAssistOption(
+            id: 'translation',
+            label: 'Translation',
+            requiresLanguage: true,
+            allowsAudio: true,
+          ),
+        ],
+        allowImage: false,
+        allowAudio: true,
+      ),
+    );
+    if (result == null) return;
+    final output = result.outputText.trim();
+    if (output.isEmpty) return;
+    if (!mounted) return;
+    setState(() => _bodyController.text = output);
+    await _recordAiUsage(result);
+  }
+
+  Future<void> _recordAiUsage(AiAssistResult result) async {
+    try {
+      final attachments = <ops_repo.AttachmentDraft>[];
+      if (result.audioBytes != null) {
+        attachments.add(
+          ops_repo.AttachmentDraft(
+            type: 'audio',
+            bytes: result.audioBytes!,
+            filename: result.audioName ?? 'ai-audio',
+            mimeType: result.audioMimeType ?? 'audio/m4a',
+          ),
+        );
+      }
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: result.type,
+            inputText: result.inputText.isEmpty ? null : result.inputText,
+            outputText: result.outputText,
+            inputMedia: attachments,
+            metadata: {
+              'source': 'notebook_editor',
+              if (_projectId != null) 'projectId': _projectId!,
+              if (result.targetLanguage != null &&
+                  result.targetLanguage!.isNotEmpty)
+                'targetLanguage': result.targetLanguage,
+              if (result.checklistCount != null)
+                'checklistCount': result.checklistCount,
+            },
+          );
+    } catch (_) {
+      // Ignore AI logging failures for notebook assist.
     }
   }
 }

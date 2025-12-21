@@ -1,19 +1,54 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/ops_provider.dart';
 import '../../../projects/data/projects_provider.dart';
 import 'notebook_editor_page.dart';
 
-class NotebookPagesPage extends ConsumerWidget {
+class NotebookPagesPage extends ConsumerStatefulWidget {
   const NotebookPagesPage({super.key, this.projectId});
 
   final String? projectId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final pagesAsync = ref.watch(notebookPagesProvider(projectId));
+  ConsumerState<NotebookPagesPage> createState() => _NotebookPagesPageState();
+}
+
+class _NotebookPagesPageState extends ConsumerState<NotebookPagesPage> {
+  RealtimeChannel? _notebookChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToNotebookChanges();
+  }
+
+  @override
+  void dispose() {
+    _notebookChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToNotebookChanges() {
+    final client = Supabase.instance.client;
+    _notebookChannel = client.channel('notebook-pages')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'notebook_pages',
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(notebookPagesProvider(widget.projectId));
+        },
+      )
+      ..subscribe();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pagesAsync = ref.watch(notebookPagesProvider(widget.projectId));
     return Scaffold(
       appBar: AppBar(title: const Text('Notebook')),
       floatingActionButton: FloatingActionButton.extended(
@@ -66,7 +101,7 @@ class NotebookPagesPage extends ConsumerWidget {
       ),
     );
     if (result == true) {
-      ref.invalidate(notebookPagesProvider(projectId));
+      ref.invalidate(notebookPagesProvider(widget.projectId));
       ref.invalidate(projectsProvider);
     }
   }

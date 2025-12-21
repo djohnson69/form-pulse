@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/documents_provider.dart';
 import '../../../projects/data/projects_provider.dart';
@@ -23,6 +24,42 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
   String _query = '';
   String? _categoryFilter;
   _DocumentTypeFilter _typeFilter = _DocumentTypeFilter.all;
+  RealtimeChannel? _documentsChannel;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToDocumentChanges();
+  }
+
+  @override
+  void dispose() {
+    _documentsChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToDocumentChanges() {
+    final client = Supabase.instance.client;
+    final channelName = 'documents-${widget.projectId ?? 'all'}';
+    _documentsChannel = client.channel(channelName)
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'documents',
+        filter: widget.projectId == null
+            ? null
+            : PostgresChangeFilter(
+                type: PostgresChangeFilterType.eq,
+                column: 'project_id',
+                value: widget.projectId,
+              ),
+        callback: (_) {
+          if (!mounted) return;
+          ref.invalidate(documentsProvider(widget.projectId));
+        },
+      )
+      ..subscribe();
+  }
 
   @override
   Widget build(BuildContext context) {
