@@ -40,45 +40,52 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
 
     return Scaffold(
       backgroundColor: colors.background,
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _UserDirectoryHeader(
-            colors: colors,
-            onExport: () => _handleExport(filteredUsers),
-            onAdd: () => _openAddUserDialog(colors),
-          ),
-          if (usersAsync.hasError) ...[
-            const SizedBox(height: 12),
-            _ErrorBanner(colors: colors, message: 'Failed to load users.'),
-          ],
-          const SizedBox(height: 16),
-          _StatsGrid(
-            colors: colors,
-            stats: stats,
-          ),
-          const SizedBox(height: 16),
-          _RoleDistribution(
-            colors: colors,
-            roleCounts: stats.roleCounts,
-          ),
-          const SizedBox(height: 16),
-          _FiltersBar(
-            colors: colors,
-            searchController: _searchController,
-            roleFilter: _roleFilter,
-            statusFilter: _statusFilter,
-            onRoleChanged: (value) => setState(() => _roleFilter = value),
-            onStatusChanged: (value) => setState(() => _statusFilter = value),
-            onSearchChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 16),
-          _UsersTable(
-            colors: colors,
-            users: filteredUsers,
-          ),
-          const SizedBox(height: 80),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 768;
+          final pagePadding = EdgeInsets.all(isWide ? 24 : 16);
+          final sectionSpacing = isWide ? 24.0 : 20.0;
+          return ListView(
+            padding: pagePadding,
+            children: [
+              _UserDirectoryHeader(
+                colors: colors,
+                onExport: () => _handleExport(filteredUsers),
+                onAdd: () => _openAddUserDialog(colors),
+              ),
+              if (usersAsync.hasError) ...[
+                const SizedBox(height: 12),
+                _ErrorBanner(colors: colors, message: 'Failed to load users.'),
+              ],
+              SizedBox(height: sectionSpacing),
+              _StatsGrid(
+                colors: colors,
+                stats: stats,
+              ),
+              SizedBox(height: sectionSpacing),
+              _RoleDistribution(
+                colors: colors,
+                roleCounts: stats.roleCounts,
+              ),
+              SizedBox(height: sectionSpacing),
+              _FiltersBar(
+                colors: colors,
+                searchController: _searchController,
+                roleFilter: _roleFilter,
+                statusFilter: _statusFilter,
+                onRoleChanged: (value) => setState(() => _roleFilter = value),
+                onStatusChanged: (value) => setState(() => _statusFilter = value),
+                onSearchChanged: (_) => setState(() {}),
+              ),
+              SizedBox(height: sectionSpacing),
+              _UsersTable(
+                colors: colors,
+                users: filteredUsers,
+              ),
+              const SizedBox(height: 80),
+            ],
+          );
+        },
       ),
     );
   }
@@ -215,7 +222,12 @@ class _UserDirectoryHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 720;
+        final isWide = constraints.maxWidth >= 768;
+        final showLabel = constraints.maxWidth >= 640;
+        final buttonPadding = EdgeInsets.symmetric(
+          horizontal: showLabel ? 16 : 12,
+          vertical: 10,
+        );
         final info = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -243,13 +255,12 @@ class _UserDirectoryHeader extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onExport,
               icon: const Icon(Icons.download_outlined, size: 18),
-              label: const Text('Export'),
+              label: showLabel ? const Text('Export') : const SizedBox.shrink(),
               style: OutlinedButton.styleFrom(
                 foregroundColor: colors.body,
                 backgroundColor: colors.surface,
                 side: BorderSide(color: colors.border),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding: buttonPadding,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -258,17 +269,16 @@ class _UserDirectoryHeader extends StatelessWidget {
             ElevatedButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add User'),
+              label: showLabel ? const Text('Add User') : const SizedBox.shrink(),
               style: ElevatedButton.styleFrom(
                 backgroundColor: colors.primary,
                 foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding: buttonPadding,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                elevation: 2,
-                shadowColor: colors.primary.withValues(alpha: 0.25),
+                elevation: 6,
+                shadowColor: colors.primary.withValues(alpha: 0.2),
               ),
             ),
           ],
@@ -308,7 +318,7 @@ class _StatsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 900 ? 4 : 2;
+        final crossAxisCount = constraints.maxWidth >= 768 ? 4 : 2;
         final activeHelper =
             colors.isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
         final trendHelper =
@@ -351,9 +361,9 @@ class _StatsGrid extends StatelessWidget {
           crossAxisCount: crossAxisCount,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 1.6,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 16,
+          childAspectRatio: 1.4,
           children: [
             for (final item in items)
               _StatCard(colors: colors, data: item),
@@ -397,7 +407,7 @@ class _StatCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
         boxShadow: [
           if (!colors.isDark)
@@ -466,11 +476,19 @@ class _RoleDistribution extends StatelessWidget {
     }).toList();
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
+        boxShadow: [
+          if (!colors.isDark)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -485,14 +503,14 @@ class _RoleDistribution extends StatelessWidget {
           const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
-              final crossAxisCount = constraints.maxWidth >= 900 ? 4 : 2;
+              final crossAxisCount = constraints.maxWidth >= 768 ? 4 : 2;
               return GridView.count(
                 crossAxisCount: crossAxisCount,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.4,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.3,
                 children: [
                   for (final item in items)
                     _RoleCard(colors: colors, item: item),
@@ -530,9 +548,11 @@ class _RoleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: colors.filterSurface,
+        color: colors.isDark
+            ? colors.filterSurface.withValues(alpha: 0.5)
+            : const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -584,11 +604,19 @@ class _FiltersBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
+        boxShadow: [
+          if (!colors.isDark)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+        ],
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -686,7 +714,7 @@ class _UsersTable extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: colors.surface,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: colors.border),
         ),
         child: Text(
@@ -702,11 +730,19 @@ class _UsersTable extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
+        boxShadow: [
+          if (!colors.isDark)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+        ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTableTheme(
@@ -1527,9 +1563,10 @@ class _UserDirectoryColors {
       title: isDark ? Colors.white : const Color(0xFF111827),
       primary: primary,
       tableHeader:
-          isDark ? const Color(0xFF111827) : const Color(0xFFF3F4F6),
-      rowHover:
-          isDark ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB),
+          isDark ? const Color(0xFF111827).withValues(alpha: 0.5) : const Color(0xFFF3F4F6),
+      rowHover: isDark
+          ? const Color(0xFF374151).withValues(alpha: 0.5)
+          : const Color(0xFFF9FAFB),
       filterSurface:
           isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
       inputFill: isDark ? const Color(0xFF0B1220) : Colors.white,
