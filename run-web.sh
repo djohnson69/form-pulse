@@ -3,11 +3,27 @@
 # Usage: ./run-web.sh
 
 ROOT_DIR="$(dirname "$0")"
+
+# Load environment variables from .env file
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ROOT_DIR/.env"
+  set +a
+fi
+
+# Load local overrides from .env.local
 if [ -f "$ROOT_DIR/.env.local" ]; then
   set -a
   # shellcheck disable=SC1090
   . "$ROOT_DIR/.env.local"
   set +a
+fi
+
+# Check required variables
+if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+  echo "Error: SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env file"
+  exit 1
 fi
 
 OPENAI_DEFINES=()
@@ -27,8 +43,8 @@ fi
 cd "$ROOT_DIR/apps/mobile" || exit 1
 
 flutter run -d chrome \
-  --dart-define=SUPABASE_URL=https://xpcibptzncfmifaneoop.supabase.co \
-  --dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwY2licHR6bmNmbWlmYW5lb29wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4NTE1ODcsImV4cCI6MjA4MTQyNzU4N30.sMzKoqj0GhLsD8tRd73j9NOjEa_ucz0dkh3TwoXD4Tg \
-  --dart-define=SUPABASE_BUCKET=formbridge-attachments \
+  --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+  --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+  --dart-define=SUPABASE_BUCKET="${SUPABASE_STORAGE_BUCKET:-formbridge-attachments}" \
   "${OPENAI_DEFINES[@]}" \
   "$@"
