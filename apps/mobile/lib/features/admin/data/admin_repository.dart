@@ -297,43 +297,78 @@ class AdminRepository {
     String? search,
     UserRole? role,
   }) async {
-    var query = _client.from('profiles').select(
-          'id,org_id,email,first_name,last_name,role,is_active,created_at,updated_at',
+    try {
+      var query = _client.from('profiles').select(
+            'id,org_id,email,first_name,last_name,role,is_active,created_at,updated_at',
+          );
+
+      if (orgId != null && orgId.isNotEmpty) {
+        query = query.eq('org_id', orgId);
+      }
+      if (role != null) {
+        query = query.eq('role', role.name);
+      }
+      if (search != null && search.trim().isNotEmpty) {
+        final term = search.trim();
+        query = query.or(
+          'email.ilike.%$term%,first_name.ilike.%$term%,last_name.ilike.%$term%',
         );
+      }
 
-    if (orgId != null && orgId.isNotEmpty) {
-      query = query.eq('org_id', orgId);
+      final res = await query.order('created_at', ascending: false).limit(250);
+      return res.map<AdminUserSummary>((row) {
+        final roleName = row['role']?.toString();
+        return AdminUserSummary(
+          id: row['id'].toString(),
+          orgId: row['org_id']?.toString() ?? '',
+          email: row['email']?.toString() ?? 'unknown',
+          firstName: row['first_name']?.toString() ?? '',
+          lastName: row['last_name']?.toString() ?? '',
+          role: UserRole.fromRaw(roleName),
+          isActive: row['is_active'] as bool? ?? true,
+          createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+              DateTime.now(),
+          updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
+              DateTime.now(),
+        );
+      }).toList();
+    } on PostgrestException catch (e) {
+      if (e.message.contains('is_active') || e.code == '42703') {
+        var query = _client.from('profiles').select(
+              'id,org_id,email,first_name,last_name,role,created_at,updated_at',
+            );
+        if (orgId != null && orgId.isNotEmpty) {
+          query = query.eq('org_id', orgId);
+        }
+        if (role != null) {
+          query = query.eq('role', role.name);
+        }
+        if (search != null && search.trim().isNotEmpty) {
+          final term = search.trim();
+          query = query.or(
+            'email.ilike.%$term%,first_name.ilike.%$term%,last_name.ilike.%$term%',
+          );
+        }
+        final res = await query.order('created_at', ascending: false).limit(250);
+        return res.map<AdminUserSummary>((row) {
+          final roleName = row['role']?.toString();
+          return AdminUserSummary(
+            id: row['id'].toString(),
+            orgId: row['org_id']?.toString() ?? '',
+            email: row['email']?.toString() ?? 'unknown',
+            firstName: row['first_name']?.toString() ?? '',
+            lastName: row['last_name']?.toString() ?? '',
+            role: UserRole.fromRaw(roleName),
+            isActive: true,
+            createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+                DateTime.now(),
+            updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
+                DateTime.now(),
+          );
+        }).toList();
+      }
+      rethrow;
     }
-    if (role != null) {
-      query = query.eq('role', role.name);
-    }
-    if (search != null && search.trim().isNotEmpty) {
-      final term = search.trim();
-      query = query.or(
-        'email.ilike.%$term%,first_name.ilike.%$term%,last_name.ilike.%$term%',
-      );
-    }
-
-    final res = await query.order('created_at', ascending: false).limit(250);
-    return res.map<AdminUserSummary>((row) {
-      final roleName = row['role']?.toString();
-      return AdminUserSummary(
-        id: row['id'].toString(),
-        orgId: row['org_id']?.toString() ?? '',
-        email: row['email']?.toString() ?? 'unknown',
-        firstName: row['first_name']?.toString() ?? '',
-        lastName: row['last_name']?.toString() ?? '',
-        role: UserRole.values.firstWhere(
-          (r) => r.name == roleName,
-          orElse: () => UserRole.viewer,
-        ),
-        isActive: row['is_active'] as bool? ?? true,
-        createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
-            DateTime.now(),
-        updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
-            DateTime.now(),
-      );
-    }).toList();
   }
 
   Future<void> updateUserRole({
@@ -350,10 +385,17 @@ class AdminRepository {
     required String userId,
     required bool isActive,
   }) async {
-    await _client.from('profiles').update({
-      'is_active': isActive,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', userId);
+    try {
+      await _client.from('profiles').update({
+        'is_active': isActive,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', userId);
+    } on PostgrestException catch (e) {
+      if (e.message.contains('is_active') || e.code == '42703') {
+        return;
+      }
+      rethrow;
+    }
   }
 
   Future<List<AdminFormSummary>> fetchForms({
@@ -456,12 +498,7 @@ class AdminRepository {
       final submitterId = row['submitted_by']?.toString();
       final profile = submitterId != null ? profilesById[submitterId] : null;
       final roleName = profile?['role']?.toString();
-      final role = roleName == null
-          ? null
-          : UserRole.values.firstWhere(
-              (value) => value.name == roleName,
-              orElse: () => UserRole.viewer,
-            );
+      final role = roleName == null ? null : UserRole.fromRaw(roleName);
       final firstName = profile?['first_name']?.toString() ?? '';
       final lastName = profile?['last_name']?.toString() ?? '';
       final email = profile?['email']?.toString() ?? '';

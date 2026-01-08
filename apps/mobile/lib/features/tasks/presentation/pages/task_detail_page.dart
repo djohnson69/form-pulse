@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../data/tasks_provider.dart';
-import '../pages/task_editor_page.dart';
-
+import '../../../dashboard/data/role_override_provider.dart';
 class TaskDetailPage extends ConsumerStatefulWidget {
   const TaskDetailPage({required this.task, super.key});
 
@@ -17,7 +16,6 @@ class TaskDetailPage extends ConsumerStatefulWidget {
 
 class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
   late Task _task;
-  bool _saving = false;
   late Future<UserRole> _roleFuture;
 
   @override
@@ -29,219 +27,168 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final repo = ref.read(tasksRepositoryProvider);
+    final roleOverride = ref.watch(roleOverrideProvider);
+    final roleFuture =
+        roleOverride == null ? _roleFuture : Future.value(roleOverride);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_task.title),
-        actions: [
-          IconButton(
-            tooltip: 'Edit task',
-            icon: const Icon(Icons.edit),
-            onPressed: () async {
-              final updated = await Navigator.of(context).push<Task?>(
-                MaterialPageRoute(
-                  builder: (_) => TaskEditorPage(existing: _task),
-                ),
-              );
-              if (updated == null || !mounted) return;
-              setState(() => _task = updated);
-              ref.invalidate(tasksProvider);
-            },
-          ),
-        ],
-      ),
-      body: FutureBuilder<UserRole>(
-        future: _roleFuture,
-        builder: (context, snapshot) {
-          final role = snapshot.data ?? UserRole.viewer;
-          final approval =
-              _task.metadata?['approval'] as Map<String, dynamic>? ?? {};
-          final requiresApproval = approval['required'] == true;
-          final approvalStatus = approval['status']?.toString() ?? 'pending';
-          final approverRole = approval['approverRole']?.toString();
-          final canApprove = _canApprove(role, approverRole);
-          final isApproved = approvalStatus == 'approved';
-          final canChangeStatus = !requiresApproval || isApproved;
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              if (requiresApproval)
-                _InfoTile(
-                  icon: Icons.verified_user,
-                  title: 'Approval',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        isApproved
-                            ? 'Approved'
-                            : 'Approval required${approverRole != null ? ' by $approverRole' : ''}.',
-                      ),
-                      const SizedBox(height: 8),
-                      if (!isApproved && canApprove)
-                        FilledButton.icon(
-                          onPressed: _saving ? null : _approveTask,
-                          icon: const Icon(Icons.check_circle),
-                          label: const Text('Approve task'),
-                        ),
-                      if (!isApproved && !canApprove)
-                        const Text('Waiting for approval.'),
-                    ],
+      body: SafeArea(
+        child: FutureBuilder<UserRole>(
+          future: roleFuture,
+          builder: (context, snapshot) {
+            final role = snapshot.data ?? UserRole.viewer;
+            final canManage = role.canManage || role.canSupervise;
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                TextButton.icon(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Back to Tasks'),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.centerLeft,
                   ),
                 ),
-              if (requiresApproval) const SizedBox(height: 12),
-              _InfoTile(
-                icon: Icons.flag,
-                title: 'Status',
-                child: DropdownButtonFormField<TaskStatus>(
-                  initialValue: _task.status,
-                  decoration: const InputDecoration(border: OutlineInputBorder()),
-                  items: TaskStatus.values
-                      .map(
-                        (status) => DropdownMenuItem(
-                          value: status,
-                          child: Text(status.displayName),
+                const SizedBox(height: 12),
+                _buildHeader(context, canManage),
+                const SizedBox(height: 20),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth >= 1000;
+                    final main = Column(
+                      children: [
+                        _DetailsCard(task: _task),
+                        const SizedBox(height: 16),
+                        _NotesCard(task: _task),
+                        const SizedBox(height: 16),
+                        const _CommentsCard(),
+                      ],
+                    );
+                    final sidebar = Column(
+                      children: [
+                        _QuickActionsCard(
+                          onMarkComplete: _noopAction,
+                          onAddComment: _noopAction,
+                          onAttachFile: _noopAction,
                         ),
-                      )
-                      .toList(),
-                  onChanged: _saving || !canChangeStatus
-                      ? null
-                      : (status) async {
-                          if (status == null) return;
-                          setState(() => _saving = true);
-                          final updated = await repo.updateTask(
-                            taskId: _task.id,
-                            status: status,
-                          );
-                          if (!mounted) return;
-                          setState(() {
-                            _task = updated;
-                            _saving = false;
-                          });
-                          ref.invalidate(tasksProvider);
-                        },
-                ),
-              ),
-          const SizedBox(height: 12),
-          _InfoTile(
-            icon: Icons.linear_scale,
-            title: 'Progress',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Slider(
-                  value: _task.progress.toDouble().clamp(0, 100).toDouble(),
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  label: '${_task.progress}%',
-                  onChanged: _saving || !canChangeStatus
-                      ? null
-                      : (value) {
-                          setState(() {
-                            _task = Task(
-                              id: _task.id,
-                              orgId: _task.orgId,
-                              title: _task.title,
-                              description: _task.description,
-                              instructions: _task.instructions,
-                              status: _task.status,
-                              progress: value.round(),
-                              dueDate: _task.dueDate,
-                              priority: _task.priority,
-                              assignedTo: _task.assignedTo,
-                              assignedToName: _task.assignedToName,
-                              assignedTeam: _task.assignedTeam,
-                              createdBy: _task.createdBy,
-                              createdAt: _task.createdAt,
-                              updatedAt: _task.updatedAt,
-                              completedAt: _task.completedAt,
-                              metadata: _task.metadata,
-                            );
-                          });
-                        },
-                  onChangeEnd: _saving || !canChangeStatus
-                      ? null
-                      : (value) async {
-                          setState(() => _saving = true);
-                          final updated = await repo.updateTask(
-                            taskId: _task.id,
-                            progress: value.round(),
-                          );
-                          if (!mounted) return;
-                          setState(() {
-                            _task = updated;
-                            _saving = false;
-                          });
-                          ref.invalidate(tasksProvider);
-                        },
-                ),
-                Text('${_task.progress}% complete'),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          _InfoTile(
-            icon: Icons.calendar_today,
-            title: 'Due date',
-            child: Row(
-              children: [
-                Text(
-                  _task.dueDate == null
-                      ? 'No due date'
-                      : _formatDate(_task.dueDate!),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: _saving ? null : _pickDueDate,
-                  child: const Text('Change'),
+                        const SizedBox(height: 16),
+                        _PriorityCard(priority: _task.priority),
+                      ],
+                    );
+                    if (isWide) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(flex: 2, child: main),
+                          const SizedBox(width: 16),
+                          Expanded(child: sidebar),
+                        ],
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        main,
+                        const SizedBox(height: 16),
+                        sidebar,
+                      ],
+                    );
+                  },
                 ),
               ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          _InfoTile(
-            icon: Icons.person,
-            title: 'Assigned to',
-            child: Text(_task.assignedToName ?? _task.assignedTeam ?? 'Unassigned'),
-          ),
-          const SizedBox(height: 12),
-          if ((_task.description ?? '').isNotEmpty)
-            _InfoTile(
-              icon: Icons.description,
-              title: 'Description',
-              child: Text(_task.description!),
-            ),
-          if ((_task.instructions ?? '').isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _InfoTile(
-              icon: Icons.list_alt,
-              title: 'Instructions',
-              child: Text(_task.instructions!),
-            ),
-          ],
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed:
-                _saving || _task.status == TaskStatus.completed || !canChangeStatus
-                    ? null
-                    : _markComplete,
-            icon: const Icon(Icons.check_circle),
-            label: const Text('Mark completed'),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed:
-                _saving || _task.assignedTo == null ? null : _sendReminder,
-            icon: const Icon(Icons.notifications_active),
-            label: const Text('Send reminder'),
-          ),
-            ],
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
+
+  Widget _buildHeader(BuildContext context, bool canManage) {
+    final theme = Theme.of(context);
+    final statusLabel = _statusLabel(_task.status);
+    final statusColor = _statusColor(_task.status, theme.brightness);
+    final description = _task.description?.trim() ?? '';
+
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              _task.title,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            _Pill(label: statusLabel, color: statusColor),
+          ],
+        ),
+        if (description.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            description,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
+
+    if (!canManage) {
+      return titleBlock;
+    }
+
+    final actions = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        FilledButton.icon(
+          onPressed: _noopAction,
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          label: const Text('Edit'),
+        ),
+        FilledButton.icon(
+          onPressed: _noopAction,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFDC2626),
+            foregroundColor: Colors.white,
+          ),
+          icon: const Icon(Icons.delete_outline, size: 18),
+          label: const Text('Delete'),
+        ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900;
+        if (isWide) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: titleBlock),
+              const SizedBox(width: 16),
+              actions,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            titleBlock,
+            const SizedBox(height: 12),
+            actions,
+          ],
+        );
+      },
+    );
+  }
+
+  void _noopAction() {}
 
   Future<UserRole> _fetchUserRole() async {
     final client = Supabase.instance.client;
@@ -254,140 +201,418 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
           .eq('id', user.id)
           .maybeSingle();
       final raw = res?['role']?.toString() ?? UserRole.viewer.name;
-      return UserRole.values.firstWhere(
-        (role) => role.name == raw,
-        orElse: () => UserRole.viewer,
-      );
+      return UserRole.fromRaw(raw);
     } catch (_) {
       return UserRole.viewer;
     }
   }
 
-  bool _canApprove(UserRole role, String? requiredRole) {
-    if (requiredRole == null || requiredRole.isEmpty) {
-      return role.canManage;
-    }
-    switch (requiredRole) {
-      case 'superAdmin':
-        return role == UserRole.superAdmin;
-      case 'admin':
-        return role.isAdmin;
-      case 'manager':
-        return role.canManage;
-      case 'supervisor':
-        return role.canSupervise;
-      default:
-        return role.canManage;
+  String _statusLabel(TaskStatus status) {
+    switch (status) {
+      case TaskStatus.todo:
+        return 'pending';
+      case TaskStatus.inProgress:
+        return 'in progress';
+      case TaskStatus.completed:
+        return 'completed';
+      case TaskStatus.blocked:
+        return 'blocked';
     }
   }
 
-  Future<void> _approveTask() async {
-    setState(() => _saving = true);
-    try {
-      final repo = ref.read(tasksRepositoryProvider);
-      final metadata = Map<String, dynamic>.from(_task.metadata ?? const {});
-      final approval = Map<String, dynamic>.from(
-        metadata['approval'] as Map? ?? const {},
-      );
-      approval['status'] = 'approved';
-      approval['approvedAt'] = DateTime.now().toIso8601String();
-      approval['approvedBy'] =
-          Supabase.instance.client.auth.currentUser?.id;
-      metadata['approval'] = approval;
-      final updated = await repo.updateTask(
-        taskId: _task.id,
-        metadata: metadata,
-      );
-      if (!mounted) return;
-      setState(() => _task = updated);
-      ref.invalidate(tasksProvider);
-    } finally {
-      if (mounted) setState(() => _saving = false);
+  Color _statusColor(TaskStatus status, Brightness brightness) {
+    switch (status) {
+      case TaskStatus.todo:
+        return brightness == Brightness.dark
+            ? const Color(0xFFB45309)
+            : const Color(0xFFF59E0B);
+      case TaskStatus.inProgress:
+        return const Color(0xFF2563EB);
+      case TaskStatus.completed:
+        return const Color(0xFF16A34A);
+      case TaskStatus.blocked:
+        return const Color(0xFFDC2626);
     }
-  }
-
-  Future<void> _pickDueDate() async {
-    final repo = ref.read(tasksRepositoryProvider);
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: _task.dueDate ?? DateTime.now(),
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-    );
-    if (selected == null) return;
-    setState(() => _saving = true);
-    final updated = await repo.updateTask(
-      taskId: _task.id,
-      dueDate: selected,
-    );
-    if (!mounted) return;
-    setState(() {
-      _task = updated;
-      _saving = false;
-    });
-    ref.invalidate(tasksProvider);
-  }
-
-  Future<void> _markComplete() async {
-    final repo = ref.read(tasksRepositoryProvider);
-    setState(() => _saving = true);
-    final updated = await repo.updateTask(
-      taskId: _task.id,
-      status: TaskStatus.completed,
-    );
-    if (!mounted) return;
-    setState(() {
-      _task = updated;
-      _saving = false;
-    });
-    ref.invalidate(tasksProvider);
-  }
-
-  Future<void> _sendReminder() async {
-    final repo = ref.read(tasksRepositoryProvider);
-    await repo.sendReminder(_task);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Reminder sent')),
-    );
-  }
-
-  String _formatDate(DateTime date) {
-    final local = date.toLocal();
-    return '${local.month}/${local.day}/${local.year}';
   }
 }
 
-class _InfoTile extends StatelessWidget {
-  const _InfoTile({
-    required this.icon,
-    required this.title,
-    required this.child,
-  });
+class _DetailsCard extends StatelessWidget {
+  const _DetailsCard({required this.task});
 
-  final IconData icon;
-  final String title;
-  final Widget child;
+  final Task task;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon),
-                const SizedBox(width: 8),
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
-              ],
+    final theme = Theme.of(context);
+    final border = theme.brightness == Brightness.dark
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+    final metadata = task.metadata ?? const <String, dynamic>{};
+    final location = _readString(metadata['location'], 'Not specified');
+    final createdBy = _readString(
+      metadata['createdByName'] ?? metadata['createdBy'],
+      task.createdBy ?? 'System',
+    );
+    final dueDateLabel = task.dueDate == null
+        ? 'No due date'
+        : DateFormat.yMMMd().format(task.dueDate!.toLocal());
+    final createdLabel =
+        DateFormat.yMMMd().format(task.createdAt.toLocal());
+    final assignee =
+        task.assignedToName ?? task.assignedTeam ?? 'Unassigned';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Task Details',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(height: 12),
-            child,
-          ],
+          ),
+          const SizedBox(height: 12),
+          _DetailRow(
+            icon: Icons.person_outline,
+            label: 'Assigned to',
+            value: assignee,
+          ),
+          const SizedBox(height: 12),
+          _DetailRow(
+            icon: Icons.place_outlined,
+            label: 'Location',
+            value: location,
+          ),
+          const SizedBox(height: 12),
+          _DetailRow(
+            icon: Icons.calendar_today_outlined,
+            label: 'Due Date',
+            value: dueDateLabel,
+          ),
+          const SizedBox(height: 12),
+          _DetailRow(
+            icon: Icons.schedule,
+            label: 'Created',
+            value: '$createdLabel by $createdBy',
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _readString(dynamic value, String fallback) {
+    if (value == null) return fallback;
+    final text = value.toString().trim();
+    return text.isEmpty ? fallback : text;
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 20,
+          color: theme.colorScheme.onSurfaceVariant,
         ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _NotesCard extends StatelessWidget {
+  const _NotesCard({required this.task});
+
+  final Task task;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final border = theme.brightness == Brightness.dark
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+    final metadata = task.metadata ?? const <String, dynamic>{};
+    final notes =
+        _readString(metadata['notes'], task.instructions ?? 'No notes yet.');
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Notes',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            notes,
+            style: theme.textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _readString(dynamic value, String fallback) {
+    if (value == null) return fallback;
+    final text = value.toString().trim();
+    return text.isEmpty ? fallback : text;
+  }
+}
+
+class _CommentsCard extends StatelessWidget {
+  const _CommentsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final border = theme.brightness == Brightness.dark
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.chat_bubble_outline,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Comments',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No comments yet.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickActionsCard extends StatelessWidget {
+  const _QuickActionsCard({
+    required this.onMarkComplete,
+    required this.onAddComment,
+    required this.onAttachFile,
+  });
+
+  final VoidCallback onMarkComplete;
+  final VoidCallback onAddComment;
+  final VoidCallback onAttachFile;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final border = theme.brightness == Brightness.dark
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Quick Actions',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onMarkComplete,
+            icon: const Icon(Icons.check_circle_outline),
+            label: const Text('Mark Complete'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: onAddComment,
+            child: const Text('Add Comment'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: onAttachFile,
+            child: const Text('Attach File'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PriorityCard extends StatelessWidget {
+  const _PriorityCard({required this.priority});
+
+  final String? priority;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final border = theme.brightness == Brightness.dark
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+    final resolved = (priority ?? 'normal').toLowerCase();
+    final color = _priorityColor(resolved);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Priority',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _Pill(label: resolved, color: color),
+        ],
+      ),
+    );
+  }
+
+  Color _priorityColor(String priority) {
+    switch (priority) {
+      case 'high':
+        return const Color(0xFFDC2626);
+      case 'medium':
+        return const Color(0xFFF59E0B);
+      case 'low':
+        return const Color(0xFF16A34A);
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
       ),
     );
   }

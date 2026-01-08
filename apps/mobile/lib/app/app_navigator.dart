@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:mobile/features/dashboard/presentation/pages/dashboard_page.dart';
-import 'package:mobile/features/admin/presentation/pages/admin_dashboard_page.dart';
+import 'package:mobile/features/dashboard/presentation/pages/role_dashboard_page.dart';
 import 'package:mobile/features/auth/presentation/pages/account_disabled_page.dart';
 import 'package:mobile/features/auth/presentation/pages/login_page.dart';
+import 'package:mobile/features/auth/presentation/pages/org_onboarding_page.dart';
 import 'package:shared/shared.dart';
 
 /// Main app navigator and entry point with admin routing
@@ -22,6 +22,7 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
     if (user == null) return null;
     
     try {
+      final orgId = await _resolveOrgId(client, user.id);
       final res = await client
           .from('profiles')
           .select('role, is_active')
@@ -31,18 +32,24 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
       // If no profile exists or no role, default to viewer
       if (res == null || res['role'] == null) {
         debugPrint('No profile or role found for user ${user.id}, defaulting to viewer');
-        return const _UserAccess(role: UserRole.viewer, isActive: true);
+        return _UserAccess(
+          role: UserRole.viewer,
+          isActive: true,
+          needsOnboarding: orgId == null || orgId.isEmpty,
+        );
       }
       
-      final role = UserRole.values.firstWhere(
-        (r) => r.name == res['role'],
-        orElse: () => UserRole.viewer,
-      );
+      final role = UserRole.fromRaw(res['role']?.toString());
       final isActive = res['is_active'] as bool? ?? true;
-      return _UserAccess(role: role, isActive: isActive);
+      return _UserAccess(
+        role: role,
+        isActive: isActive,
+        needsOnboarding: orgId == null || orgId.isEmpty,
+      );
     } on PostgrestException catch (e) {
       if (e.message.contains('is_active') || e.code == '42703') {
         try {
+          final orgId = await _resolveOrgId(client, user.id);
           final res = await client
               .from('profiles')
               .select('role')
@@ -52,24 +59,67 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
             debugPrint(
               'No profile or role found for user ${user.id}, defaulting to viewer',
             );
-            return const _UserAccess(role: UserRole.viewer, isActive: true);
+            return _UserAccess(
+              role: UserRole.viewer,
+              isActive: true,
+              needsOnboarding: orgId == null || orgId.isEmpty,
+            );
           }
-          final role = UserRole.values.firstWhere(
-            (r) => r.name == res['role'],
-            orElse: () => UserRole.viewer,
+          final role = UserRole.fromRaw(res['role']?.toString());
+          return _UserAccess(
+            role: role,
+            isActive: true,
+            needsOnboarding: orgId == null || orgId.isEmpty,
           );
-          return _UserAccess(role: role, isActive: true);
         } catch (inner) {
           debugPrint('Error fetching user role: $inner, defaulting to viewer');
-          return const _UserAccess(role: UserRole.viewer, isActive: true);
+          final orgId = await _resolveOrgId(client, user.id);
+          return _UserAccess(
+            role: UserRole.viewer,
+            isActive: true,
+            needsOnboarding: orgId == null || orgId.isEmpty,
+          );
         }
       }
       debugPrint('Error fetching user role: $e, defaulting to viewer');
-      return const _UserAccess(role: UserRole.viewer, isActive: true);
+      final orgId = await _resolveOrgId(client, user.id);
+      return _UserAccess(
+        role: UserRole.viewer,
+        isActive: true,
+        needsOnboarding: orgId == null || orgId.isEmpty,
+      );
     } catch (e) {
       debugPrint('Error fetching user role: $e, defaulting to viewer');
-      return const _UserAccess(role: UserRole.viewer, isActive: true);
+      final orgId = await _resolveOrgId(client, user.id);
+      return _UserAccess(
+        role: UserRole.viewer,
+        isActive: true,
+        needsOnboarding: orgId == null || orgId.isEmpty,
+      );
     }
+  }
+
+  Future<String?> _resolveOrgId(SupabaseClient client, String userId) async {
+    try {
+      final res = await client
+          .from('org_members')
+          .select('org_id')
+          .eq('user_id', userId)
+          .limit(1)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    try {
+      final res = await client
+          .from('profiles')
+          .select('org_id')
+          .eq('id', userId)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    return null;
   }
 
   @override
@@ -99,7 +149,12 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
             
             // Handle errors or missing data by defaulting to viewer role
             final access =
-                accessSnap.data ?? const _UserAccess(role: UserRole.viewer, isActive: true);
+                accessSnap.data ??
+                    const _UserAccess(
+                      role: UserRole.viewer,
+                      isActive: true,
+                      needsOnboarding: false,
+                    );
             
             if (accessSnap.hasError) {
               debugPrint('Error loading user role: ${accessSnap.error}');
@@ -109,10 +164,13 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
               return const AccountDisabledPage();
             }
 
-            if (access.role.canAccessAdminConsole) {
-              return AdminDashboardPage(userRole: access.role);
+            if (access.needsOnboarding) {
+              return OrgOnboardingPage(
+                onCompleted: () => setState(() {}),
+              );
             }
-            return const DashboardPage();
+
+            return RoleDashboardPage(role: access.role);
           },
         );
       },
@@ -121,8 +179,13 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
 }
 
 class _UserAccess {
-  const _UserAccess({required this.role, required this.isActive});
+  const _UserAccess({
+    required this.role,
+    required this.isActive,
+    required this.needsOnboarding,
+  });
 
   final UserRole role;
   final bool isActive;
+  final bool needsOnboarding;
 }

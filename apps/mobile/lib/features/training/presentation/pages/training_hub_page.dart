@@ -16,36 +16,103 @@ class TrainingHubPage extends ConsumerStatefulWidget {
 }
 
 class _TrainingHubPageState extends ConsumerState<TrainingHubPage> {
+  final List<_ReminderSetting> _reminderSchedule = [
+    _ReminderSetting(label: '30 days before expiration', enabled: true),
+    _ReminderSetting(label: '2 weeks before expiration', enabled: true),
+    _ReminderSetting(label: '1 week before expiration', enabled: true),
+    _ReminderSetting(label: '3 days before expiration', enabled: true),
+    _ReminderSetting(label: '1 day before expiration', enabled: true),
+    _ReminderSetting(label: 'On expiration day', enabled: true),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Training Hub'),
-          actions: [
-            IconButton(
-              tooltip: 'Add employee',
-              icon: const Icon(Icons.person_add),
-              onPressed: () => _openEmployeeEditor(context),
-            ),
-            IconButton(
-              tooltip: 'Assign training',
-              icon: const Icon(Icons.school),
-              onPressed: () => _openTrainingEditor(context),
-            ),
-          ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Training'),
-              Tab(text: 'Employees'),
-            ],
-          ),
-        ),
-        body: const TabBarView(
+        body: Column(
           children: [
-            TrainingRecordsTab(),
-            EmployeesTab(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth >= 720;
+                  final titleBlock = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Training Hub',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Manage training programs and employee certifications',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.grey[400]
+                                  : Colors.grey[600],
+                            ),
+                      ),
+                    ],
+                  );
+                  final actions = Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () => _openReminderSettings(context),
+                        icon: const Icon(Icons.notifications_active_outlined, size: 18),
+                        label: const Text('Reminders'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _openEmployeeEditor(context),
+                        icon: const Icon(Icons.person_add, size: 18),
+                        label: const Text('Add Employee'),
+                      ),
+                      FilledButton.icon(
+                        onPressed: () => _openTrainingEditor(context),
+                        icon: const Icon(Icons.school, size: 18),
+                        label: const Text('Assign Training'),
+                      ),
+                    ],
+                  );
+                  if (isWide) {
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: titleBlock),
+                        actions,
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      titleBlock,
+                      const SizedBox(height: 12),
+                      actions,
+                    ],
+                  );
+                },
+              ),
+            ),
+            const TabBar(
+              tabs: [
+                Tab(text: 'Training'),
+                Tab(text: 'Employees'),
+              ],
+            ),
+            const Divider(height: 1),
+            const Expanded(
+              child: TabBarView(
+                children: [
+                  TrainingRecordsTab(),
+                  EmployeesTab(),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -70,6 +137,148 @@ class _TrainingHubPageState extends ConsumerState<TrainingHubPage> {
     if (result != null) {
       ref.invalidate(trainingRecordsProvider(null));
     }
+  }
+
+  Future<void> _openReminderSettings(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.notifications_active_outlined),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Automated Expiration Reminders',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Configure when employees receive automatic reminders about expiring certifications.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 16),
+                    ..._reminderSchedule.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final reminder = entry.value;
+                      final activeColor = Theme.of(context).colorScheme.primary;
+                      final muted =
+                          Theme.of(context).colorScheme.onSurfaceVariant;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceVariant
+                              .withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Theme.of(context).dividerColor,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Checkbox(
+                              value: reminder.enabled,
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setState(() {
+                                  _reminderSchedule[index].enabled = value;
+                                });
+                                setSheetState(() {});
+                              },
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    reminder.label,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Email & in-app notification',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(color: muted),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: reminder.enabled
+                                    ? activeColor.withValues(alpha: 0.15)
+                                    : muted.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                reminder.enabled ? 'Active' : 'Disabled',
+                                style:
+                                    Theme.of(context).textTheme.labelSmall?.copyWith(
+                                          color: reminder.enabled
+                                              ? activeColor
+                                              : muted,
+                                        ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Save Settings'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('Cancel'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }
 
@@ -538,6 +747,13 @@ class _TrainingRecordCard extends StatelessWidget {
     }
     return training.status;
   }
+}
+
+class _ReminderSetting {
+  _ReminderSetting({required this.label, required this.enabled});
+
+  final String label;
+  bool enabled;
 }
 
 class _ErrorView extends StatelessWidget {

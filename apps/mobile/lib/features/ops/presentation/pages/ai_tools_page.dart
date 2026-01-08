@@ -1,11 +1,9 @@
-import 'dart:typed_data';
-
+import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
-import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../../../../core/ai/ai_job_runner.dart';
 import '../../../../core/ai/ai_providers.dart';
 import '../../../../core/utils/file_bytes_loader.dart';
@@ -22,435 +20,578 @@ class AiToolsPage extends ConsumerStatefulWidget {
 }
 
 class _AiToolsPageState extends ConsumerState<AiToolsPage> {
-  RealtimeChannel? _aiJobsChannel;
+  final TextEditingController _inputController = TextEditingController();
+  final List<_AiAttachment> _attachments = [];
+  String _activeTab = _aiTabs.first.id;
+  String _output = '';
+  bool _isGenerating = false;
 
   @override
   void initState() {
     super.initState();
-    _subscribeToAiJobs();
   }
 
   @override
   void dispose() {
-    _aiJobsChannel?.unsubscribe();
+    _inputController.dispose();
     super.dispose();
-  }
-
-  void _subscribeToAiJobs() {
-    final client = Supabase.instance.client;
-    _aiJobsChannel = client.channel('ai-jobs')
-      ..onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'ai_jobs',
-        callback: (_) {
-          if (!mounted) return;
-          ref.invalidate(aiJobsProvider);
-        },
-      )
-      ..subscribe();
   }
 
   @override
   Widget build(BuildContext context) {
-    final jobsAsync = ref.watch(aiJobsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('AI Tools')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openCreateSheet(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('New AI job'),
-      ),
-      body: jobsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (jobs) {
-          if (jobs.isEmpty) {
-            return const Center(child: Text('No AI jobs yet.'));
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: jobs.length,
-            itemBuilder: (context, index) {
-              final job = jobs[index];
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  leading: const Icon(Icons.auto_awesome),
-                  title: Text(_labelForType(job.type)),
-                  subtitle: Text(job.outputText ?? job.status),
-                ),
-              );
-            },
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 1024;
+          final horizontalPadding = isWide ? 24.0 : 16.0;
+          return ListView(
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              16,
+              horizontalPadding,
+              32,
+            ),
+            children: [
+              _buildHeader(context),
+              const SizedBox(height: 16),
+              _buildTabs(context),
+              const SizedBox(height: 16),
+              if (isWide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _buildInputCard(context)),
+                    const SizedBox(width: 16),
+                    Expanded(child: _buildOutputCard(context)),
+                  ],
+                )
+              else ...[
+                _buildInputCard(context),
+                const SizedBox(height: 16),
+                _buildOutputCard(context),
+              ],
+              const SizedBox(height: 16),
+              _buildFeaturesGrid(context, isWide: isWide),
+            ],
           );
         },
       ),
     );
   }
 
-  Future<void> _openCreateSheet(BuildContext context, WidgetRef ref) async {
-    final inputController = TextEditingController();
-    final languageController = TextEditingController(text: 'Spanish');
-    final checklistCountController = TextEditingController(text: '8');
-    Uint8List? imageBytes;
-    String? imageName;
-    String? imageMime;
-    String? imagePath;
-    Uint8List? audioBytes;
-    String? audioName;
-    String? audioMime;
-    String? audioPath;
-    String type = _aiJobOptions.first.id;
-    bool isSaving = false;
-    final aiRunner = _resolveAiService(ref);
-    final hasAi = aiRunner != null;
-    final hasFallback = aiRunner?.hasDirectFallback ?? false;
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.auto_awesome, size: 28, color: Color(0xFF7C3AED)),
+            const SizedBox(width: 10),
+            Text(
+              'AI-Powered Tools',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white : const Color(0xFF111827),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Generate reports, captions, translations, and summaries using artificial intelligence',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
           ),
-          child: StatefulBuilder(
-            builder: (context, setState) {
-              return Column(
+        ),
+      ],
+    );
+  }
+
+
+  Widget _buildTabs(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF1F2937) : Colors.white;
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final inactive = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _aiTabs.map((tab) {
+          final selected = tab.id == _activeTab;
+          return InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => setState(() => _activeTab = tab.id),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: selected ? const Color(0xFF7C3AED) : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Create AI job',
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 12),
-                  if (!hasAi)
-                    const Text(
-                      'AI service is unavailable. Confirm Supabase is initialized and the AI function is deployed.',
-                    )
-                  else if (!hasFallback)
-                    const Text(
-                      'AI runs via the Supabase ai function. For client fallback, set OPENAI_API_KEY and OPENAI_CLIENT_FALLBACK=true.',
-                    ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: type,
-                    decoration: const InputDecoration(
-                      labelText: 'Type',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: _aiJobOptions
-                        .map(
-                          (option) => DropdownMenuItem(
-                            value: option.id,
-                            child: Text(option.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) =>
-                        setState(() => type = value ?? _aiJobOptions.first.id),
+                  Icon(
+                    tab.icon,
+                    size: 16,
+                    color: selected ? Colors.white : inactive,
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: inputController,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'Input text or notes',
-                      border: OutlineInputBorder(),
+                  const SizedBox(width: 6),
+                  Text(
+                    tab.label,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: selected ? Colors.white : inactive,
+                      fontWeight: FontWeight.w600,
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_requiresLanguage(type))
-                    TextField(
-                      controller: languageController,
-                      decoration: const InputDecoration(
-                        labelText: 'Target language',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  if (_requiresLanguage(type)) const SizedBox(height: 12),
-                  if (_isChecklist(type))
-                    TextField(
-                      controller: checklistCountController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Checklist item count',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  if (_isChecklist(type)) const SizedBox(height: 12),
-                  if (_allowsImage(type))
-                    Column(
-                      children: [
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.image),
-                          title: Text(imageName ?? 'Attach photo (optional)'),
-                          subtitle: imageName == null
-                              ? const Text('Use for captions, reports, and notes.')
-                              : Text(imageMime ?? 'image'),
-                          trailing: TextButton(
-                            onPressed: isSaving
-                                ? null
-                                : () async {
-                                    final picked = await FilePicker.platform.pickFiles(
-                                      type: FileType.image,
-                                      withData: true,
-                                      allowMultiple: false,
-                                    );
-                                    final file = picked?.files.first;
-                                    if (file == null) return;
-                                    final bytes = file.bytes ??
-                                        (file.path == null
-                                            ? null
-                                            : await loadFileBytes(file.path!));
-                                    if (bytes == null) {
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Unable to load image data.'),
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    if (bytes.length > AiToolsPage._maxAiMediaBytes) {
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Image is too large.'),
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    setState(() {
-                                      imageBytes = bytes;
-                                      imageName = file.name;
-                                      imageMime = _guessMimeType(file.name) ??
-                                          'image/jpeg';
-                                      imagePath = file.path;
-                                    });
-                                  },
-                            child: const Text('Select'),
-                          ),
-                        ),
-                        if (imageName != null)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: isSaving
-                                  ? null
-                                  : () => setState(() {
-                                        imageBytes = null;
-                                        imageName = null;
-                                        imageMime = null;
-                                        imagePath = null;
-                                      }),
-                              child: const Text('Remove image'),
-                            ),
-                          ),
-                      ],
-                    ),
-                  if (_allowsImage(type)) const SizedBox(height: 12),
-                  if (_allowsAudio(type))
-                    Column(
-                      children: [
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.mic),
-                          title: Text(audioName ?? 'Attach audio (optional)'),
-                          subtitle: audioName == null
-                              ? const Text('Use for spoken notes.')
-                              : Text(audioMime ?? 'audio'),
-                          trailing: TextButton(
-                            onPressed: isSaving
-                                ? null
-                                : () async {
-                                    final picked =
-                                        await FilePicker.platform.pickFiles(
-                                      type: FileType.audio,
-                                      withData: true,
-                                      allowMultiple: false,
-                                    );
-                                    final file = picked?.files.first;
-                                    if (file == null) return;
-                                    final bytes = file.bytes ??
-                                        (file.path == null
-                                            ? null
-                                            : await loadFileBytes(file.path!));
-                                    if (bytes == null) {
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content:
-                                              Text('Unable to load audio data.'),
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    if (bytes.length > AiToolsPage._maxAiMediaBytes) {
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Audio file is too large.'),
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    setState(() {
-                                      audioBytes = bytes;
-                                      audioName = file.name;
-                                      audioMime = _guessMimeType(file.name) ??
-                                          'audio/m4a';
-                                      audioPath = file.path;
-                                    });
-                                  },
-                            child: const Text('Select'),
-                          ),
-                        ),
-                        if (audioName != null)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: isSaving
-                                  ? null
-                                  : () => setState(() {
-                                        audioBytes = null;
-                                        audioName = null;
-                                        audioMime = null;
-                                        audioPath = null;
-                                      }),
-                              child: const Text('Remove audio'),
-                            ),
-                          ),
-                      ],
-                    ),
-                  if (_allowsAudio(type)) const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: isSaving
-                        ? null
-                        : () async {
-                            final ai = aiRunner;
-                            if (ai == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('AI service is unavailable.'),
-                                ),
-                              );
-                              return;
-                            }
-                            final text = inputController.text.trim();
-                            if (text.isEmpty &&
-                                imageBytes == null &&
-                                audioBytes == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Provide notes or attach media.'),
-                                ),
-                              );
-                              return;
-                            }
-                            if ((imageBytes?.length ?? 0) >
-                                AiToolsPage._maxAiMediaBytes) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Image is too large.'),
-                                ),
-                              );
-                              return;
-                            }
-                            if ((audioBytes?.length ?? 0) >
-                                AiToolsPage._maxAiMediaBytes) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Audio file is too large.'),
-                                ),
-                              );
-                              return;
-                            }
-                            setState(() => isSaving = true);
-                            try {
-                              final output = await ai.runJob(
-                                type: type,
-                                inputText: text.isEmpty ? null : text,
-                                imageBytes: imageBytes,
-                                audioBytes: audioBytes,
-                                audioMimeType: audioMime,
-                                targetLanguage: languageController.text.trim(),
-                                checklistCount: int.tryParse(
-                                  checklistCountController.text.trim(),
-                                ),
-                              );
-                              final attachments = <AttachmentDraft>[];
-                              if (imageBytes != null) {
-                                attachments.add(
-                                  AttachmentDraft(
-                                    type: 'photo',
-                                    bytes: imageBytes!,
-                                    filename: imageName ?? 'ai-image',
-                                    mimeType: imageMime ?? 'image/jpeg',
-                                    metadata: {
-                                      if (imagePath != null) 'path': imagePath,
-                                    },
-                                  ),
-                                );
-                              }
-                              if (audioBytes != null) {
-                                attachments.add(
-                                  AttachmentDraft(
-                                    type: 'audio',
-                                    bytes: audioBytes!,
-                                    filename: audioName ?? 'ai-audio',
-                                    mimeType: audioMime ?? 'audio/m4a',
-                                    metadata: {
-                                      if (audioPath != null) 'path': audioPath,
-                                    },
-                                  ),
-                                );
-                              }
-                              await ref.read(opsRepositoryProvider).createAiJob(
-                                    type: type,
-                                    inputText: text.isEmpty ? null : text,
-                                    outputText: output,
-                                    inputMedia: attachments,
-                                    metadata: {
-                                      'targetLanguage':
-                                          languageController.text.trim().isEmpty
-                                              ? null
-                                              : languageController.text.trim(),
-                                      'checklistCount': int.tryParse(
-                                        checklistCountController.text.trim(),
-                                      ),
-                                      'hasImage': imageBytes != null,
-                                      'hasAudio': audioBytes != null,
-                                    },
-                                  );
-                              if (context.mounted) {
-                                Navigator.of(context).pop(true);
-                              }
-                            } catch (e) {
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('AI failed: $e')),
-                              );
-                              setState(() => isSaving = false);
-                            }
-                          },
-                    child: Text(isSaving ? 'Saving...' : 'Generate'),
                   ),
                 ],
-              );
-            },
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildInputCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final labelColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
+    final helperColor = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    final dashedColor = isDark ? const Color(0xFF4B5563) : const Color(0xFFD1D5DB);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.chat_bubble_outline,
+                    color: Color(0xFF7C3AED)),
+                const SizedBox(width: 8),
+                Text(
+                  'Input Data',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Upload Photos, Videos, or Enter Notes',
+              style: theme.textTheme.labelLarge?.copyWith(color: labelColor),
+            ),
+            const SizedBox(height: 8),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _pickFiles,
+              child: _DashedBorder(
+                color: dashedColor,
+                radius: 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  width: double.infinity,
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.photo_camera_outlined,
+                        size: 44,
+                        color: helperColor,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Click to upload or drag and drop',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: helperColor,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Photos, videos, PDFs, or documents',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: helperColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (_attachments.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: List.generate(_attachments.length, (index) {
+                  final attachment = _attachments[index];
+                  return Chip(
+                    label: Text(attachment.name),
+                    onDeleted: () => _removeAttachment(index),
+                  );
+                }),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Text(
+              'Voice Notes or Text Input',
+              style: theme.textTheme.labelLarge?.copyWith(color: labelColor),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _inputController,
+              maxLines: 6,
+              decoration: InputDecoration(
+                hintText: 'Add voice notes, descriptions, or context...',
+                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: helperColor,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isGenerating ? null : _generateAiContent,
+                icon: _isGenerating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome),
+                label: Text(
+                  _isGenerating ? 'Generating with AI...' : 'Generate AI Content',
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  backgroundColor: const Color(0xFF7C3AED),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOutputCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB);
+    final helperColor = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.auto_awesome, color: Color(0xFF7C3AED)),
+                const SizedBox(width: 8),
+                Text(
+                  'AI-Generated Output',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_output.isNotEmpty)
+              Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(maxHeight: 500),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: background,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        _output,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: helperColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _copyOutput(context),
+                          child: const Text('Copy to Clipboard'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => _exportOutput(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF7C3AED),
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Save & Export'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              )
+            else
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 36),
+                decoration: BoxDecoration(
+                  color: background,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.auto_awesome,
+                      size: 48,
+                      color: helperColor,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'AI-generated content will appear here',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: helperColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Upload files or add notes, then click Generate',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: helperColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeaturesGrid(BuildContext context, {required bool isWide}) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF1F2937) : Colors.white;
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final titleColor = isDark ? Colors.white : const Color(0xFF111827);
+    final bodyColor = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: isWide ? 3 : 1,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: isWide ? 2.6 : 3.0,
+      children: _features.map((feature) {
+        return Container(
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: border),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(feature.icon, color: const Color(0xFF7C3AED)),
+              const SizedBox(height: 8),
+              Text(
+                feature.title,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: titleColor,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                feature.description,
+                style: theme.textTheme.bodySmall?.copyWith(color: bodyColor),
+              ),
+            ],
           ),
         );
-      },
+      }).toList(),
     );
-    inputController.dispose();
-    languageController.dispose();
-    checklistCountController.dispose();
-    if (result == true) {
-      ref.invalidate(aiJobsProvider);
+  }
+
+
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null) return;
+
+    final errors = <String>[];
+    final newAttachments = <_AiAttachment>[];
+
+    for (final file in result.files) {
+      final bytes = file.bytes ??
+          (file.path != null ? await loadFileBytes(file.path!) : null);
+      if (bytes == null) {
+        errors.add('Unable to read ${file.name}.');
+        continue;
+      }
+      if (bytes.length > AiToolsPage._maxAiMediaBytes) {
+        errors.add('${file.name} exceeds 8MB.');
+        continue;
+      }
+      final mimeType = file.extension == null
+          ? 'application/octet-stream'
+          : _guessMimeType('.${file.extension}') ?? 'application/octet-stream';
+      newAttachments.add(
+        _AiAttachment(
+          name: file.name,
+          bytes: bytes,
+          mimeType: mimeType,
+        ),
+      );
     }
+
+    if (newAttachments.isNotEmpty) {
+      setState(() => _attachments.addAll(newAttachments));
+    }
+
+    if (errors.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errors.join(' '))),
+      );
+    }
+  }
+
+  void _removeAttachment(int index) {
+    setState(() => _attachments.removeAt(index));
+  }
+
+  Future<void> _generateAiContent() async {
+    final runner = _resolveAiService(ref);
+    if (runner == null) {
+      _showMessage('AI service unavailable. Check your configuration.');
+      return;
+    }
+
+    final tab = _aiTabs.firstWhere((tab) => tab.id == _activeTab);
+    final input = _inputController.text.trim();
+    final image = _attachments.firstWhere(
+      (attachment) => attachment.mimeType.startsWith('image/'),
+      orElse: () => _AiAttachment.empty(),
+    );
+    final audio = _attachments.firstWhere(
+      (attachment) => attachment.mimeType.startsWith('audio/'),
+      orElse: () => _AiAttachment.empty(),
+    );
+
+    setState(() {
+      _isGenerating = true;
+      _output = '';
+    });
+
+    try {
+      final output = await runner.runJob(
+        type: tab.jobType,
+        inputText: input.isEmpty ? null : input,
+        imageBytes: image.bytes.isEmpty ? null : image.bytes,
+        audioBytes: audio.bytes.isEmpty ? null : audio.bytes,
+        audioMimeType: audio.bytes.isEmpty ? null : audio.mimeType,
+        targetLanguage: tab.jobType == 'translation' ? 'Spanish' : null,
+        checklistCount: tab.jobType == 'checklist_builder' ? 8 : null,
+      );
+
+      await ref.read(opsRepositoryProvider).createAiJob(
+            type: tab.jobType,
+            inputText: input.isEmpty ? null : input,
+            outputText: output,
+            inputMedia: _attachments
+                .map(
+                  (attachment) => AttachmentDraft(
+                    type: _attachmentType(attachment.mimeType),
+                    bytes: attachment.bytes,
+                    filename: attachment.name,
+                    mimeType: attachment.mimeType,
+                    metadata: {'source': 'ai_tools'},
+                  ),
+                )
+                .toList(),
+            metadata: {
+              'source': 'ai_tools',
+              'tab': tab.id,
+            },
+          );
+
+      if (!mounted) return;
+      setState(() {
+        _output = output;
+        _isGenerating = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _isGenerating = false);
+      _showMessage(error.toString());
+    }
+  }
+
+  Future<void> _copyOutput(BuildContext context) async {
+    if (_output.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: _output));
+    _showMessage('Output copied to clipboard.');
+  }
+
+  Future<void> _exportOutput(BuildContext context) async {
+    if (_output.isEmpty) return;
+    try {
+      final bytes = Uint8List.fromList(utf8.encode(_output));
+      final filename = 'ai-output-${DateTime.now().toIso8601String()}.txt';
+      await ref.read(opsRepositoryProvider).createExportJobWithFile(
+            type: 'ai_output',
+            format: 'txt',
+            filename: filename,
+            bytes: bytes,
+            metadata: {
+              'source': 'ai_tools',
+              'tab': _activeTab,
+            },
+          );
+      _showMessage('Export ready in Exports.');
+    } catch (error) {
+      _showMessage('Failed to export: $error');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   AiJobRunner? _resolveAiService(WidgetRef ref) {
@@ -462,56 +603,122 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
   }
 }
 
-class _AiJobOption {
-  const _AiJobOption({required this.id, required this.label});
+class _AiAttachment {
+  const _AiAttachment({
+    required this.name,
+    required this.bytes,
+    required this.mimeType,
+  });
+
+  final String name;
+  final Uint8List bytes;
+  final String mimeType;
+
+  factory _AiAttachment.empty() => _AiAttachment(
+        name: '',
+        bytes: Uint8List(0),
+        mimeType: '',
+      );
+}
+
+class _AiTab {
+  const _AiTab({
+    required this.id,
+    required this.label,
+    required this.icon,
+    required this.jobType,
+  });
 
   final String id;
   final String label;
+  final IconData icon;
+  final String jobType;
 }
 
-const _aiJobOptions = [
-  _AiJobOption(id: 'summary', label: 'Summary'),
-  _AiJobOption(id: 'photo_caption', label: 'Photo caption'),
-  _AiJobOption(id: 'progress_recap', label: 'Progress recap'),
-  _AiJobOption(id: 'translation', label: 'Translation'),
-  _AiJobOption(id: 'checklist_builder', label: 'Checklist builder'),
-  _AiJobOption(id: 'field_report', label: 'Field report'),
-  _AiJobOption(id: 'walkthrough_notes', label: 'Walkthrough notes'),
-  _AiJobOption(id: 'daily_log', label: 'Daily log'),
+class _AiFeature {
+  const _AiFeature({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+}
+
+const _aiTabs = [
+  _AiTab(
+    id: 'reports',
+    label: 'Field Reports',
+    icon: Icons.description_outlined,
+    jobType: 'field_report',
+  ),
+  _AiTab(
+    id: 'captions',
+    label: 'Photo Captions',
+    icon: Icons.photo_camera_outlined,
+    jobType: 'photo_caption',
+  ),
+  _AiTab(
+    id: 'translate',
+    label: 'Translation',
+    icon: Icons.translate,
+    jobType: 'translation',
+  ),
+  _AiTab(
+    id: 'checklists',
+    label: 'Checklists',
+    icon: Icons.checklist_outlined,
+    jobType: 'checklist_builder',
+  ),
+  _AiTab(
+    id: 'summaries',
+    label: 'Progress Summary',
+    icon: Icons.trending_up,
+    jobType: 'progress_recap',
+  ),
 ];
 
-String _labelForType(String type) {
-  for (final option in _aiJobOptions) {
-    if (option.id == type) return option.label;
-  }
-  switch (type) {
-    case 'caption':
-      return 'Photo caption';
-    case 'recap':
-      return 'Progress recap';
-    case 'checklist':
-      return 'Checklist builder';
-    default:
-      break;
-  }
-  return type.replaceAll('_', ' ');
+const _features = [
+  _AiFeature(
+    icon: Icons.description_outlined,
+    title: 'Smart Reports',
+    description: 'Generate detailed field reports from photos and notes',
+  ),
+  _AiFeature(
+    icon: Icons.photo_camera_outlined,
+    title: 'Auto Captions',
+    description: 'AI analyzes photos and creates descriptive captions',
+  ),
+  _AiFeature(
+    icon: Icons.translate,
+    title: 'Multi-Language',
+    description: 'Translate reports into 50+ languages instantly',
+  ),
+  _AiFeature(
+    icon: Icons.checklist_outlined,
+    title: 'Checklist Builder',
+    description: 'AI creates custom checklists based on project type',
+  ),
+  _AiFeature(
+    icon: Icons.trending_up,
+    title: 'Progress Analytics',
+    description: 'Automated summaries with insights and predictions',
+  ),
+  _AiFeature(
+    icon: Icons.auto_awesome,
+    title: 'Daily Logs',
+    description: 'AI compiles daily activities into formatted logs',
+  ),
+];
+
+String _attachmentType(String mimeType) {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.startsWith('video/')) return 'video';
+  return 'file';
 }
-
-bool _requiresLanguage(String type) => type == 'translation';
-
-bool _isChecklist(String type) => type == 'checklist_builder';
-
-bool _allowsImage(String type) =>
-    type == 'photo_caption' || type == 'field_report' || type == 'walkthrough_notes';
-
-bool _allowsAudio(String type) =>
-    type == 'field_report' ||
-    type == 'walkthrough_notes' ||
-    type == 'daily_log' ||
-    type == 'summary' ||
-    type == 'progress_recap' ||
-    type == 'translation' ||
-    type == 'checklist_builder';
 
 String? _guessMimeType(String filename) {
   final ext = p.extension(filename).toLowerCase();
@@ -537,5 +744,68 @@ String? _guessMimeType(String filename) {
       return 'audio/ogg';
     default:
       return null;
+  }
+}
+
+class _DashedBorder extends StatelessWidget {
+  const _DashedBorder({
+    required this.color,
+    required this.radius,
+    required this.child,
+  });
+
+  final Color color;
+  final double radius;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _DashedBorderPainter(color: color, radius: radius),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _DashedBorderPainter extends CustomPainter {
+  _DashedBorderPainter({required this.color, required this.radius});
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(radius),
+    );
+
+    const dashWidth = 6.0;
+    const dashSpace = 4.0;
+    final path = Path()..addRRect(rrect);
+    final metrics = path.computeMetrics();
+
+    for (final metric in metrics) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final length = dashWidth;
+        final extract = metric.extractPath(distance, distance + length);
+        canvas.drawPath(extract, paint);
+        distance += dashWidth + dashSpace;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedBorderPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.radius != radius;
   }
 }

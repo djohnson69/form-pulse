@@ -16,12 +16,14 @@ class DocumentDetailPage extends ConsumerStatefulWidget {
     required this.document,
     this.projectId,
     this.projectName,
+    this.openSignatureOnLoad = false,
     super.key,
   });
 
   final Document document;
   final String? projectId;
   final String? projectName;
+  final bool openSignatureOnLoad;
 
   @override
   ConsumerState<DocumentDetailPage> createState() => _DocumentDetailPageState();
@@ -37,6 +39,12 @@ class _DocumentDetailPageState extends ConsumerState<DocumentDetailPage> {
   void initState() {
     super.initState();
     _document = widget.document;
+    if (widget.openSignatureOnLoad) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _captureSignature();
+      });
+    }
   }
 
   @override
@@ -301,14 +309,32 @@ class _DocumentDetailPageState extends ConsumerState<DocumentDetailPage> {
                       subtitle: Text(
                         '${version.filename} • ${_formatFileSize(version.fileSize)}',
                       ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.open_in_new),
-                        onPressed: () => _openUrl(
-                          version.fileUrl,
-                          mimeType: version.mimeType,
-                          filename: version.filename,
-                          metadata: version.metadata,
-                        ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (action) =>
+                            _handleVersionAction(action, version),
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: 'open',
+                            child: ListTile(
+                              leading: Icon(Icons.open_in_new),
+                              title: Text('Open'),
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'download',
+                            child: ListTile(
+                              leading: Icon(Icons.download_outlined),
+                              title: Text('Download'),
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'restore',
+                            child: ListTile(
+                              leading: Icon(Icons.restore_outlined),
+                              title: Text('Restore version'),
+                            ),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -380,12 +406,47 @@ class _DocumentDetailPageState extends ConsumerState<DocumentDetailPage> {
         _saving = false;
       });
       ref.invalidate(documentsProvider(widget.projectId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Approval captured.')),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Signature failed: $e')),
       );
+    }
+  }
+
+  Future<void> _handleVersionAction(
+    String action,
+    DocumentVersion version,
+  ) async {
+    switch (action) {
+      case 'open':
+        await _openUrl(
+          version.fileUrl,
+          mimeType: version.mimeType,
+          filename: version.filename,
+          metadata: version.metadata,
+        );
+        break;
+      case 'download':
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloading version ${version.version}...')),
+        );
+        await _openUrl(
+          version.fileUrl,
+          mimeType: version.mimeType,
+          filename: version.filename,
+          metadata: version.metadata,
+        );
+        break;
+      case 'restore':
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Restored version ${version.version}.')),
+        );
+        break;
     }
   }
 

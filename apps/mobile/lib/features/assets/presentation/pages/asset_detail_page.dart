@@ -25,6 +25,17 @@ class AssetDetailPage extends ConsumerWidget {
             icon: const Icon(Icons.edit),
             onPressed: () => _openEditor(context, ref),
           ),
+          IconButton(
+            tooltip: 'Print QR',
+            icon: const Icon(Icons.qr_code),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Printing QR code for ${asset.name}...'),
+                ),
+              );
+            },
+          ),
         ],
       ),
       body: ListView(
@@ -85,6 +96,9 @@ class AssetDetailPage extends ConsumerWidget {
     );
     if (result != null) {
       ref.invalidate(equipmentProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Asset updated successfully.')),
+      );
     }
   }
 
@@ -99,6 +113,9 @@ class AssetDetailPage extends ConsumerWidget {
     );
     if (result != null) {
       ref.invalidate(assetInspectionsProvider(asset.id));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Inspection scheduled successfully.')),
+      );
     }
   }
 

@@ -7,7 +7,16 @@ import 'photo_detail_page.dart';
 import 'photo_editor_page.dart';
 
 class ProjectGalleriesPage extends ConsumerStatefulWidget {
-  const ProjectGalleriesPage({super.key});
+  const ProjectGalleriesPage({
+    super.key,
+    this.title,
+    this.initialTagFilter,
+    this.allowedTags,
+  });
+
+  final String? title;
+  final String? initialTagFilter;
+  final List<String>? allowedTags;
 
   @override
   ConsumerState<ProjectGalleriesPage> createState() =>
@@ -20,11 +29,23 @@ class _ProjectGalleriesPageState extends ConsumerState<ProjectGalleriesPage> {
   String? _labelFilter;
 
   @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialTagFilter;
+    if (initial == null) {
+      _tagFilter = null;
+    } else if (widget.allowedTags == null ||
+        widget.allowedTags!.contains(initial)) {
+      _tagFilter = initial;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final photosAsync = ref.watch(projectPhotosProvider(_projectId));
     final projectsAsync = ref.watch(projectsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Project Galleries')),
+      appBar: AppBar(title: Text(widget.title ?? 'Project Galleries')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openEditor(context),
         icon: const Icon(Icons.add_a_photo),
@@ -102,13 +123,17 @@ class _ProjectGalleriesPageState extends ConsumerState<ProjectGalleriesPage> {
             ),
             error: (e, _) => Expanded(child: Center(child: Text('Error: $e'))),
             data: (photos) {
-              final tags = photos
+              final tagSet = photos
                   .expand((photo) => photo.tags)
                   .map((tag) => tag.trim())
                   .where((tag) => tag.isNotEmpty)
-                  .toSet()
-                  .toList()
-                ..sort();
+                  .toSet();
+              final allowedTags = widget.allowedTags;
+              if (allowedTags != null) {
+                tagSet.removeWhere((tag) => !allowedTags.contains(tag));
+                tagSet.addAll(allowedTags);
+              }
+              final tags = tagSet.toList()..sort();
               final projectLabels = {
                 for (final project in (projectsAsync.asData?.value ?? const []))
                   project.id: project.labels,

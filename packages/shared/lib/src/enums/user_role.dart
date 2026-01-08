@@ -14,6 +14,12 @@ enum UserRole {
 
   /// Standard employee user
   employee,
+
+  /// Maintenance technician
+  maintenance,
+  
+  /// Technical support
+  techSupport,
   
   /// Client portal user
   client,
@@ -37,6 +43,10 @@ enum UserRole {
         return 'Supervisor';
       case UserRole.employee:
         return 'Employee';
+      case UserRole.maintenance:
+        return 'Maintenance';
+      case UserRole.techSupport:
+        return 'Tech Support';
       case UserRole.client:
         return 'Client';
       case UserRole.vendor:
@@ -58,4 +68,32 @@ enum UserRole {
   /// Check if role can access the admin console
   bool get canAccessAdminConsole =>
       isAdmin || this == UserRole.manager || this == UserRole.supervisor;
+
+  static UserRole fromRaw(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return UserRole.viewer;
+    final normalized = raw.replaceAll('_', '').replaceAll('-', '').toLowerCase();
+    switch (normalized) {
+      case 'superadmin':
+        return UserRole.superAdmin;
+      case 'admin':
+        return UserRole.admin;
+      case 'manager':
+        return UserRole.manager;
+      case 'supervisor':
+        return UserRole.supervisor;
+      case 'employee':
+        return UserRole.employee;
+      case 'maintenance':
+        return UserRole.maintenance;
+      case 'techsupport':
+        return UserRole.techSupport;
+      case 'client':
+        return UserRole.client;
+      case 'vendor':
+        return UserRole.vendor;
+      case 'viewer':
+      default:
+        return UserRole.viewer;
+    }
+  }
 }

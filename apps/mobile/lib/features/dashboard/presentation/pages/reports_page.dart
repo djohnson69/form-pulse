@@ -135,16 +135,6 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     final forms = ref.watch(dashboardDataProvider).asData?.value.forms ??
         const <FormDefinition>[];
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Reports'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
-          ),
-        ],
-      ),
       body: FutureBuilder<List<FormSubmission>>(
         future: _future,
         builder: (context, snapshot) {
@@ -164,6 +154,8 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _ReportsHeader(onRefresh: _refresh),
+              const SizedBox(height: 12),
               _buildQuickFilters(context),
               const SizedBox(height: 12),
               _FiltersCard(
@@ -418,10 +410,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         final id = row['id']?.toString();
         if (id == null) continue;
         final rawRole = row['role']?.toString() ?? UserRole.viewer.name;
-        roles[id] = UserRole.values.firstWhere(
-          (role) => role.name == rawRole,
-          orElse: () => UserRole.viewer,
-        );
+        roles[id] = UserRole.fromRaw(rawRole);
       }
       if (!mounted) return;
       setState(() => _submitterRoles = roles);
@@ -1166,6 +1155,68 @@ class _FilterChip extends StatelessWidget {
       label: Text(label),
       selected: selected,
       onSelected: onSelected,
+    );
+  }
+}
+
+class _ReportsHeader extends StatelessWidget {
+  const _ReportsHeader({required this.onRefresh});
+
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Reports',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Analyze submissions, trends, and export insights',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: isDark ? Colors.grey[400] : Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+
+    final refreshButton = FilledButton.icon(
+      onPressed: onRefresh,
+      icon: const Icon(Icons.refresh, size: 18),
+      label: const Text('Refresh'),
+      style: FilledButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 720;
+        if (isWide) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: titleBlock),
+              refreshButton,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            titleBlock,
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: refreshButton),
+          ],
+        );
+      },
     );
   }
 }

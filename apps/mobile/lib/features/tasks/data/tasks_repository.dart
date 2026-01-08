@@ -102,6 +102,33 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
           role: data['role'] as String?,
         );
       }).toList();
+    } on PostgrestException catch (e, st) {
+      if (e.message.contains('is_active') || e.code == '42703') {
+        developer.log(
+          'Supabase fetchAssignees missing is_active; falling back',
+          error: e,
+          stackTrace: st,
+        );
+        final res = await _client
+            .from('profiles')
+            .select('id, first_name, last_name, email, role')
+            .eq('org_id', orgId)
+            .order('last_name', ascending: true);
+        return (res as List<dynamic>).map((row) {
+          final data = Map<String, dynamic>.from(row as Map);
+          final first = (data['first_name'] as String?)?.trim() ?? '';
+          final last = (data['last_name'] as String?)?.trim() ?? '';
+          final email = data['email'] as String?;
+          final name = [first, last].where((p) => p.isNotEmpty).join(' ');
+          return TaskAssignee(
+            id: data['id'].toString(),
+            name: name.isNotEmpty ? name : (email ?? 'User'),
+            email: email,
+            role: data['role'] as String?,
+          );
+        }).toList();
+      }
+      rethrow;
     } catch (e, st) {
       developer.log(
         'Supabase fetchAssignees failed',

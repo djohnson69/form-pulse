@@ -57,6 +57,7 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
   final SpeechToText _speechToText = SpeechToText();
   Map<String, dynamic>? _locationData;
   bool _submitting = false;
+  bool _isSubmitted = false;
   bool _isRecordingAudio = false;
   bool _isDictating = false;
   String? _dictationFieldId;
@@ -92,52 +93,294 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isSubmitted) {
+      return _buildSuccessView(context);
+    }
+
+    final theme = Theme.of(context);
+    final border = theme.brightness == Brightness.dark
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+    final description = widget.form.description.trim();
+    final fields = widget.form.fields;
+    final basicFields = fields.where(_isBasicField).toList();
+    final advancedFields = fields.where(_isAdvancedField).toList();
+    final otherFields = fields
+        .where((field) => !_isBasicField(field) && !_isAdvancedField(field))
+        .toList();
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.form.title),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.save_alt),
-            tooltip: 'Submit',
-            onPressed: _submitting ? null : _submit,
-          ),
-        ],
-      ),
       body: SafeArea(
         child: Form(
           key: _formKey,
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Text(
-                widget.form.description,
-                style: Theme.of(context).textTheme.bodyLarge,
+              TextButton.icon(
+                onPressed:
+                    _submitting ? null : () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Back to Forms'),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  alignment: Alignment.centerLeft,
+                ),
               ),
-              const SizedBox(height: 16),
-              ...widget.form.fields.map(_buildField),
               const SizedBox(height: 12),
-              _buildAttachmentsCard(context),
-              const SizedBox(height: 12),
-              _buildLocationCard(context),
-              const SizedBox(height: 12),
-              _buildAccessLevelCard(context),
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: _submitting ? null : _submit,
-                icon: _submitting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.check_circle),
-                label: Text(_submitting ? 'Submitting...' : 'Submit'),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.form.title,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        description,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (basicFields.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      _sectionTitle(context, 'Basic Information'),
+                      const SizedBox(height: 12),
+                      ...basicFields.map(_buildField),
+                    ],
+                    if (otherFields.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Divider(color: border),
+                      const SizedBox(height: 12),
+                      _sectionTitle(context, 'Additional Details'),
+                      const SizedBox(height: 12),
+                      ...otherFields.map(_buildField),
+                    ],
+                    const SizedBox(height: 8),
+                    Divider(color: border),
+                    const SizedBox(height: 12),
+                    _sectionTitle(
+                      context,
+                      'Inspection Details (Advanced Fields)',
+                    ),
+                    const SizedBox(height: 12),
+                    ...advancedFields.map(_buildField),
+                    const SizedBox(height: 12),
+                    _buildAttachmentsCard(context),
+                    const SizedBox(height: 12),
+                    _buildLocationCard(context),
+                    const SizedBox(height: 12),
+                    _buildAccessLevelCard(context),
+                    const SizedBox(height: 16),
+                    Divider(color: border),
+                    const SizedBox(height: 16),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _submitting ? null : _submit,
+                          icon: _submitting
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.send),
+                          label:
+                              Text(_submitting ? 'Submitting...' : 'Submit Form'),
+                        ),
+                        OutlinedButton(
+                          onPressed: _submitting
+                              ? null
+                              : () => Navigator.of(context).maybePop(),
+                          child: const Text('Cancel'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildSuccessView(BuildContext context) {
+    final theme = Theme.of(context);
+    final border = theme.brightness == Brightness.dark
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+    final title = widget.form.title;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: theme.brightness == Brightness.dark
+                            ? const Color(0xFF064E3B)
+                            : const Color(0xFFD1FAE5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check_circle,
+                        size: 40,
+                        color: Color(0xFF16A34A),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Form Submitted Successfully!',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Your $title form has been submitted and saved.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Redirecting you back to forms...',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(BuildContext context, String title) {
+    return Text(
+      title,
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+    );
+  }
+
+  bool _isBasicField(shared.FormField field) {
+    switch (field.type) {
+      case shared.FormFieldType.text:
+      case shared.FormFieldType.textarea:
+      case shared.FormFieldType.email:
+      case shared.FormFieldType.phone:
+      case shared.FormFieldType.number:
+      case shared.FormFieldType.date:
+      case shared.FormFieldType.time:
+      case shared.FormFieldType.datetime:
+      case shared.FormFieldType.dropdown:
+      case shared.FormFieldType.checkbox:
+      case shared.FormFieldType.radio:
+      case shared.FormFieldType.toggle:
+        return true;
+      case shared.FormFieldType.file:
+      case shared.FormFieldType.files:
+      case shared.FormFieldType.photo:
+      case shared.FormFieldType.video:
+      case shared.FormFieldType.audio:
+      case shared.FormFieldType.voiceNote:
+      case shared.FormFieldType.signature:
+      case shared.FormFieldType.location:
+      case shared.FormFieldType.barcode:
+      case shared.FormFieldType.rfid:
+      case shared.FormFieldType.repeater:
+      case shared.FormFieldType.table:
+      case shared.FormFieldType.computed:
+      case shared.FormFieldType.sectionHeader:
+      case shared.FormFieldType.infoText:
+        return false;
+    }
+  }
+
+  bool _isAdvancedField(shared.FormField field) {
+    switch (field.type) {
+      case shared.FormFieldType.file:
+      case shared.FormFieldType.files:
+      case shared.FormFieldType.photo:
+      case shared.FormFieldType.video:
+      case shared.FormFieldType.audio:
+      case shared.FormFieldType.voiceNote:
+      case shared.FormFieldType.signature:
+      case shared.FormFieldType.location:
+      case shared.FormFieldType.barcode:
+      case shared.FormFieldType.rfid:
+      case shared.FormFieldType.repeater:
+      case shared.FormFieldType.table:
+      case shared.FormFieldType.computed:
+        return true;
+      case shared.FormFieldType.text:
+      case shared.FormFieldType.textarea:
+      case shared.FormFieldType.email:
+      case shared.FormFieldType.phone:
+      case shared.FormFieldType.number:
+      case shared.FormFieldType.date:
+      case shared.FormFieldType.time:
+      case shared.FormFieldType.datetime:
+      case shared.FormFieldType.dropdown:
+      case shared.FormFieldType.checkbox:
+      case shared.FormFieldType.radio:
+      case shared.FormFieldType.toggle:
+      case shared.FormFieldType.sectionHeader:
+      case shared.FormFieldType.infoText:
+        return false;
+    }
   }
 
   Widget _buildField(shared.FormField field) {
@@ -1613,10 +1856,10 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
       );
       if (!mounted) return;
       ref.invalidate(dashboardDataProvider);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Submission recorded')));
-      Navigator.pop(context);
+      setState(() => _isSubmitted = true);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) Navigator.pop(context);
+      });
     } catch (e) {
       // Persist offline queue on failure.
       await PendingSubmissionQueue(

@@ -1,7 +1,11 @@
+// ignore_for_file: unused_element, unused_element_parameter
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart' as legacy;
 import 'package:intl/intl.dart';
 import 'package:shared/shared.dart';
 
@@ -20,16 +24,37 @@ import '../../../ops/presentation/pages/notification_rules_page.dart';
 import '../../../ops/presentation/pages/ops_hub_page.dart';
 import '../../../ops/presentation/pages/payment_requests_page.dart';
 import '../../../ops/presentation/pages/portfolio_items_page.dart';
-import '../../../ops/presentation/pages/project_galleries_page.dart';
 import '../../../ops/presentation/pages/reviews_page.dart';
 import '../../../ops/presentation/pages/signature_requests_page.dart';
+import '../../../ops/presentation/widgets/ai_chat_panel.dart';
+import '../../../dashboard/presentation/widgets/top_bar.dart';
+import '../../../navigation/presentation/pages/audit_logs_page.dart';
+import '../../../navigation/presentation/pages/before_after_photos_page.dart';
+import '../../../navigation/presentation/pages/incidents_page.dart';
+import '../../../navigation/presentation/pages/notifications_page.dart';
+import '../../../navigation/presentation/pages/organization_chart_page.dart';
+import '../../../navigation/presentation/pages/payroll_page.dart';
+import '../../../navigation/presentation/pages/photos_page.dart';
+import '../../../navigation/presentation/pages/qr_scanner_page.dart';
+import '../../../navigation/presentation/pages/roles_page.dart';
+import '../../../navigation/presentation/pages/roles_permissions_page.dart';
+import '../../../navigation/presentation/pages/support_tickets_page.dart';
+import '../../../navigation/presentation/pages/system_logs_page.dart';
+import '../../../navigation/presentation/pages/timecards_page.dart';
+import '../../../navigation/presentation/pages/user_directory_page.dart';
+import '../../../navigation/presentation/pages/work_orders_page.dart';
+import '../../../navigation/presentation/widgets/side_menu.dart';
 import '../../../ops/data/ops_provider.dart';
 import '../../../ops/data/ops_repository.dart';
 import '../../../partners/presentation/pages/clients_page.dart';
 import '../../../partners/presentation/pages/messages_page.dart';
 import '../../../partners/presentation/pages/vendors_page.dart';
 import '../../../projects/presentation/pages/projects_page.dart';
+import '../../../sop/presentation/pages/sop_library_page.dart';
+import '../../../settings/presentation/pages/settings_page.dart';
 import '../../../tasks/presentation/pages/tasks_page.dart';
+import '../../../teams/presentation/pages/teams_page.dart';
+import '../../../templates/presentation/pages/templates_page.dart';
 import '../../../training/presentation/pages/training_hub_page.dart';
 import '../../../../core/utils/automation_scheduler.dart';
 import '../../../../core/utils/ai_job_scheduler.dart';
@@ -39,11 +64,19 @@ import '../../data/admin_providers.dart';
 
 final _dateFmt = DateFormat('MMM d, h:mm a');
 final _shortDateFmt = DateFormat('MMM d, yyyy');
+final _adminDayStartedProvider = legacy.StateProvider<bool>((ref) => false);
 
 class AdminDashboardPage extends ConsumerStatefulWidget {
-  const AdminDashboardPage({super.key, required this.userRole});
+  const AdminDashboardPage({
+    super.key,
+    required this.userRole,
+    this.initialSectionId,
+    this.embedInShell = false,
+  });
 
   final UserRole userRole;
+  final String? initialSectionId;
+  final bool embedInShell;
 
   @override
   ConsumerState<AdminDashboardPage> createState() =>
@@ -52,6 +85,7 @@ class AdminDashboardPage extends ConsumerStatefulWidget {
 
 class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
   int _sectionIndex = 0;
+  bool _didInitSection = false;
   late final ProviderSubscription<AsyncValue<List<AdminOrgSummary>>> _orgListener;
   late final OpsRepositoryBase _opsRepository;
   Timer? _automationTimer;
@@ -181,6 +215,20 @@ class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
       sectionIndexById[sections[i].id] = i;
     }
 
+    void navigateToSection(String id) {
+      final index = sectionIndexById[id];
+      if (index == null) return;
+      setState(() => _sectionIndex = index);
+    }
+
+    if (!_didInitSection && widget.initialSectionId != null) {
+      final target = sectionIndexById[widget.initialSectionId!];
+      if (target != null) {
+        _sectionIndex = target;
+      }
+      _didInitSection = true;
+    }
+
     if (_sectionIndex >= sections.length) {
       _sectionIndex = 0;
     }
@@ -188,48 +236,92 @@ class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final useRail = constraints.maxWidth >= 1024;
-        final showAppBar = _sectionIndex != 0;
-        return Scaffold(
-          appBar: showAppBar
-              ? AppBar(
-                  title: const Text('Admin Console'),
-                  actions: [
-                    if (showOrgSwitcher)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: _OrgSwitcher(compact: true),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 12),
-                      child: Chip(
-                        label: Text(widget.userRole.displayName),
-                        backgroundColor:
-                            Theme.of(context).colorScheme.secondaryContainer,
-                      ),
-                    ),
-                  ],
-                )
-              : null,
-          body: Row(
+        final showSidebar =
+            !widget.embedInShell && (kIsWeb || constraints.maxWidth >= 1200);
+        final contentRow = Row(
+          children: [
+            if (showSidebar)
+              SideMenu(
+                role: widget.userRole,
+                activeRoute: SideMenuRoute.dashboard,
+                onNavigate: (route) => _handleSideMenuRoute(
+                  context,
+                  route,
+                  navigateToSection,
+                ),
+              ),
+            if (useRail)
+              NavigationRail(
+                selectedIndex: _sectionIndex,
+                onDestinationSelected: (index) {
+                  setState(() => _sectionIndex = index);
+                },
+                labelType: NavigationRailLabelType.all,
+                destinations: [
+                  for (final section in sections)
+                    NavigationRailDestination(
+                      icon: Icon(section.icon),
+                      label: Text(section.label),
+                    )
+                ],
+              ),
+            Expanded(
+              child: sections[_sectionIndex].builder(context, ref),
+            ),
+          ],
+        );
+
+        if (widget.embedInShell) {
+          return Column(
             children: [
-              if (useRail)
-                NavigationRail(
+              Expanded(child: contentRow),
+              if (!useRail)
+                NavigationBar(
                   selectedIndex: _sectionIndex,
                   onDestinationSelected: (index) {
                     setState(() => _sectionIndex = index);
                   },
-                  labelType: NavigationRailLabelType.all,
                   destinations: [
                     for (final section in sections)
-                      NavigationRailDestination(
+                      NavigationDestination(
                         icon: Icon(section.icon),
-                        label: Text(section.label),
+                        label: section.label,
                       )
                   ],
                 ),
-              Expanded(
-                child: sections[_sectionIndex].builder(context, ref),
+            ],
+          );
+        }
+
+        return Scaffold(
+          backgroundColor: Theme.of(context).colorScheme.background,
+          drawer: showSidebar
+              ? null
+              : Drawer(
+                  child: SideMenu(
+                    role: widget.userRole,
+                    activeRoute: SideMenuRoute.dashboard,
+                    isMobile: true,
+                    onNavigate: (route) => _handleSideMenuRoute(
+                      context,
+                      route,
+                      navigateToSection,
+                    ),
+                    onClose: () => Navigator.of(context).pop(),
+                  ),
+                ),
+          body: Column(
+            children: [
+              Builder(
+                builder: (context) => TopBar(
+                  role: widget.userRole,
+                  isMobile: !showSidebar,
+                  onMenuPressed: showSidebar
+                      ? null
+                      : () => Scaffold.of(context).openDrawer(),
+                ),
               ),
+              Expanded(child: contentRow),
             ],
           ),
           bottomNavigationBar: useRail
@@ -249,6 +341,80 @@ class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
                 ),
         );
       },
+    );
+  }
+
+  void _handleSideMenuRoute(
+    BuildContext context,
+    SideMenuRoute route,
+    void Function(String) navigateToSection,
+  ) {
+    switch (route) {
+      case SideMenuRoute.dashboard:
+        navigateToSection('overview');
+        return;
+      case SideMenuRoute.organization:
+        navigateToSection('orgs');
+        return;
+      case SideMenuRoute.users:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const UserDirectoryPage()),
+        );
+        return;
+      case SideMenuRoute.forms:
+        navigateToSection('forms');
+        return;
+      case SideMenuRoute.approvals:
+        navigateToSection('submissions');
+        return;
+      case SideMenuRoute.auditLogs:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AuditLogsPage()),
+        );
+        return;
+      case SideMenuRoute.systemOverview:
+        navigateToSection('system');
+        return;
+      default:
+        break;
+    }
+
+    final page = switch (route) {
+      SideMenuRoute.notifications => const NotificationsPage(),
+      SideMenuRoute.messages => const MessagesPage(),
+      SideMenuRoute.companyNews => const NewsPostsPage(),
+      SideMenuRoute.organizationChart =>
+          OrganizationChartPage(role: widget.userRole),
+      SideMenuRoute.team => const TeamsPage(),
+      SideMenuRoute.tasks => const TasksPage(),
+      SideMenuRoute.documents => const DocumentsPage(),
+      SideMenuRoute.photos => const PhotosPage(),
+      SideMenuRoute.beforeAfter => const BeforeAfterPhotosPage(),
+      SideMenuRoute.assets => const AssetsPage(),
+      SideMenuRoute.qrScanner => const QrScannerPage(),
+      SideMenuRoute.training => const TrainingHubPage(),
+      SideMenuRoute.incidents => const IncidentsPage(),
+      SideMenuRoute.aiTools => const AiToolsPage(),
+      SideMenuRoute.reports => const ReportsPage(),
+      SideMenuRoute.settings => const SettingsPage(),
+      SideMenuRoute.projects => const ProjectsPage(),
+      SideMenuRoute.workOrders => const WorkOrdersPage(),
+      SideMenuRoute.templates => const TemplatesPage(),
+      SideMenuRoute.payments => const PaymentRequestsPage(),
+      SideMenuRoute.payroll => const PayrollPage(),
+      SideMenuRoute.rolesPermissions => widget.userRole == UserRole.admin
+          ? const RolesPage()
+          : const RolesPermissionsPage(),
+      SideMenuRoute.supportTickets => const SupportTicketsPage(),
+      SideMenuRoute.knowledgeBase => const SopLibraryPage(),
+      SideMenuRoute.systemLogs => const SystemLogsPage(),
+      SideMenuRoute.timecards => TimecardsPage(role: widget.userRole),
+      _ => null,
+    };
+
+    if (page == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => page),
     );
   }
 }
@@ -386,9 +552,8 @@ class _OverviewSection extends ConsumerWidget {
     final stats = ref.watch(adminStatsProvider);
     final orgs = ref.watch(adminOrganizationsProvider);
     final users = ref.watch(adminUsersProvider);
-    final submissions = ref.watch(adminSubmissionsProvider);
-    final audit = ref.watch(adminAuditProvider);
     final userFilters = ref.watch(adminUsersFilterProvider);
+    final dayStarted = ref.watch(_adminDayStartedProvider);
     final activeOrgId = ref.watch(adminActiveOrgIdProvider);
     final orgList = orgs.asData?.value ?? const <AdminOrgSummary>[];
     AdminOrgSummary? activeOrg;
@@ -405,61 +570,113 @@ class _OverviewSection extends ConsumerWidget {
         role: userFilters.role,
       );
     }
-    final inviteUser = permissions.canManageUsers
-        ? () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const GuestInvitesPage()),
-            )
-        : null;
+    Future<void> handleStartDay() async {
+      if (dayStarted) return;
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Start the workday?'),
+          content: const Text(
+            'This will:\n\n'
+            '• Open timecard submissions for all employees\n'
+            '• Activate daily schedules and assignments\n'
+            '• Send notifications to all active users\n\n'
+            'Continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Start Day'),
+            ),
+          ],
+        ),
+      );
+      if (approved == true) {
+        ref.read(_adminDayStartedProvider.notifier).state = true;
+      }
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 1100;
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _AdminOverviewHeader(
-              activeOrg: activeOrg,
-              canManageUsers: permissions.canManageUsers,
-              showOrgSwitcher: showOrgSwitcher,
-              userRoleLabel: userRoleLabel,
-              onSearchChanged: updateUserSearch,
-              onNavigate: onNavigate,
-            ),
-            const SizedBox(height: 16),
-            stats.when(
-              data: (data) {
-                final totalUsers = users.asData?.value.length;
-                final metrics = _adminOverviewMetrics(
-                  context,
-                  stats: data,
-                  totalUsers: totalUsers,
-                );
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _AdminMetricGrid(cards: metrics),
-                    const SizedBox(height: 16),
-                    _AdminOverviewPanels(
-                      isWide: isWide,
-                      permissions: permissions,
-                      stats: data,
-                      users: users,
-                      submissions: submissions,
-                      audit: audit,
-                      onUserSearch: updateUserSearch,
-                      onInviteUser: inviteUser,
-                      onNavigate: onNavigate,
-                    ),
-                  ],
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => _ErrorTile(
-                message: 'Failed to load overview stats',
-                onRetry: () => ref.invalidate(adminStatsProvider),
+        final theme = Theme.of(context);
+        final scheme = theme.colorScheme;
+        final cardTheme = theme.cardTheme.copyWith(
+          color: scheme.surface,
+          elevation: 0,
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: scheme.outlineVariant),
+          ),
+        );
+        return Theme(
+          data: theme.copyWith(cardTheme: cardTheme),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  scheme.surface,
+                  scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-          ],
+            child: ListView(
+              padding: EdgeInsets.fromLTRB(
+                isWide ? 24 : 16,
+                16,
+                isWide ? 24 : 16,
+                24,
+              ),
+              children: [
+                _AdminOverviewHeader(
+                  activeOrg: activeOrg,
+                  canManageUsers: permissions.canManageUsers,
+                  dayStarted: dayStarted,
+                  showOrgSwitcher: showOrgSwitcher,
+                  userRoleLabel: userRoleLabel,
+                  onSearchChanged: updateUserSearch,
+                  onStartDay: handleStartDay,
+                  onNavigate: onNavigate,
+                ),
+                const SizedBox(height: 16),
+                stats.when(
+                  data: (data) {
+                    final totalUsers = users.asData?.value.length;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _AdminReactStatsGrid(
+                          stats: _adminReactStats(
+                            totalUsers: totalUsers ?? 0,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _AdminOverviewPanels(
+                          isWide: isWide,
+                          permissions: permissions,
+                          users: users,
+                          onUserSearch: updateUserSearch,
+                          onNavigate: onNavigate,
+                        ),
+                      ],
+                    );
+                  },
+                  loading: () => const Center(child: CircularProgressIndicator()),
+                  error: (e, _) => _ErrorTile(
+                    message: 'Failed to load overview stats',
+                    onRetry: () => ref.invalidate(adminStatsProvider),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
@@ -470,75 +687,140 @@ class _AdminOverviewHeader extends StatelessWidget {
   const _AdminOverviewHeader({
     required this.activeOrg,
     required this.canManageUsers,
+    required this.dayStarted,
     required this.showOrgSwitcher,
     required this.userRoleLabel,
     required this.onSearchChanged,
+    required this.onStartDay,
     this.onNavigate,
   });
 
   final AdminOrgSummary? activeOrg;
   final bool canManageUsers;
+  final bool dayStarted;
   final bool showOrgSwitcher;
   final String userRoleLabel;
   final ValueChanged<String> onSearchChanged;
+  final VoidCallback onStartDay;
   final void Function(String id)? onNavigate;
 
   @override
   Widget build(BuildContext context) {
-    final titleStyle = Theme.of(context)
-        .textTheme
-        .headlineSmall
-        ?.copyWith(fontWeight: FontWeight.w600);
-    final subtitle = activeOrg == null
-        ? 'No organization selected'
-        : 'Active org: ${activeOrg!.name}';
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final titleStyle = theme.textTheme.headlineSmall?.copyWith(
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.2,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildAdminCommandBar(context),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: Column(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 900;
+            final startedBackground = isDark
+                ? const Color(0xFF14532D).withValues(alpha: 0.35)
+                : const Color(0xFFDCFCE7);
+            final startedForeground =
+                isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D);
+            final actionButtons = Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: dayStarted ? null : onStartDay,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: dayStarted
+                        ? startedBackground
+                        : const Color(0xFF16A34A),
+                    foregroundColor:
+                        dayStarted ? startedForeground : Colors.white,
+                    disabledBackgroundColor: startedBackground,
+                    disabledForegroundColor: startedForeground,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: dayStarted
+                          ? BorderSide(color: startedForeground.withValues(alpha: 0.6))
+                          : BorderSide.none,
+                    ),
+                  ),
+                  icon: Icon(
+                    Icons.play_arrow,
+                    size: 18,
+                    color: dayStarted ? startedForeground : Colors.white,
+                  ),
+                  label: Text(dayStarted ? 'Day Started ✓' : 'Start Day'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsPage()),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.settings_outlined, size: 18),
+                  label: const Text('System Settings'),
+                ),
+                FilledButton.icon(
+                  onPressed: canManageUsers
+                      ? () => onNavigate?.call('users')
+                      : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.person_add_alt_1, size: 18),
+                  label: const Text('Add User'),
+                ),
+              ],
+            );
+
+            final header = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Admin Dashboard', style: titleStyle),
+                const SizedBox(height: 4),
+                Text(
+                  'User management and system administration',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ],
+            );
+
+            if (wide) {
+              return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Super Admin Dashboard', style: titleStyle),
-                  const SizedBox(height: 4),
-                  Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+                  Expanded(child: header),
+                  const SizedBox(width: 16),
+                  actionButtons,
                 ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            if (canManageUsers)
-              FilledButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const GuestInvitesPage()),
-                ),
-                icon: const Icon(Icons.person_add_alt_1),
-                label: const Text('Invite user'),
-              ),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ReportsPage()),
-              ),
-              icon: const Icon(Icons.insights),
-              label: const Text('Reports'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const AiToolsPage()),
-              ),
-              icon: const Icon(Icons.auto_awesome),
-              label: const Text('AI Tools'),
-            ),
-          ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                header,
+                const SizedBox(height: 12),
+                actionButtons,
+              ],
+            );
+          },
         ),
       ],
     );
@@ -566,10 +848,11 @@ class _AdminOverviewHeader extends StatelessWidget {
       decoration: InputDecoration(
         prefixIcon: const Icon(Icons.search),
         hintText: 'Search users, forms, or submissions',
+        suffixIcon: const Icon(Icons.tune),
         filled: true,
-        fillColor: scheme.surfaceContainerHighest,
+        fillColor: scheme.surface,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide.none,
         ),
       ),
@@ -600,7 +883,19 @@ class _AdminOverviewHeader extends StatelessWidget {
       ),
     ];
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: LayoutBuilder(
@@ -676,81 +971,83 @@ class _AdminOverviewHeader extends StatelessWidget {
   }
 }
 
-List<_MetricCardData> _adminOverviewMetrics(
-  BuildContext context, {
-  required AdminStats stats,
-  int? totalUsers,
+List<_AdminReactStat> _adminReactStats({
+  required int totalUsers,
 }) {
-  final theme = Theme.of(context);
+  final totalUsersLabel = NumberFormat.decimalPattern().format(totalUsers);
   return [
-    _MetricCardData(
-      title: 'Total Users',
-      value: totalUsers ?? 0,
-      icon: Icons.people_alt,
-      color: theme.colorScheme.primaryContainer,
-      subtitle: 'Licensed seats',
+    _AdminReactStat(
+      label: 'Total Users',
+      value: totalUsersLabel,
+      icon: Icons.people_outline,
+      tone: _AdminStatTone.blue,
+      trend: '+12 this month',
     ),
-    _MetricCardData(
-      title: 'Active Projects',
-      value: stats.projects,
-      icon: Icons.folder_open,
-      color: theme.colorScheme.secondaryContainer,
-      subtitle: 'In-flight work',
+    const _AdminReactStat(
+      label: 'Active Sessions',
+      value: '142',
+      icon: Icons.show_chart,
+      tone: _AdminStatTone.green,
     ),
-    _MetricCardData(
-      title: 'Active Forms',
-      value: stats.forms,
-      icon: Icons.description,
-      color: theme.colorScheme.tertiaryContainer,
-      subtitle: 'Published templates',
+    const _AdminReactStat(
+      label: 'Pending Approvals',
+      value: '8',
+      icon: Icons.schedule,
+      tone: _AdminStatTone.orange,
     ),
-    _MetricCardData(
-      title: 'Submissions',
-      value: stats.submissions,
-      icon: Icons.assignment_turned_in,
-      color: theme.colorScheme.primaryContainer,
-      subtitle: 'All time',
+    const _AdminReactStat(
+      label: 'Security Alerts',
+      value: '2',
+      icon: Icons.shield_outlined,
+      tone: _AdminStatTone.red,
+      trend: 'Low priority',
     ),
-    _MetricCardData(
-      title: 'Alerts',
-      value: stats.notifications,
-      icon: Icons.notifications_active,
-      color: theme.colorScheme.secondaryContainer,
-      subtitle: 'Unresolved',
+    const _AdminReactStat(
+      label: 'System Health',
+      value: '99%',
+      icon: Icons.check_circle_outline,
+      tone: _AdminStatTone.emerald,
     ),
   ];
 }
 
-class _AdminMetricGrid extends StatelessWidget {
-  const _AdminMetricGrid({required this.cards});
+enum _AdminStatTone { blue, green, orange, red, emerald }
 
-  final List<_MetricCardData> cards;
+class _AdminReactStat {
+  const _AdminReactStat({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.tone,
+    this.trend,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final _AdminStatTone tone;
+  final String? trend;
+}
+
+class _AdminReactStatsGrid extends StatelessWidget {
+  const _AdminReactStatsGrid({required this.stats});
+
+  final List<_AdminReactStat> stats;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        double cardWidth = width;
-        if (width >= 1500) {
-          cardWidth = (width / 5) - 12;
-        } else if (width >= 1200) {
-          cardWidth = (width / 4) - 12;
-        } else if (width >= 900) {
-          cardWidth = (width / 3) - 12;
-        } else if (width >= 820) {
-          cardWidth = (width / 2) - 10;
-        }
-        return Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: cards
-              .map(
-                (card) => SizedBox(
-                  width: cardWidth,
-                  child: _StatCard(card: card),
-                ),
-              )
+        final crossAxisCount = constraints.maxWidth >= 1100 ? 5 : 2;
+        return GridView.count(
+          crossAxisCount: crossAxisCount,
+          shrinkWrap: true,
+          mainAxisSpacing: 16,
+          crossAxisSpacing: 16,
+          childAspectRatio: crossAxisCount > 2 ? 2.25 : 1.4,
+          physics: const NeverScrollableScrollPhysics(),
+          children: stats
+              .map((stat) => _AdminReactStatCard(stat: stat))
               .toList(),
         );
       },
@@ -758,55 +1055,245 @@ class _AdminMetricGrid extends StatelessWidget {
   }
 }
 
+class _AdminReactStatCard extends StatelessWidget {
+  const _AdminReactStatCard({required this.stat});
+
+  final _AdminReactStat stat;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final palette = _AdminStatPalette.fromTone(stat.tone, isDark);
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: palette.gradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: palette.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: palette.iconBackground,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(stat.icon, color: Colors.white, size: 24),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            stat.value,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : const Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            stat.label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (stat.trend != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              stat.trend!,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color:
+                    isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminStatPalette {
+  const _AdminStatPalette({
+    required this.gradient,
+    required this.border,
+    required this.iconBackground,
+  });
+
+  final List<Color> gradient;
+  final Color border;
+  final Color iconBackground;
+
+  factory _AdminStatPalette.fromTone(_AdminStatTone tone, bool isDark) {
+    switch (tone) {
+      case _AdminStatTone.blue:
+        return _AdminStatPalette(
+          gradient: isDark
+              ? [
+                  const Color(0xFF1E3A8A).withValues(alpha: 0.4),
+                  const Color(0xFF312E81).withValues(alpha: 0.4),
+                ]
+              : const [Color(0xFFEFF6FF), Color(0xFFE0E7FF)],
+          border: isDark
+              ? const Color(0xFF1D4ED8).withValues(alpha: 0.4)
+              : const Color(0xFFBFDBFE),
+          iconBackground: const Color(0xFF2563EB),
+        );
+      case _AdminStatTone.green:
+        return _AdminStatPalette(
+          gradient: isDark
+              ? [
+                  const Color(0xFF064E3B).withValues(alpha: 0.4),
+                  const Color(0xFF065F46).withValues(alpha: 0.4),
+                ]
+              : const [Color(0xFFF0FDF4), Color(0xFFDCFCE7)],
+          border: isDark
+              ? const Color(0xFF059669).withValues(alpha: 0.4)
+              : const Color(0xFFBBF7D0),
+          iconBackground: const Color(0xFF16A34A),
+        );
+      case _AdminStatTone.orange:
+        return _AdminStatPalette(
+          gradient: isDark
+              ? [
+                  const Color(0xFF7C2D12).withValues(alpha: 0.4),
+                  const Color(0xFF9A3412).withValues(alpha: 0.4),
+                ]
+              : const [Color(0xFFFFF7ED), Color(0xFFFFEDD5)],
+          border: isDark
+              ? const Color(0xFFEA580C).withValues(alpha: 0.4)
+              : const Color(0xFFFED7AA),
+          iconBackground: const Color(0xFFEA580C),
+        );
+      case _AdminStatTone.red:
+        return _AdminStatPalette(
+          gradient: isDark
+              ? [
+                  const Color(0xFF7F1D1D).withValues(alpha: 0.4),
+                  const Color(0xFF991B1B).withValues(alpha: 0.4),
+                ]
+              : const [Color(0xFFFEF2F2), Color(0xFFFFE4E6)],
+          border: isDark
+              ? const Color(0xFFDC2626).withValues(alpha: 0.4)
+              : const Color(0xFFFECACA),
+          iconBackground: const Color(0xFFDC2626),
+        );
+      case _AdminStatTone.emerald:
+        return _AdminStatPalette(
+          gradient: isDark
+              ? [
+                  const Color(0xFF065F46).withValues(alpha: 0.4),
+                  const Color(0xFF047857).withValues(alpha: 0.4),
+                ]
+              : const [Color(0xFFECFDF5), Color(0xFFD1FAE5)],
+          border: isDark
+              ? const Color(0xFF10B981).withValues(alpha: 0.4)
+              : const Color(0xFFA7F3D0),
+          iconBackground: const Color(0xFF059669),
+        );
+    }
+  }
+}
+
 class _AdminOverviewPanels extends StatelessWidget {
   const _AdminOverviewPanels({
     required this.isWide,
     required this.permissions,
-    required this.stats,
     required this.users,
-    required this.submissions,
-    required this.audit,
     required this.onUserSearch,
-    required this.onInviteUser,
     required this.onNavigate,
   });
 
   final bool isWide;
   final _AdminPermissions permissions;
-  final AdminStats stats;
   final AsyncValue<List<AdminUserSummary>> users;
-  final AsyncValue<List<AdminSubmissionSummary>> submissions;
-  final AsyncValue<List<AdminAuditEvent>> audit;
   final ValueChanged<String> onUserSearch;
-  final VoidCallback? onInviteUser;
   final void Function(String id)? onNavigate;
 
   @override
   Widget build(BuildContext context) {
+    final userList = users.asData?.value ?? const <AdminUserSummary>[];
+    final roleDistribution = _buildRoleDistribution(userList);
+    final approvals = const [
+      _AdminApprovalItem(
+        type: 'New User Request',
+        user: 'John Smith',
+        time: '1 hour ago',
+      ),
+      _AdminApprovalItem(
+        type: 'Role Change',
+        user: 'Lisa White',
+        time: '3 hours ago',
+      ),
+      _AdminApprovalItem(
+        type: 'Access Request',
+        user: 'David Kim',
+        time: '5 hours ago',
+      ),
+    ];
+    final securityAlerts = const [
+      _AdminSecurityAlert(
+        title: 'Multiple Login Attempts',
+        detail: 'User: mike.chen@company.com',
+        tone: _AdminAlertTone.warning,
+      ),
+      _AdminSecurityAlert(
+        title: 'Unusual Activity Detected',
+        detail: 'Location: New York',
+        tone: _AdminAlertTone.info,
+      ),
+    ];
+
     final mainColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminPanel(
           title: 'User Management',
-          actionLabel: permissions.canViewUsers ? 'Manage users' : null,
-          onAction: permissions.canViewUsers
-              ? () => onNavigate?.call('users')
-              : null,
           child: _AdminUsersPreview(
             users: users,
             onManageUsers:
                 permissions.canViewUsers ? () => onNavigate?.call('users') : null,
             onSearch: onUserSearch,
-            onInvite: onInviteUser,
           ),
         ),
         const SizedBox(height: 16),
-        _AdminPanel(
-          title: 'Server Overview',
-          child: _AdminOpsSnapshot(stats: stats),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 780;
+            final roleCard = _AdminPanel(
+              title: 'Role Distribution',
+              child: _AdminRoleDistributionCard(items: roleDistribution),
+            );
+            final activityCard = const _AdminPanel(
+              title: 'User Activity',
+              child: _AdminUserActivityCard(),
+            );
+            if (wide) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: roleCard),
+                  const SizedBox(width: 16),
+                  Expanded(child: activityCard),
+                ],
+              );
+            }
+            return Column(
+              children: [
+                roleCard,
+                const SizedBox(height: 16),
+                activityCard,
+              ],
+            );
+          },
         ),
-        const SizedBox(height: 16),
-        _FormsByCategoryCard(stats: stats),
       ],
     );
 
@@ -814,34 +1301,23 @@ class _AdminOverviewPanels extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _AdminPanel(
-          title: 'Latest Submissions',
-          actionLabel: permissions.canViewSubmissions ? 'View submissions' : null,
-          onAction: permissions.canViewSubmissions
-              ? () => onNavigate?.call('submissions')
-              : null,
-          child: _AdminSubmissionsPreview(
-            submissions: submissions,
-            onViewSubmissions: permissions.canViewSubmissions
-                ? () => onNavigate?.call('submissions')
-                : null,
+          title: 'Quick Actions',
+          child: _AdminQuickActions(
+            onNavigate: onNavigate,
+            canManageUsers: permissions.canManageUsers,
+            role: permissions.role,
           ),
         ),
         const SizedBox(height: 16),
         _AdminPanel(
-          title: 'Incidents & Alerts',
-          actionLabel: permissions.canViewAudit ? 'View audit' : null,
-          onAction: permissions.canViewAudit
-              ? () => onNavigate?.call('audit')
-              : null,
-          child: _AdminAuditPreview(audit: audit),
+          title: 'Pending Approvals',
+          child: _AdminPendingApprovals(items: approvals, totalCount: 8),
         ),
         const SizedBox(height: 16),
         _AdminPanel(
-          title: 'AI Assistant',
-          child: _AdminAiAssistantCard(),
+          title: 'Security Alerts',
+          child: _AdminSecurityAlerts(items: securityAlerts),
         ),
-        if (permissions.canViewOps) const SizedBox(height: 16),
-        if (permissions.canViewOps) const _AiUsageSection(),
       ],
     );
 
@@ -867,6 +1343,555 @@ class _AdminOverviewPanels extends StatelessWidget {
   }
 }
 
+List<_RoleDistributionItem> _buildRoleDistribution(
+  List<AdminUserSummary> users,
+) {
+  final total = users.length;
+  final roleOrder = <_RoleDistributionItem>[
+    const _RoleDistributionItem(
+      label: 'Employees',
+      role: UserRole.employee,
+      color: Color(0xFF3B82F6),
+    ),
+    const _RoleDistributionItem(
+      label: 'Supervisors',
+      role: UserRole.supervisor,
+      color: Color(0xFF8B5CF6),
+    ),
+    const _RoleDistributionItem(
+      label: 'Managers',
+      role: UserRole.manager,
+      color: Color(0xFF22C55E),
+    ),
+    const _RoleDistributionItem(
+      label: 'Admins',
+      role: UserRole.admin,
+      color: Color(0xFFF97316),
+    ),
+    const _RoleDistributionItem(
+      label: 'Tech Support',
+      role: UserRole.techSupport,
+      color: Color(0xFFEF4444),
+    ),
+  ];
+  return roleOrder.map((item) {
+    final count = users.where((user) => user.role == item.role).length;
+    final percent = total == 0 ? 0 : ((count / total) * 100).round();
+    return item.copyWith(count: count, percent: percent);
+  }).toList();
+}
+
+class _RoleDistributionItem {
+  const _RoleDistributionItem({
+    required this.label,
+    required this.role,
+    required this.color,
+    this.count = 0,
+    this.percent = 0,
+  });
+
+  final String label;
+  final UserRole role;
+  final Color color;
+  final int count;
+  final int percent;
+
+  _RoleDistributionItem copyWith({int? count, int? percent}) {
+    return _RoleDistributionItem(
+      label: label,
+      role: role,
+      color: color,
+      count: count ?? this.count,
+      percent: percent ?? this.percent,
+    );
+  }
+}
+
+class _AdminRoleDistributionCard extends StatelessWidget {
+  const _AdminRoleDistributionCard({required this.items});
+
+  final List<_RoleDistributionItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Column(
+      children: items
+          .map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        item.label,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: isDark
+                              ? const Color(0xFFD1D5DB)
+                              : const Color(0xFF374151),
+                        ),
+                      ),
+                      Text(
+                        item.count.toString(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: item.percent / 100,
+                      minHeight: 8,
+                      backgroundColor:
+                          isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+                      valueColor: AlwaysStoppedAnimation(item.color),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _AdminUserActivityCard extends StatelessWidget {
+  const _AdminUserActivityCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Column(
+      children: [
+        _AdminActivityTile(
+          label: 'Active Users',
+          value: '142',
+          detail: 'Currently online',
+          color: const Color(0xFF22C55E),
+          background: isDark
+              ? const Color(0xFF064E3B).withValues(alpha: 0.2)
+              : const Color(0xFFECFDF5),
+          border: isDark ? const Color(0xFF047857) : const Color(0xFFBBF7D0),
+          icon: Icons.bar_chart,
+        ),
+        const SizedBox(height: 12),
+        _AdminActivityTile(
+          label: 'New This Month',
+          value: '12',
+          detail: '+15% from last month',
+          color: const Color(0xFF3B82F6),
+          background: isDark
+              ? const Color(0xFF1E3A8A).withValues(alpha: 0.2)
+              : const Color(0xFFEFF6FF),
+          border: isDark ? const Color(0xFF1D4ED8) : const Color(0xFFBFDBFE),
+          icon: Icons.trending_up,
+        ),
+      ],
+    );
+  }
+}
+
+class _AdminActivityTile extends StatelessWidget {
+  const _AdminActivityTile({
+    required this.label,
+    required this.value,
+    required this.detail,
+    required this.color,
+    required this.background,
+    required this.border,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
+  final String detail;
+  final Color color;
+  final Color background;
+  final Color border;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+              Icon(icon, size: 16, color: color),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            detail,
+            style: theme.textTheme.labelSmall?.copyWith(color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminQuickActions extends StatelessWidget {
+  const _AdminQuickActions({
+    required this.onNavigate,
+    required this.canManageUsers,
+    required this.role,
+  });
+
+  final void Function(String id)? onNavigate;
+  final bool canManageUsers;
+  final UserRole role;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _AdminQuickActionTile(
+          label: 'Add New User',
+          icon: Icons.person_add_alt_1,
+          color: const Color(0xFF2563EB),
+          onTap: canManageUsers ? () => onNavigate?.call('users') : null,
+        ),
+        const SizedBox(height: 10),
+        _AdminQuickActionTile(
+          label: 'Manage Roles',
+          icon: Icons.key,
+          color: const Color(0xFF8B5CF6),
+          onTap: () {
+            final page = role == UserRole.admin
+                ? const RolesPage()
+                : const RolesPermissionsPage();
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => page),
+            );
+          },
+        ),
+        const SizedBox(height: 10),
+        _AdminQuickActionTile(
+          label: 'System Settings',
+          icon: Icons.settings_outlined,
+          color: const Color(0xFF22C55E),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SettingsPage()),
+            );
+          },
+        ),
+        const SizedBox(height: 10),
+        _AdminQuickActionTile(
+          label: 'Audit Logs',
+          icon: Icons.description_outlined,
+          color: const Color(0xFFF97316),
+          onTap: () => onNavigate?.call('audit'),
+        ),
+      ],
+    );
+  }
+}
+
+class _AdminQuickActionTile extends StatelessWidget {
+  const _AdminQuickActionTile({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = color.withValues(alpha: isDark ? 0.2 : 0.12);
+    final border = color.withValues(alpha: isDark ? 0.4 : 0.2);
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminPendingApprovals extends StatelessWidget {
+  const _AdminPendingApprovals({
+    required this.items,
+    required this.totalCount,
+  });
+
+  final List<_AdminApprovalItem> items;
+  final int totalCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: _AdminCountPill(
+            label: totalCount.toString(),
+            color: const Color(0xFFF97316),
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...items.map(
+          (item) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        item.type,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        item.time,
+                        style: theme.textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.user,
+                    style: theme.textTheme.labelSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {},
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF16A34A),
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Approve'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {},
+                          child: const Text('Review'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: () {},
+          child: const Text('View All Approvals'),
+        ),
+      ],
+    );
+  }
+}
+
+class _AdminSecurityAlerts extends StatelessWidget {
+  const _AdminSecurityAlerts({required this.items});
+
+  final List<_AdminSecurityAlert> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: items
+          .map(
+            (alert) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _AdminAlertTile(alert: alert),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _AdminAlertTile extends StatelessWidget {
+  const _AdminAlertTile({required this.alert});
+
+  final _AdminSecurityAlert alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final color = alert.tone == _AdminAlertTone.warning
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFF3B82F6);
+    final background = color.withValues(alpha: isDark ? 0.2 : 0.15);
+    final border = color.withValues(alpha: isDark ? 0.35 : 0.25);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            alert.tone == _AdminAlertTone.warning
+                ? Icons.warning_amber_outlined
+                : Icons.monitor_heart_outlined,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alert.title,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  alert.detail,
+                  style: theme.textTheme.labelSmall?.copyWith(color: color),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminCountPill extends StatelessWidget {
+  const _AdminCountPill({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.2 : 0.15),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+      ),
+    );
+  }
+}
+
+class _AdminApprovalItem {
+  const _AdminApprovalItem({
+    required this.type,
+    required this.user,
+    required this.time,
+  });
+
+  final String type;
+  final String user;
+  final String time;
+}
+
+class _AdminSecurityAlert {
+  const _AdminSecurityAlert({
+    required this.title,
+    required this.detail,
+    required this.tone,
+  });
+
+  final String title;
+  final String detail;
+  final _AdminAlertTone tone;
+}
+
+enum _AdminAlertTone { warning, info }
+
 class _AdminPanel extends StatelessWidget {
   const _AdminPanel({
     required this.title,
@@ -882,7 +1907,21 @@ class _AdminPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -892,7 +1931,9 @@ class _AdminPanel extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                 ),
                 const Spacer(),
                 if (actionLabel != null)
@@ -916,13 +1957,11 @@ class _AdminUsersPreview extends StatelessWidget {
     required this.users,
     this.onManageUsers,
     this.onSearch,
-    this.onInvite,
   });
 
   final AsyncValue<List<AdminUserSummary>> users;
   final VoidCallback? onManageUsers;
   final ValueChanged<String>? onSearch;
-  final VoidCallback? onInvite;
 
   @override
   Widget build(BuildContext context) {
@@ -935,16 +1974,8 @@ class _AdminUsersPreview extends StatelessWidget {
         return LayoutBuilder(
           builder: (context, constraints) {
             final isCompact = constraints.maxWidth < 720;
-            final inviteAction = onInvite ?? onManageUsers;
             final toolbar = Row(
               children: [
-                if (inviteAction != null)
-                  FilledButton.icon(
-                    onPressed: inviteAction,
-                    icon: const Icon(Icons.person_add_alt_1),
-                    label: const Text('New user'),
-                  ),
-                if (inviteAction != null) const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     onChanged: onSearch,
@@ -960,6 +1991,12 @@ class _AdminUsersPreview extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.filter_list, size: 18),
+                  label: const Text('Filter'),
                 ),
               ],
             );
@@ -981,11 +2018,19 @@ class _AdminUsersPreview extends StatelessWidget {
                       title: Text(user.displayName),
                       subtitle: Text('${user.email} • ${user.role.displayName}'),
                       trailing: _AdminStatusPill(
-                        label: user.isActive ? 'Active' : 'Disabled',
-                        color: user.isActive ? Colors.green : Colors.grey,
+                        label: user.isActive ? 'active' : 'pending',
+                        color: user.isActive ? Colors.green : Colors.orange,
                       ),
                     );
                   }).toList(),
+                  if (onManageUsers != null)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: onManageUsers,
+                        child: const Text('View All Users'),
+                      ),
+                    ),
                 ],
               );
             }
@@ -994,8 +2039,21 @@ class _AdminUsersPreview extends StatelessWidget {
                 toolbar,
                 const SizedBox(height: 12),
                 _buildUserTableHeader(context),
-                const Divider(),
-                ...preview.map((user) => _buildUserTableRow(context, user)),
+                const SizedBox(height: 8),
+                ...preview.map(
+                  (user) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _buildUserTableRow(context, user),
+                  ),
+                ),
+                if (onManageUsers != null)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: onManageUsers,
+                      child: const Text('View All Users'),
+                    ),
+                  ),
               ],
             );
           },
@@ -1007,57 +2065,77 @@ class _AdminUsersPreview extends StatelessWidget {
   }
 
   Widget _buildUserTableHeader(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final headerStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
           fontWeight: FontWeight.w600,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          color: scheme.onSurfaceVariant,
         );
-    return Row(
-      children: [
-        Expanded(flex: 3, child: Text('Name', style: headerStyle)),
-        Expanded(flex: 3, child: Text('Email', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Role', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Last Active', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Status', style: headerStyle)),
-        const SizedBox(width: 140),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Expanded(flex: 4, child: Text('User', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Role', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Status', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Joined', style: headerStyle)),
+          const SizedBox(width: 110),
+        ],
+      ),
     );
   }
 
   Widget _buildUserTableRow(BuildContext context, AdminUserSummary user) {
-    final lastActive = _shortDateFmt.format(user.updatedAt);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+    final joined = _shortDateFmt.format(user.createdAt);
+    final scheme = Theme.of(context).colorScheme;
+    final statusLabel = user.isActive ? 'active' : 'pending';
+    final statusColor = user.isActive ? Colors.green : Colors.orange;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
       child: Row(
         children: [
           Expanded(
-            flex: 3,
-            child: Row(
+            flex: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: 16,
-                  child: Text(
-                    user.displayName.isNotEmpty
-                        ? user.displayName[0].toUpperCase()
-                        : '?',
-                  ),
+                Text(
+                  user.displayName,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(child: Text(user.displayName)),
+                const SizedBox(height: 2),
+                Text(
+                  user.email,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
           ),
-          Expanded(flex: 3, child: Text(user.email)),
-          Expanded(flex: 2, child: Text(user.role.displayName)),
-          Expanded(flex: 2, child: Text(lastActive)),
+          Expanded(
+            flex: 2,
+            child: Text(user.role.displayName),
+          ),
           Expanded(
             flex: 2,
             child: _AdminStatusPill(
-              label: user.isActive ? 'Active' : 'Disabled',
-              color: user.isActive ? Colors.green : Colors.grey,
+              label: statusLabel,
+              color: statusColor,
             ),
           ),
+          Expanded(flex: 2, child: Text(joined)),
           SizedBox(
-            width: 140,
+            width: 110,
             child: Wrap(
               spacing: 8,
               runSpacing: 4,
@@ -1068,7 +2146,7 @@ class _AdminUsersPreview extends StatelessWidget {
                 ),
                 TextButton(
                   onPressed: onManageUsers,
-                  child: const Text('Suspend'),
+                  child: const Text('View'),
                 ),
               ],
             ),
@@ -1122,8 +2200,13 @@ class _AdminSubmissionsPreview extends StatelessWidget {
             return Column(
               children: [
                 _buildSubmissionTableHeader(context),
-                const Divider(),
-                ...preview.map((summary) => _buildSubmissionTableRow(context, summary)),
+                const SizedBox(height: 8),
+                ...preview.map(
+                  (summary) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _buildSubmissionTableRow(context, summary),
+                  ),
+                ),
               ],
             );
           },
@@ -1135,18 +2218,27 @@ class _AdminSubmissionsPreview extends StatelessWidget {
   }
 
   Widget _buildSubmissionTableHeader(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final headerStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
           fontWeight: FontWeight.w600,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          color: scheme.onSurfaceVariant,
         );
-    return Row(
-      children: [
-        Expanded(flex: 3, child: Text('Form', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Submitted by', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Status', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Submitted', style: headerStyle)),
-        const SizedBox(width: 72),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Expanded(flex: 3, child: Text('Form', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Submitted by', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Status', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Submitted', style: headerStyle)),
+          const SizedBox(width: 72),
+        ],
+      ),
     );
   }
 
@@ -1155,8 +2247,14 @@ class _AdminSubmissionsPreview extends StatelessWidget {
     AdminSubmissionSummary summary,
   ) {
     final submitter = summary.submittedByName ?? summary.submittedBy ?? 'Unknown';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
       child: Row(
         children: [
           Expanded(
@@ -1224,8 +2322,19 @@ class _AdminAiAssistantCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Draft policy responses, summarize submissions, and automate workflows.',
+          'Ask questions, draft policy responses, and automate workflows.',
           style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 12),
+        const AiChatPanel(
+          suggestions: [
+            'Summarize incident trends from the last week.',
+            'Draft a compliance update for project managers.',
+            'Create an audit checklist for site inspections.',
+          ],
+          placeholder: 'Ask AI about audits, compliance, or operations...',
+          initialMessage: 'Hi! Ask me about audits, submissions, or workflows.',
+          maxHeight: 220,
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -1260,42 +2369,138 @@ class _AdminOpsSnapshot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final metrics = [
+      _OpsMetricData(
+        label: 'Automation jobs',
+        value: stats.aiJobs,
+        icon: Icons.auto_awesome_outlined,
+        color: scheme.primary,
+      ),
+      _OpsMetricData(
+        label: 'Export jobs',
+        value: stats.exportJobs,
+        icon: Icons.cloud_upload_outlined,
+        color: scheme.secondary,
+      ),
+      _OpsMetricData(
+        label: 'Webhooks',
+        value: stats.webhooks,
+        icon: Icons.hub_outlined,
+        color: scheme.tertiary,
+      ),
+      _OpsMetricData(
+        label: 'Documents',
+        value: stats.documents,
+        icon: Icons.folder_open_outlined,
+        color: scheme.primary,
+      ),
+      _OpsMetricData(
+        label: 'Assets',
+        value: stats.assets,
+        icon: Icons.inventory_2_outlined,
+        color: scheme.secondary,
+      ),
+      _OpsMetricData(
+        label: 'Reviews',
+        value: stats.reviews,
+        icon: Icons.rate_review_outlined,
+        color: scheme.tertiary,
+      ),
+    ];
+    var maxValue = 0;
+    for (final metric in metrics) {
+      if (metric.value > maxValue) {
+        maxValue = metric.value;
+      }
+    }
     return Column(
-      children: [
-        _OpsMetricRow(label: 'Automation jobs', value: stats.aiJobs),
-        _OpsMetricRow(label: 'Export jobs', value: stats.exportJobs),
-        _OpsMetricRow(label: 'Webhooks', value: stats.webhooks),
-        _OpsMetricRow(label: 'Documents', value: stats.documents),
-        _OpsMetricRow(label: 'Assets', value: stats.assets),
-        _OpsMetricRow(label: 'Reviews', value: stats.reviews),
-      ],
+      children: metrics
+          .map(
+            (metric) => _OpsMetricRow(
+              label: metric.label,
+              value: metric.value,
+              max: maxValue,
+              icon: metric.icon,
+              color: metric.color,
+            ),
+          )
+          .toList(),
     );
   }
 }
 
 class _OpsMetricRow extends StatelessWidget {
-  const _OpsMetricRow({required this.label, required this.value});
+  const _OpsMetricRow({
+    required this.label,
+    required this.value,
+    required this.max,
+    required this.icon,
+    required this.color,
+  });
 
   final String label;
   final int value;
+  final int max;
+  final IconData icon;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final pct = max == 0 ? 0.0 : value / max;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
         children: [
-          Expanded(child: Text(label)),
-          Text(
-            value.toString(),
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
+                child: Icon(icon, size: 16, color: color),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(label)),
+              Text(
+                value.toString(),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 6,
+              color: color,
+              backgroundColor: scheme.surfaceContainerHighest,
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+class _OpsMetricData {
+  const _OpsMetricData({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final int value;
+  final IconData icon;
+  final Color color;
 }
 
 class _AdminStatusPill extends StatelessWidget {
@@ -1343,7 +2548,7 @@ class _AdminCommandIcon extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: scheme.outlineVariant),
         ),
@@ -1380,10 +2585,9 @@ class _AdminNavPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final background =
-        selected ? scheme.primaryContainer : scheme.surfaceContainerHighest;
+    final background = selected ? scheme.primary : scheme.surface;
     final foreground =
-        selected ? scheme.primary : scheme.onSurfaceVariant;
+        selected ? scheme.onPrimary : scheme.onSurfaceVariant;
     return InkWell(
       borderRadius: BorderRadius.circular(999),
       onTap: onTap,
@@ -1392,7 +2596,9 @@ class _AdminNavPill extends StatelessWidget {
         decoration: BoxDecoration(
           color: background,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: scheme.outlineVariant),
+          border: Border.all(
+            color: selected ? scheme.primary : scheme.outlineVariant,
+          ),
         ),
         child: Text(
           label,
@@ -1915,7 +3121,7 @@ class _OpsSection extends ConsumerWidget {
                 value: data.projectPhotos,
                 icon: Icons.photo_library,
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ProjectGalleriesPage()),
+                  MaterialPageRoute(builder: (_) => const PhotosPage()),
                 ),
               ),
               _AdminActionCard(
@@ -2416,6 +3622,7 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -2427,16 +3634,16 @@ class _StatCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: card.color,
+                    color: card.color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(card.icon),
+                  child: Icon(card.icon, color: card.color),
                 ),
                 const Spacer(),
                 Icon(
                   Icons.trending_up,
                   size: 18,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: scheme.primary,
                 ),
               ],
             ),
@@ -2454,12 +3661,21 @@ class _StatCard extends StatelessWidget {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             if (card.subtitle != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                card.subtitle!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+              const SizedBox(height: 10),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  card.subtitle!,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
               ),
             ],
           ],
@@ -2980,6 +4196,8 @@ List<UserRole> _assignableRoles(UserRole actor) {
         UserRole.manager,
         UserRole.supervisor,
         UserRole.employee,
+        UserRole.maintenance,
+        UserRole.techSupport,
         UserRole.client,
         UserRole.vendor,
         UserRole.viewer,
@@ -2989,6 +4207,7 @@ List<UserRole> _assignableRoles(UserRole actor) {
         UserRole.manager,
         UserRole.supervisor,
         UserRole.employee,
+        UserRole.maintenance,
         UserRole.client,
         UserRole.vendor,
         UserRole.viewer,
@@ -2997,9 +4216,12 @@ List<UserRole> _assignableRoles(UserRole actor) {
       return const [
         UserRole.supervisor,
         UserRole.employee,
+        UserRole.maintenance,
         UserRole.viewer,
       ];
     case UserRole.employee:
+    case UserRole.maintenance:
+    case UserRole.techSupport:
     case UserRole.client:
     case UserRole.vendor:
     case UserRole.viewer:

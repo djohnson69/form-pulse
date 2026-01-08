@@ -60,6 +60,7 @@ abstract class DashboardRepositoryBase {
   });
   Future<void> markNotificationRead(String id);
   Future<FormDefinition> createForm(FormDefinition form);
+  Future<FormDefinition> updateForm(FormDefinition form);
 }
 
 /// Repository that communicates with the backend API.
@@ -225,6 +226,28 @@ class DashboardRepository implements DashboardRepositoryBase {
     } on DioException catch (e, st) {
       developer.log(
         'Create form failed',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
+  }
+
+  @override
+  Future<FormDefinition> updateForm(FormDefinition form) async {
+    try {
+      final res = await _client.raw.patch(
+        '${ApiConstants.forms}/${form.id}',
+        data: form.toJson(),
+      );
+      final body = res.data;
+      if (body is Map<String, dynamic> && body.containsKey('id')) {
+        return FormDefinition.fromJson(body);
+      }
+      throw Exception('Update form response missing id');
+    } on DioException catch (e, st) {
+      developer.log(
+        'Update form failed',
         error: e,
         stackTrace: st,
       );
@@ -582,6 +605,33 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
   }
 
   @override
+  Future<FormDefinition> updateForm(FormDefinition form) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) {
+      throw Exception('User must belong to an organization to update forms.');
+    }
+
+    try {
+      final payload = _toSupabaseFormUpdateMap(form);
+      final res = await _client
+          .from('forms')
+          .update(payload)
+          .eq('id', form.id)
+          .eq('org_id', orgId)
+          .select()
+          .single();
+      return _mapFormDefinition(Map<String, dynamic>.from(res as Map));
+    } catch (e, st) {
+      developer.log(
+        'Supabase updateForm failed',
+        error: e,
+        stackTrace: st,
+      );
+    }
+    throw Exception('Supabase updateForm failed');
+  }
+
+  @override
   Future<void> markNotificationRead(String id) async {
     try {
       await _client
@@ -683,10 +733,7 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
           .maybeSingle();
       final raw = res?['role']?.toString();
       if (raw != null) {
-        return UserRole.values.firstWhere(
-          (role) => role.name == raw,
-          orElse: () => UserRole.viewer,
-        );
+        return UserRole.fromRaw(raw);
       }
     } catch (_) {}
     try {
@@ -697,10 +744,7 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
           .maybeSingle();
       final raw = res?['role']?.toString();
       if (raw != null) {
-        return UserRole.values.firstWhere(
-          (role) => role.name == raw,
-          orElse: () => UserRole.viewer,
-        );
+        return UserRole.fromRaw(raw);
       }
     } catch (_) {}
     return UserRole.viewer;
@@ -895,6 +939,20 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       'created_by': form.createdBy.isEmpty
           ? _client.auth.currentUser?.id
           : form.createdBy,
+      'metadata': form.metadata,
+    };
+  }
+
+  Map<String, dynamic> _toSupabaseFormUpdateMap(FormDefinition form) {
+    return {
+      'title': form.title,
+      'description': form.description,
+      'category': form.category,
+      'tags': form.tags,
+      'fields': form.fields.map((f) => f.toJson()).toList(),
+      'is_published': form.isPublished,
+      'version': form.version,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
       'metadata': form.metadata,
     };
   }

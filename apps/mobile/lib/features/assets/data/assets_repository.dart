@@ -27,6 +27,7 @@ abstract class AssetsRepositoryBase {
   Future<List<Equipment>> fetchEquipment();
   Future<Equipment> createEquipment(Equipment equipment);
   Future<Equipment> updateEquipment(Equipment equipment);
+  Future<void> deleteEquipment({required Equipment equipment});
 
   Future<List<AssetInspection>> fetchInspections(String equipmentId);
   Future<AssetInspection> createInspection({
@@ -117,6 +118,28 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
     } on PostgrestException catch (e, st) {
       developer.log(
         'Supabase updateEquipment failed: ${e.message} (code: ${e.code})',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> deleteEquipment({required Equipment equipment}) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) {
+      throw Exception('User must belong to an organization.');
+    }
+    try {
+      await _client
+          .from('equipment')
+          .delete()
+          .eq('id', equipment.id)
+          .eq('org_id', orgId);
+    } on PostgrestException catch (e, st) {
+      developer.log(
+        'Supabase deleteEquipment failed: ${e.message} (code: ${e.code})',
         error: e,
         stackTrace: st,
       );

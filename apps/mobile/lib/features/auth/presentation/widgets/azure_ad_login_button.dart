@@ -41,10 +41,17 @@ class _AzureAdLoginButtonState extends State<AzureAdLoginButton> {
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ElevatedButton.icon(
-          icon: const Icon(Icons.login),
-          label: _loading ? const CircularProgressIndicator() : const Text('Login with Microsoft'),
+        OutlinedButton.icon(
+          icon: _loading
+              ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.window),
+          label: const Text('Login with Microsoft'),
           onPressed: _loading ? null : _login,
         ),
         if (_error != null)

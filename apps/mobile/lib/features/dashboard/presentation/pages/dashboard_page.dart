@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' as legacy;
 import 'package:intl/intl.dart';
@@ -31,8 +32,12 @@ import '../../../partners/presentation/pages/vendors_page.dart';
 import '../../../assets/presentation/pages/assets_page.dart';
 import '../../../ops/presentation/pages/ops_hub_page.dart';
 import '../../../ops/presentation/pages/ai_tools_page.dart';
+import '../../../ops/presentation/pages/news_posts_page.dart';
 import '../../../ops/data/ops_provider.dart';
 import '../../../ops/data/ops_repository.dart';
+import '../../../ops/presentation/widgets/ai_chat_panel.dart';
+import '../../../navigation/presentation/widgets/side_menu.dart';
+import '../widgets/top_bar.dart';
 import '../../../profile/presentation/pages/profile_page.dart';
 import 'submission_detail_page.dart';
 import 'template_gallery_page.dart';
@@ -49,7 +54,9 @@ final dashboardPrefsProvider =
 
 /// Main dashboard container that holds the bottom navigation experience.
 class DashboardPage extends ConsumerStatefulWidget {
-  const DashboardPage({super.key});
+  const DashboardPage({super.key, this.initialIndex = 0});
+
+  final int initialIndex;
 
   @override
   ConsumerState<DashboardPage> createState() => _DashboardPageState();
@@ -77,6 +84,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialIndex.clamp(0, _pages.length - 1);
     ref.read(dashboardPrefsProvider.notifier).ensureLoaded();
     _opsRepository = ref.read(opsRepositoryProvider);
     final supabaseClient = Supabase.instance.client;
@@ -127,167 +135,181 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final showAppBar = _currentIndex != 0;
-    return Scaffold(
-      appBar: showAppBar
-          ? AppBar(
-              title: const Text('Form Bridge'),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.tune),
-                  tooltip: 'Customize dashboard',
-                  onPressed: _openPrefsSheet,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showSidebar = kIsWeb || constraints.maxWidth >= 768;
+        final activeRoute = _activeRouteForIndex(_currentIndex);
+        return Scaffold(
+          drawer: showSidebar
+              ? null
+              : Drawer(
+                  child: SideMenu(
+                    role: UserRole.viewer,
+                    activeRoute: activeRoute,
+                    isMobile: true,
+                    onNavigate: (route) =>
+                        _handleSideMenuNavigation(context, route),
+                    onClose: () => Navigator.of(context).pop(),
+                  ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.view_comfy_alt),
-                  tooltip: 'Templates',
-                  onPressed: () async {
-                    final data = await ref.read(dashboardDataProvider.future);
-                    if (!context.mounted) return;
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => TemplateGalleryPage(forms: data.forms),
+          body: Column(
+            children: [
+              Builder(
+                builder: (context) => TopBar(
+                  role: UserRole.viewer,
+                  isMobile: !showSidebar,
+                  onMenuPressed: showSidebar
+                      ? null
+                      : () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (showSidebar)
+                      SideMenu(
+                        role: UserRole.viewer,
+                        activeRoute: activeRoute,
+                        onNavigate: (route) =>
+                            _handleSideMenuNavigation(context, route),
                       ),
-                    );
-                  },
+                    Expanded(child: _pages[_currentIndex]),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.insights),
-                  tooltip: 'Reports',
-                  onPressed: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ReportsPage()),
-                    );
+              ),
+            ],
+          ),
+          bottomNavigationBar: showSidebar
+              ? null
+              : NavigationBar(
+                  selectedIndex: _currentIndex,
+                  onDestinationSelected: (index) {
+                    setState(() => _currentIndex = index);
                   },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_box_outlined),
-                  tooltip: 'Create form',
-                  onPressed: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const CreateFormPage()),
-                    );
-                    if (!mounted) return;
-                    ref.invalidate(dashboardDataProvider);
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  tooltip: 'Search forms',
-                  onPressed: () async {
-                    await showSearch<String?>(
-                      context: context,
-                      delegate: _FormSearchDelegate(ref),
-                    );
-                  },
-                ),
-                PopupMenuButton<String>(
-                  onSelected: (value) {
-                    switch (value) {
-                      case 'settings':
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const SettingsPage()),
-                        );
-                        break;
-                      case 'profile':
-                        setState(() => _currentIndex = 5);
-                        break;
-                      case 'logout':
-                        Supabase.instance.client.auth.signOut();
-                        break;
-                    }
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      value: 'settings',
-                      child: ListTile(
-                        leading: Icon(Icons.settings),
-                        title: Text('Settings'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.home_outlined),
+                      selectedIcon: Icon(Icons.home),
+                      label: 'Home',
                     ),
-                    PopupMenuItem(
-                      value: 'profile',
-                      child: ListTile(
-                        leading: Icon(Icons.person),
-                        title: Text('Profile'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
+                    NavigationDestination(
+                      icon: Icon(Icons.description_outlined),
+                      selectedIcon: Icon(Icons.description),
+                      label: 'Forms',
                     ),
-                    PopupMenuDivider(),
-                    PopupMenuItem(
-                      value: 'logout',
-                      child: ListTile(
-                        leading: Icon(Icons.logout, color: Colors.red),
-                        title: Text('Logout', style: TextStyle(color: Colors.red)),
-                        contentPadding: EdgeInsets.zero,
-                      ),
+                    NavigationDestination(
+                      icon: Icon(Icons.work_outline),
+                      selectedIcon: Icon(Icons.work),
+                      label: 'Projects',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.checklist_outlined),
+                      selectedIcon: Icon(Icons.checklist),
+                      label: 'Tasks',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.notifications_outlined),
+                      selectedIcon: Icon(Icons.notifications),
+                      label: 'Alerts',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.person_outline),
+                      selectedIcon: Icon(Icons.person),
+                      label: 'Profile',
                     ),
                   ],
                 ),
-              ],
-            )
-          : null,
-      body: _pages[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() => _currentIndex = index);
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.description_outlined),
-            selectedIcon: Icon(Icons.description),
-            label: 'Forms',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.work_outline),
-            selectedIcon: Icon(Icons.work),
-            label: 'Projects',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.checklist_outlined),
-            selectedIcon: Icon(Icons.checklist),
-            label: 'Tasks',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.notifications_outlined),
-            selectedIcon: Icon(Icons.notifications),
-            label: 'Alerts',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
-      ),
-      floatingActionButton: _currentIndex == 1
-          ? FloatingActionButton.extended(
-              onPressed: () => _openSubmissionSheet(context),
-              icon: const Icon(Icons.add),
-              label: const Text('New Submission'),
-            )
-          : _currentIndex == 2
-          ? FloatingActionButton.extended(
-              onPressed: () => _openProjectEditor(context),
-              icon: const Icon(Icons.add),
-              label: const Text('New Project'),
-            )
-          : _currentIndex == 3
-          ? FloatingActionButton.extended(
-              onPressed: () => _openTaskEditor(context),
-              icon: const Icon(Icons.add),
-              label: const Text('New Task'),
-            )
-          : null,
+          floatingActionButton: _currentIndex == 1
+              ? FloatingActionButton.extended(
+                  onPressed: () => _openSubmissionSheet(context),
+                  icon: const Icon(Icons.add),
+                  label: const Text('New Submission'),
+                )
+              : _currentIndex == 2
+              ? FloatingActionButton.extended(
+                  onPressed: () => _openProjectEditor(context),
+                  icon: const Icon(Icons.add),
+                  label: const Text('New Project'),
+                )
+              : _currentIndex == 3
+              ? FloatingActionButton.extended(
+                  onPressed: () => _openTaskEditor(context),
+                  icon: const Icon(Icons.add),
+                  label: const Text('New Task'),
+                )
+              : null,
+        );
+      },
     );
+  }
+
+  SideMenuRoute? _activeRouteForIndex(int index) {
+    switch (index) {
+      case 0:
+        return SideMenuRoute.dashboard;
+      case 1:
+        return SideMenuRoute.forms;
+      case 2:
+        return SideMenuRoute.projects;
+      case 3:
+        return SideMenuRoute.tasks;
+      case 4:
+        return SideMenuRoute.notifications;
+      default:
+        return null;
+    }
+  }
+
+  void _handleSideMenuNavigation(BuildContext context, SideMenuRoute route) {
+    switch (route) {
+      case SideMenuRoute.dashboard:
+        setState(() => _currentIndex = 0);
+        return;
+      case SideMenuRoute.forms:
+        setState(() => _currentIndex = 1);
+        return;
+      case SideMenuRoute.projects:
+        setState(() => _currentIndex = 2);
+        return;
+      case SideMenuRoute.tasks:
+        setState(() => _currentIndex = 3);
+        return;
+      case SideMenuRoute.notifications:
+        setState(() => _currentIndex = 4);
+        return;
+      case SideMenuRoute.messages:
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => _ViewerShellPage(
+              activeRoute: SideMenuRoute.messages,
+              child: const MessagesPage(),
+            ),
+          ),
+        );
+        return;
+      case SideMenuRoute.companyNews:
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => _ViewerShellPage(
+              activeRoute: SideMenuRoute.companyNews,
+              child: const NewsPostsPage(),
+            ),
+          ),
+        );
+        return;
+      case SideMenuRoute.settings:
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => _ViewerShellPage(
+              activeRoute: SideMenuRoute.settings,
+              child: const SettingsPage(),
+            ),
+          ),
+        );
+        return;
+      default:
+        return;
+    }
   }
 
   Future<void> _openSubmissionSheet(BuildContext context) async {
@@ -317,16 +339,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
   }
 
-  Future<void> _openPrefsSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      builder: (context) => const _DashboardPrefsSheet(),
-    );
-    if (!mounted) return;
-    setState(() {});
-  }
-
   Future<void> _openProjectEditor(BuildContext context) async {
     final project = await Navigator.of(context).push<Project?>(
       MaterialPageRoute(builder: (_) => const ProjectEditorPage()),
@@ -352,6 +364,91 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       );
     }
   }
+}
+
+class _ViewerShellPage extends StatelessWidget {
+  const _ViewerShellPage({
+    required this.child,
+    required this.activeRoute,
+  });
+
+  final Widget child;
+  final SideMenuRoute activeRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showSidebar = kIsWeb || constraints.maxWidth >= 768;
+        return Scaffold(
+          drawer: showSidebar
+              ? null
+              : Drawer(
+                  child: SideMenu(
+                    role: UserRole.viewer,
+                    activeRoute: activeRoute,
+                    isMobile: true,
+                    onNavigate: (route) =>
+                        Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (_) => _ViewerShellPage(
+                          activeRoute: route,
+                          child: _viewerRoutePage(route),
+                        ),
+                      ),
+                    ),
+                    onClose: () => Navigator.of(context).pop(),
+                  ),
+                ),
+          body: Column(
+            children: [
+              Builder(
+                builder: (context) => TopBar(
+                  role: UserRole.viewer,
+                  isMobile: !showSidebar,
+                  onMenuPressed: showSidebar
+                      ? null
+                      : () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (showSidebar)
+                      SideMenu(
+                        role: UserRole.viewer,
+                        activeRoute: activeRoute,
+                        onNavigate: (route) => Navigator.of(context)
+                            .pushReplacement(
+                          MaterialPageRoute(
+                            builder: (_) => _ViewerShellPage(
+                              activeRoute: route,
+                              child: _viewerRoutePage(route),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Expanded(child: child),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+Widget _viewerRoutePage(SideMenuRoute route) {
+  return switch (route) {
+    SideMenuRoute.dashboard => const DashboardPage(initialIndex: 0),
+    SideMenuRoute.notifications => const DashboardPage(initialIndex: 4),
+    SideMenuRoute.messages => const MessagesPage(),
+    SideMenuRoute.companyNews => const NewsPostsPage(),
+    SideMenuRoute.settings => const SettingsPage(),
+    _ => const DashboardPage(initialIndex: 0),
+  };
 }
 
 class _FormSearchDelegate extends SearchDelegate<String?> {
@@ -437,112 +534,120 @@ class DashboardHomeView extends ConsumerWidget {
       },
       child: dashboard.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, st) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Dashboard Load Error',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Unable to load dashboard data from database.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Error: ${e.toString()}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontFamily: 'monospace',
+        error: (e, st) => _wrapDashboardSurface(
+          context,
+          ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            color: Theme.of(context).colorScheme.error,
                           ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Try: pull to refresh, check network, or sign out/in. If you just added the user to an org, restart the app to refresh the session.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+                          const SizedBox(width: 8),
+                          Text(
+                            'Dashboard Load Error',
+                            style:
+                                Theme.of(context).textTheme.titleLarge?.copyWith(
+                                      color: Theme.of(context).colorScheme.error,
+                                    ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Unable to load dashboard data from database.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Error: ${e.toString()}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Try: pull to refresh, check network, or sign out/in. If you just added the user to an org, restart the app to refresh the session.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: () => ref.invalidate(dashboardDataProvider),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
-            ),
-          ],
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () => ref.invalidate(dashboardDataProvider),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
         ),
         data: (data) {
           if (data.forms.isEmpty) {
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'No templates yet',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+            return _wrapDashboardSurface(
+              context,
+              ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'No templates yet',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'You are signed in but have no published forms. Add the user to an org and publish templates, or browse the gallery to copy templates.',
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ElevatedButton.icon(
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Reload'),
-                              onPressed: () =>
-                                  ref.invalidate(dashboardDataProvider),
-                            ),
-                            OutlinedButton.icon(
-                              icon: const Icon(Icons.view_comfy_alt),
-                              label: const Text('Template gallery'),
-                              onPressed: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        TemplateGalleryPage(forms: data.forms),
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        )
-                      ],
+                          const SizedBox(height: 8),
+                          const Text(
+                            'You are signed in but have no published forms. Add the user to an org and publish templates, or browse the gallery to copy templates.',
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Reload'),
+                                onPressed: () =>
+                                    ref.invalidate(dashboardDataProvider),
+                              ),
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.view_comfy_alt),
+                                label: const Text('Template gallery'),
+                                onPressed: () async {
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => TemplateGalleryPage(
+                                        forms: data.forms,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          )
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             );
           }
 
@@ -671,69 +776,102 @@ class DashboardHomeView extends ConsumerWidget {
                 ],
               );
 
-              return ListView(
-                padding: EdgeInsets.all(horizontalPadding),
-                children: [
-                  _buildCommandBar(
-                    context,
-                    ref,
-                    data,
-                    isWide: isWide,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildDashboardHeader(
-                    context,
-                    ref,
-                    data,
-                    isWide: isWide,
-                  ),
-                  const SizedBox(height: 16),
-                  if (prefs.showStats)
-                    _StatisticsGrid(
-                      cards: statCards,
-                      compact: prefs.compactCards,
+              return _wrapDashboardSurface(
+                context,
+                ListView(
+                  padding: EdgeInsets.all(horizontalPadding),
+                  children: [
+                    _buildCommandBar(
+                      context,
+                      ref,
+                      data,
+                      isWide: isWide,
                     ),
-                  if (prefs.showStats) const SizedBox(height: 20),
-                  if (!showSidebar) ...[
-                    workspacePanel,
-                    if (quickActions != null) const SizedBox(height: 16),
-                    if (quickActions != null) quickActions,
                     const SizedBox(height: 16),
-                  ],
-                  if (showSidebar)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(width: 260, child: sidebarColumn),
-                        const SizedBox(width: 16),
-                        Expanded(flex: 4, child: mainColumn),
-                        const SizedBox(width: 16),
-                        Expanded(flex: 2, child: rightColumn),
-                      ],
-                    )
-                  else if (showRightRail)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 3, child: mainColumn),
-                        const SizedBox(width: 16),
-                        Expanded(flex: 2, child: rightColumn),
-                      ],
-                    )
-                  else
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        mainColumn,
-                        const SizedBox(height: 16),
-                        rightColumn,
-                      ],
+                    _buildDashboardHeader(
+                      context,
+                      ref,
+                      data,
+                      isWide: isWide,
                     ),
-                ],
+                    const SizedBox(height: 16),
+                    if (prefs.showStats)
+                      _StatisticsGrid(
+                        cards: statCards,
+                        compact: prefs.compactCards,
+                      ),
+                    if (prefs.showStats) const SizedBox(height: 20),
+                    if (!showSidebar) ...[
+                      workspacePanel,
+                      if (quickActions != null) const SizedBox(height: 16),
+                      if (quickActions != null) quickActions,
+                      const SizedBox(height: 16),
+                    ],
+                    if (showSidebar)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(width: 260, child: sidebarColumn),
+                          const SizedBox(width: 16),
+                          Expanded(flex: 4, child: mainColumn),
+                          const SizedBox(width: 16),
+                          Expanded(flex: 2, child: rightColumn),
+                        ],
+                      )
+                    else if (showRightRail)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(flex: 3, child: mainColumn),
+                          const SizedBox(width: 16),
+                          Expanded(flex: 2, child: rightColumn),
+                        ],
+                      )
+                    else
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          mainColumn,
+                          const SizedBox(height: 16),
+                          rightColumn,
+                        ],
+                      ),
+                  ],
+                ),
               );
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _wrapDashboardSurface(BuildContext context, Widget child) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final cardTheme = theme.cardTheme.copyWith(
+      color: scheme.surface,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+    );
+    return Theme(
+      data: theme.copyWith(cardTheme: cardTheme),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              scheme.surface,
+              scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: child,
       ),
     );
   }
@@ -831,8 +969,9 @@ class DashboardHomeView extends ConsumerWidget {
       decoration: InputDecoration(
         hintText: 'Search forms, submissions, or people',
         prefixIcon: const Icon(Icons.search),
+        suffixIcon: const Icon(Icons.tune),
         filled: true,
-        fillColor: scheme.surfaceContainerHighest,
+        fillColor: scheme.surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
@@ -946,7 +1085,19 @@ class DashboardHomeView extends ConsumerWidget {
       ),
     ];
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: LayoutBuilder(
@@ -1127,10 +1278,12 @@ class DashboardHomeView extends ConsumerWidget {
                   return Column(
                     children: [
                       _buildSubmissionTableHeader(context),
-                      const Divider(),
+                      const SizedBox(height: 8),
                       ...submissions.map(
-                        (submission) =>
-                            _buildSubmissionTableRow(context, submission),
+                        (submission) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _buildSubmissionTableRow(context, submission),
+                        ),
                       ),
                     ],
                   );
@@ -1213,18 +1366,27 @@ class DashboardHomeView extends ConsumerWidget {
   }
 
   Widget _buildSubmissionTableHeader(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final headerStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
           fontWeight: FontWeight.w600,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          color: scheme.onSurfaceVariant,
         );
-    return Row(
-      children: [
-        Expanded(flex: 3, child: Text('Form', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Submitted by', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Status', style: headerStyle)),
-        Expanded(flex: 2, child: Text('Updated', style: headerStyle)),
-        const SizedBox(width: 32),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Expanded(flex: 3, child: Text('Form', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Submitted by', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Status', style: headerStyle)),
+          Expanded(flex: 2, child: Text('Updated', style: headerStyle)),
+          const SizedBox(width: 32),
+        ],
+      ),
     );
   }
 
@@ -1235,6 +1397,7 @@ class DashboardHomeView extends ConsumerWidget {
     final name = submission.submittedByName ?? submission.submittedBy;
     final timeLabel = _formatTimeAgo([submission.submittedAt]) ??
         DateFormat('MMM d').format(submission.submittedAt);
+    final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: () {
         Navigator.of(context).push(
@@ -1243,8 +1406,13 @@ class DashboardHomeView extends ConsumerWidget {
           ),
         );
       },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
         child: Row(
           children: [
             Expanded(
@@ -1538,8 +1706,19 @@ class DashboardHomeView extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Generate summaries, autofill common fields, and draft responses for your team.',
+              'Ask questions, generate summaries, and draft responses for your team.',
               style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            const AiChatPanel(
+              suggestions: [
+                'Summarize the latest submissions for my projects.',
+                'Draft a daily log from my task list.',
+                'What should I follow up on today?',
+              ],
+              placeholder: 'Ask AI about tasks, forms, or reports...',
+              initialMessage: 'Hi! How can I help with your forms today?',
+              maxHeight: 200,
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -2505,6 +2684,7 @@ class _StatisticsGrid extends StatelessWidget {
                   title: card.title,
                   value: card.value,
                   color: card.color,
+                  subtitle: card.subtitle,
                   compact: compact,
                 ),
               )
@@ -2520,6 +2700,7 @@ class _StatCard extends StatelessWidget {
   final String title;
   final String value;
   final Color color;
+  final String? subtitle;
   final bool compact;
 
   const _StatCard({
@@ -2527,11 +2708,13 @@ class _StatCard extends StatelessWidget {
     required this.title,
     required this.value,
     required this.color,
+    this.subtitle,
     this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: EdgeInsets.all(compact ? 10 : 14),
@@ -2553,7 +2736,7 @@ class _StatCard extends StatelessWidget {
                 Icon(
                   Icons.trending_up,
                   size: 18,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: scheme.primary,
                 ),
               ],
             ),
@@ -2569,11 +2752,20 @@ class _StatCard extends StatelessWidget {
             Text(title, style: Theme.of(context).textTheme.bodyMedium),
             if (subtitle != null) ...[
               const SizedBox(height: 6),
-              Text(
-                subtitle!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  subtitle!,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
               ),
             ],
           ],
@@ -2631,7 +2823,7 @@ class _CommandIcon extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: scheme.outlineVariant),
         ),
@@ -2695,10 +2887,9 @@ class _DashboardNavPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final background =
-        selected ? scheme.primaryContainer : scheme.surfaceContainerHighest;
+    final background = selected ? scheme.primary : scheme.surface;
     final foreground =
-        selected ? scheme.primary : scheme.onSurfaceVariant;
+        selected ? scheme.onPrimary : scheme.onSurfaceVariant;
     return InkWell(
       borderRadius: BorderRadius.circular(999),
       onTap: onTap,
@@ -2707,7 +2898,9 @@ class _DashboardNavPill extends StatelessWidget {
         decoration: BoxDecoration(
           color: background,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: scheme.outlineVariant),
+          border: Border.all(
+            color: selected ? scheme.primary : scheme.outlineVariant,
+          ),
         ),
         child: Text(
           label,

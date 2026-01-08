@@ -99,6 +99,7 @@ abstract class DocumentsRepositoryBase {
     required Uint8List bytes,
     String? signerName,
   });
+  Future<void> deleteDocument({required Document document});
 }
 
 class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
@@ -411,6 +412,34 @@ class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
       documentId: document.id,
       metadata: updatedMetadata,
     );
+  }
+
+  @override
+  Future<void> deleteDocument({required Document document}) async {
+    final orgId = await _getOrgId();
+    if (orgId == null) {
+      throw Exception('User must belong to an organization to delete documents.');
+    }
+    try {
+      final path = resolveStoragePath(document.fileUrl, document.metadata);
+      final bucket =
+          resolveBucket(_bucketName, document.fileUrl, document.metadata);
+      if (path != null && path.isNotEmpty) {
+        await _client.storage.from(bucket).remove([path]);
+      }
+      await _client
+          .from('documents')
+          .delete()
+          .eq('id', document.id)
+          .eq('org_id', orgId);
+    } catch (e, st) {
+      developer.log(
+        'Supabase deleteDocument failed',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
   }
 
   Future<String> _uploadFile({

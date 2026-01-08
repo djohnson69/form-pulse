@@ -1,6 +1,7 @@
 // Basic Flutter widget smoke test for Form Bridge
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -29,7 +30,11 @@ void main() {
   });
 
   testWidgets('App launches successfully', (WidgetTester tester) async {
-    await tester.pumpWidget(const AppEntry());
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: AppEntry(),
+      ),
+    );
     await tester.pump();
 
     expect(find.byType(AppNavigator), findsOneWidget);

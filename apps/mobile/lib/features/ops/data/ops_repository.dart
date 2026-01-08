@@ -1456,6 +1456,29 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
         }
       }
       return matches;
+    } on PostgrestException catch (e) {
+      if (e.message.contains('is_active') || e.code == '42703') {
+        try {
+          final rows = await _client
+              .from('profiles')
+              .select('id, email, first_name, last_name')
+              .eq('org_id', orgId);
+          final matches = <String>[];
+          for (final row in rows as List<dynamic>) {
+            final data = Map<String, dynamic>.from(row as Map);
+            final id = data['id']?.toString();
+            if (id == null) continue;
+            final handles = _profileHandles(data);
+            if (handles.any(targetHandles.contains)) {
+              matches.add(id);
+            }
+          }
+          return matches;
+        } catch (_) {
+          return const [];
+        }
+      }
+      return const [];
     } catch (_) {
       return const [];
     }

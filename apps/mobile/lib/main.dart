@@ -15,12 +15,26 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (_supabaseUrl.isEmpty || _supabaseAnonKey.isEmpty) {
-    throw StateError('Missing Supabase configuration. Provide SUPABASE_URL and SUPABASE_ANON_KEY via --dart-define.');
+    runApp(const _StartupErrorApp(
+      title: 'Missing configuration',
+      message:
+          'SUPABASE_URL and SUPABASE_ANON_KEY are not set.\n\n'
+          'Run the app with:\n'
+          '--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...\n\n'
+          'Or use the provided scripts in the repo (run-mobile.sh / run-web.sh).',
+    ));
+    return;
   }
-  SecurityGuard.ensureHttps(_supabaseUrl);
-
-  // Initialize Supabase
-  await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
+  try {
+    SecurityGuard.ensureHttps(_supabaseUrl);
+    await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
+  } catch (e) {
+    runApp(_StartupErrorApp(
+      title: 'Startup failed',
+      message: 'Could not initialize Supabase.\n\n$e',
+    ));
+    return;
+  }
 
   // Initialize dependency injection
   await configureDependencies();
@@ -29,6 +43,61 @@ void main() async {
   await PushNotificationsService().initialize();
 
   runApp(const ProviderScope(child: AppEntry()));
+}
+
+class _StartupErrorApp extends StatelessWidget {
+  const _StartupErrorApp({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Form Bridge',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF2563EB),
+          surface: Color(0xFF111827),
+          onSurface: Color(0xFFE5E7EB),
+        ),
+      ),
+      home: Scaffold(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      message,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class FormBridgeApp extends ConsumerWidget {

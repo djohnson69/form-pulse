@@ -1,6 +1,11 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile/core/services/api_service.dart';
+import 'package:mobile/features/dashboard/presentation/pages/role_dashboard_page.dart';
+import 'package:shared/shared.dart';
+import 'package:mobile/core/state/demo_mode_provider.dart';
 import '../widgets/azure_ad_login_button.dart';
 
 const _apiBaseUrl = String.fromEnvironment(
@@ -9,24 +14,26 @@ const _apiBaseUrl = String.fromEnvironment(
 );
 
 /// Login page for authentication
-class LoginPage extends StatefulWidget {
+class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  OAuthProvider? _oauthLoadingProvider;
   bool _obscurePassword = true;
   final _supabase = Supabase.instance.client;
   final _apiService = ApiService(baseUrl: _apiBaseUrl);
 
   Future<void> _handleAzureAdLogin(String accessToken) async {
     try {
+      ref.read(demoModeProvider.notifier).state = false;
       await _apiService.azureAdLogin(accessToken);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -54,6 +61,40 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  Future<void> _handleOAuthLogin(OAuthProvider provider) async {
+    ref.read(demoModeProvider.notifier).state = false;
+    setState(() => _oauthLoadingProvider = provider);
+    try {
+      final redirectTo = kIsWeb ? Uri.base.origin : 'com.formpulse.mobile://login-callback/';
+      final didLaunch = await _supabase.auth.signInWithOAuth(
+        provider,
+        redirectTo: redirectTo,
+      );
+      if (!didLaunch && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open the browser for login.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unexpected error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _oauthLoadingProvider = null);
+      }
+    }
+  }
+
   Future<void> _handleLogin() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
@@ -66,6 +107,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!mounted) return;
         setState(() => _isLoading = false);
         if (res.session != null) {
+          ref.read(demoModeProvider.notifier).state = false;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Login successful'),
@@ -100,6 +142,9 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final inputFill =
+        theme.inputDecorationTheme.fillColor ?? theme.colorScheme.surfaceVariant;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -111,29 +156,23 @@ class _LoginPageState extends State<LoginPage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  AzureAdLoginButton(onLogin: _handleAzureAdLogin),
-                  Icon(
-                    Icons.assignment_turned_in,
-                    size: 80,
-                    color: Theme.of(context).colorScheme.primary,
+                  Center(
+                    child: Image.asset(
+                      'assets/branding/form_bridge_logo.png',
+                      height: 120,
+                      fit: BoxFit.contain,
+                      semanticLabel: 'Form Bridge',
+                    ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
                   Text(
-                    'Form Bridge',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+                    'The bridge between the field and data.',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Living, AI-driven forms for the field',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyLarge?.copyWith(color: Colors.grey),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 48),
+                  const SizedBox(height: 40),
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -190,8 +229,12 @@ class _LoginPageState extends State<LoginPage> {
                           )
                         : const Text('Sign In'),
                   ),
-                  const SizedBox(height: 16),
-                  TextButton(
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: inputFill,
+                      foregroundColor: theme.colorScheme.onSurface,
+                    ),
                     onPressed: () {
                       Navigator.push(
                         context,
@@ -201,6 +244,57 @@ class _LoginPageState extends State<LoginPage> {
                       );
                     },
                     child: const Text('Create Account'),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Or sign in with',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  AzureAdLoginButton(onLogin: _handleAzureAdLogin),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _oauthLoadingProvider == null
+                        ? () => _handleOAuthLogin(OAuthProvider.google)
+                        : null,
+                    icon: _oauthLoadingProvider == OAuthProvider.google
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.g_mobiledata),
+                    label: const Text('Login with Google'),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _oauthLoadingProvider == null
+                        ? () => _handleOAuthLogin(OAuthProvider.apple)
+                        : null,
+                    icon: _oauthLoadingProvider == OAuthProvider.apple
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.apple),
+                    label: const Text('Login with Apple'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () {
+                      ref.read(demoModeProvider.notifier).state = true;
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              const RoleDashboardPage(role: UserRole.superAdmin),
+                        ),
+                      );
+                    },
+                    child: const Text('Continue in Demo Mode'),
                   ),
                 ],
               ),
