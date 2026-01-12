@@ -8,8 +8,16 @@ import 'core/di/injection.dart';
 import 'core/services/push_notifications_service.dart';
 import 'core/utils/security_guard.dart';
 
-const _supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
-const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+// Provide sane defaults so the app still boots if dart-defines aren't supplied.
+const _supabaseUrl = String.fromEnvironment(
+  'SUPABASE_URL',
+  defaultValue: 'https://xpcibptzncfmifaneoop.supabase.co',
+);
+const _supabaseAnonKey = String.fromEnvironment(
+  'SUPABASE_ANON_KEY',
+  defaultValue:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwY2licHR6bmNmbWlmYW5lb29wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4NTE1ODcsImV4cCI6MjA4MTQyNzU4N30.sMzKoqj0GhLsD8tRd73j9NOjEa_ucz0dkh3TwoXD4Tg',
+);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +29,8 @@ void main() async {
           'SUPABASE_URL and SUPABASE_ANON_KEY are not set.\n\n'
           'Run the app with:\n'
           '--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...\n\n'
-          'Or use the provided scripts in the repo (run-mobile.sh / run-web.sh).',
+          'Or use the provided scripts in the repo (run-mobile.sh / run-web.sh).\n\n'
+          'Fallback defaults are embedded for local runs, but production should always pass defines.',
     ));
     return;
   }

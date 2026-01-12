@@ -6,6 +6,9 @@ enum UserRole {
   /// Company administrator
   admin,
 
+  /// Developer with full-access inspector tooling
+  developer,
+
   /// Site manager with limited administrative access
   manager,
 
@@ -34,12 +37,14 @@ enum UserRole {
   String get displayName {
     switch (this) {
       case UserRole.superAdmin:
-        return 'Super Admin';
-      case UserRole.admin:
-        return 'Administrator';
-      case UserRole.manager:
-        return 'Manager';
-      case UserRole.supervisor:
+      return 'Super Admin';
+    case UserRole.admin:
+      return 'Administrator';
+    case UserRole.developer:
+      return 'Developer';
+    case UserRole.manager:
+      return 'Manager';
+    case UserRole.supervisor:
         return 'Supervisor';
       case UserRole.employee:
         return 'Employee';
@@ -57,7 +62,10 @@ enum UserRole {
   }
 
   /// Check if role has administrative privileges
-  bool get isAdmin => this == UserRole.superAdmin || this == UserRole.admin;
+  bool get isAdmin =>
+      this == UserRole.superAdmin ||
+      this == UserRole.admin ||
+      this == UserRole.developer;
 
   /// Check if role has management privileges
   bool get canManage => isAdmin || this == UserRole.manager;
@@ -77,6 +85,8 @@ enum UserRole {
         return UserRole.superAdmin;
       case 'admin':
         return UserRole.admin;
+      case 'developer':
+        return UserRole.developer;
       case 'manager':
         return UserRole.manager;
       case 'supervisor':

@@ -1191,7 +1191,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Copy link',
                           icon: const Icon(Icons.copy),
                           onPressed: _copyShareLink,
                         ),

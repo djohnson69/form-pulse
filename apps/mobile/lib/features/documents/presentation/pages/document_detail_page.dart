@@ -65,7 +65,6 @@ class _DocumentDetailPageState extends ConsumerState<DocumentDetailPage> {
         title: Text(_document.title),
         actions: [
           IconButton(
-            tooltip: 'Open file',
             icon: const Icon(Icons.open_in_new),
             onPressed: () => _openUrl(
               _document.fileUrl,
@@ -75,7 +74,6 @@ class _DocumentDetailPageState extends ConsumerState<DocumentDetailPage> {
             ),
           ),
           IconButton(
-            tooltip: 'Share',
             icon: const Icon(Icons.share),
             onPressed: _shareDocument,
           ),

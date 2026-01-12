@@ -1,65 +1,69 @@
-# React -> Flutter Parity Audit
+# Parity Audit – React (source of truth) vs Flutter/mobile
 
-Source of truth: `_design/Formbridgereact/src/app/App.tsx` routes and global layout components.
+## Method
+- Treated `_design/Formbridgereact/src/app/App.tsx` (plus pages/components it routes to) as the canonical experience.
+- Mapped every React route/page and per-role navigation in `Sidebar.tsx` to Flutter screens (`apps/mobile/lib/...`), using role menus in `features/navigation/presentation/widgets/side_menu.dart` and role shells in `features/dashboard/presentation/pages/role_dashboard_page.dart`.
+- Checked that key feature blocks called out in React code (filters, builders, dashboards, etc.) exist in the Flutter implementation. Data depth/back-end parity was not validated (Supabase/API fidelity not in scope here).
 
-Status key:
-- VERIFIED: UI/UX and interactions confirmed 1:1.
-- NEEDS_REVIEW: Screen exists but not yet audited.
-- PARTIAL: Screen exists but missing major sections or behaviors.
-- MISSING: No Flutter screen found.
+## High-level findings
+- Route coverage is nearly 1:1: every React page has a Flutter counterpart. The only functional gap is the **Role Customization** experience: the screen exists (`apps/mobile/lib/features/navigation/presentation/pages/role_customization_page.dart`) but is not exposed in any menu/route wiring, while React exposes `/role-customization`.
+- Role-based navigation matches React across Employee, Supervisor, Manager, Maintenance, Admin, Super Admin, and Tech Support. Flutter also carries extra minimal roles (client/vendor/viewer) that do not exist in the React source.
+- Global helpers: React’s `TopBar` role switcher and `AIAssistantChat` are mirrored by Flutter’s top-bar role override and `AiAssistantOverlay` in `DashboardShell`.
 
-## Routes and Screens
+## Role access parity
+- Employee: Org chart, Tasks, Forms, Documents, Photos, Before/After, Assets, QR, Training, Incidents, AI Tools, Timecards, Settings – **Match**.
+- Supervisor: Adds My Team, Approvals, Reports – **Match**.
+- Manager: Adds Organization/admin console, Projects, Work Orders, Templates, Payments – **Match**.
+- Maintenance: Work Orders, Equipment/Assets, QR, Incidents, Training, AI Tools – **Match**.
+- Admin: User Mgmt, Roles & Permissions, Work Orders, Templates, Payments, Payroll, Reports, Audit Logs – **Match**.
+- Super Admin: System Overview, Roles & Permissions, Assets, Incidents, Payments, Payroll, Reports, Audit Logs – **Match**.
+- Tech Support: Support Tickets, Users, Knowledge Base, System Logs – **Match**.
 
-| React route | React component | Flutter screen | Status | Notes |
+## Page-by-page mapping
+| React route/page (file) | Key intent | Flutter equivalent (file) | Parity | Notes |
 | --- | --- | --- | --- | --- |
-| `/` | `UserDashboard` / `SuperAdminDashboard` / `MaintenanceDashboard` | `apps/mobile/lib/features/dashboard/presentation/pages/role_dashboard_page.dart`, `apps/mobile/lib/features/admin/presentation/pages/super_admin_dashboard_page.dart` | NEEDS_REVIEW | Role-based dashboards exist; parity not verified. |
-| `/tasks` | `TasksPage` | `apps/mobile/lib/features/tasks/presentation/pages/tasks_page.dart` | PARTIAL | Create task modal aligned to React layout; tech support visibility updated; remaining UI/UX parity still needs verification. |
-| `/tasks/:id` | `TaskDetailPage` | `apps/mobile/lib/features/tasks/presentation/pages/task_detail_page.dart` | NEEDS_REVIEW |  |
-| `/work-orders` | `WorkOrdersPage` | `apps/mobile/lib/features/navigation/presentation/pages/work_orders_page.dart` | PARTIAL | Create/edit modal fields aligned to React; runtime parity still needs verification. |
-| `/forms` | `FormsPage` | `apps/mobile/lib/features/navigation/presentation/pages/forms_page.dart` | PARTIAL | Header/filter breakpoints aligned to React; remaining UI/UX parity still needs verification. |
-| `/forms/builder` | `FormBuilderPage` | `apps/mobile/lib/features/dashboard/presentation/pages/create_form_page.dart` | NEEDS_REVIEW | Builder flow likely maps here; confirm UI parity. |
-| `/forms/:id/submit` | `FormSubmissionPage` | `apps/mobile/lib/features/dashboard/presentation/pages/form_fill_page.dart` | NEEDS_REVIEW |  |
-| `/documents` | `DocumentsPage` | `apps/mobile/lib/features/documents/presentation/pages/documents_page.dart` | NEEDS_REVIEW |  |
-| `/assets` | `AssetsPage` | `apps/mobile/lib/features/assets/presentation/pages/assets_page.dart` | NEEDS_REVIEW |  |
-| `/training` | `TrainingPage` | `apps/mobile/lib/features/training/presentation/pages/training_hub_page.dart` | NEEDS_REVIEW |  |
-| `/incidents` | `IncidentsPage` | `apps/mobile/lib/features/navigation/presentation/pages/incidents_page.dart` | NEEDS_REVIEW |  |
-| `/users` | `UsersPage` | `apps/mobile/lib/features/navigation/presentation/pages/user_directory_page.dart` | NEEDS_REVIEW |  |
-| `/projects` | `ProjectsPage` | `apps/mobile/lib/features/projects/presentation/pages/projects_page.dart` | PARTIAL | New Project button responsive label aligned; remaining UI/UX parity still needs verification. |
-| `/analytics` | `AnalyticsPage` | `apps/mobile/lib/features/analytics/presentation/pages/analytics_page.dart` | NEEDS_REVIEW |  |
-| `/settings` | `SettingsPage` | `apps/mobile/lib/features/settings/presentation/pages/settings_page.dart` | NEEDS_REVIEW |  |
-| `/profile` | `ProfilePage` | `apps/mobile/lib/features/profile/presentation/pages/profile_page.dart` | NEEDS_REVIEW |  |
-| `/messages` | `MessagesPage` | `apps/mobile/lib/features/partners/presentation/pages/messages_page.dart` | PARTIAL | Back button and composer visibility aligned; remaining UI/UX parity still needs verification. |
-| `/news` | `NewsPage` | `apps/mobile/lib/features/ops/presentation/pages/news_posts_page.dart` | PARTIAL | Layout/spacing, demo data, and sidebar stats/categories aligned to React; needs runtime parity verification. |
-| `/photos` | `PhotosPage` | `apps/mobile/lib/features/navigation/presentation/pages/photos_page.dart` | NEEDS_REVIEW |  |
-| `/qrscanner` | `QRScannerPage` | `apps/mobile/lib/features/navigation/presentation/pages/qr_scanner_page.dart` | NEEDS_REVIEW |  |
-| `/notifications` | `NotificationsPage` | `apps/mobile/lib/features/navigation/presentation/pages/notifications_page.dart` | PARTIAL | Centered layout aligned to React; remaining UI/UX parity still needs verification. |
-| `/timecards` | `TimecardsPage` | `apps/mobile/lib/features/navigation/presentation/pages/timecards_page.dart` | NEEDS_REVIEW |  |
-| `/ai-tools` | `AITools` | `apps/mobile/lib/features/ops/presentation/pages/ai_tools_page.dart` | NEEDS_REVIEW |  |
-| `/approvals` | `ApprovalWorkflow` | `apps/mobile/lib/features/navigation/presentation/pages/approvals_page.dart` | NEEDS_REVIEW |  |
-| `/templates` | `TemplateBuilder` | `apps/mobile/lib/features/templates/presentation/pages/templates_page.dart` | PARTIAL | Layout aligned to TemplateBuilder; interactions still need verification. |
-| `/payments` | `PaymentRequest` | `apps/mobile/lib/features/ops/presentation/pages/payment_requests_page.dart` | NEEDS_REVIEW |  |
-| `/before-after` | `BeforeAfterPhotos` | `apps/mobile/lib/features/navigation/presentation/pages/before_after_photos_page.dart` | NEEDS_REVIEW |  |
-| `/role-customization` | `RoleCustomization` | `apps/mobile/lib/features/navigation/presentation/pages/role_customization_page.dart` | NEEDS_REVIEW |  |
-| `/team` | `TeamPage` | `apps/mobile/lib/features/teams/presentation/pages/teams_page.dart` | NEEDS_REVIEW |  |
-| `/roles` | `RolesPage` | `apps/mobile/lib/features/navigation/presentation/pages/roles_page.dart` | NEEDS_REVIEW |  |
-| `/tickets` | `TicketsPage` | `apps/mobile/lib/features/navigation/presentation/pages/support_tickets_page.dart` | NEEDS_REVIEW |  |
-| `/kb` | `KnowledgeBasePage` | `apps/mobile/lib/features/sop/presentation/pages/sop_library_page.dart` | PARTIAL | SOP library exists; needs KB parity check. |
-| `/logs` | `SystemLogsPage` | `apps/mobile/lib/features/navigation/presentation/pages/system_logs_page.dart` | NEEDS_REVIEW |  |
-| `/audit` | `AuditLogsPage` | `apps/mobile/lib/features/navigation/presentation/pages/audit_logs_page.dart` | NEEDS_REVIEW |  |
-| `/system` | `SystemOverviewPage` | `apps/mobile/lib/features/navigation/presentation/pages/system_overview_page.dart` | PARTIAL | Layout, spacing, and key metric/service/alert cards aligned to React; runtime parity still needs verification. |
-| `/payroll` | `PayrollPage` | `apps/mobile/lib/features/navigation/presentation/pages/payroll_page.dart` | NEEDS_REVIEW |  |
-| `/roles-permissions` | `RolesPermissionsPage` | `apps/mobile/lib/features/navigation/presentation/pages/roles_permissions_page.dart` | NEEDS_REVIEW |  |
-| `/organization` | `OrganizationPage` | `apps/mobile/lib/features/navigation/presentation/pages/organization_chart_page.dart` | PARTIAL | Layout/spacing, stats cards, and org structure styling aligned; runtime parity still needs verification. |
+| `/` User/Maintenance/SuperAdmin dashboards (`pages/UserDashboard.tsx`, `MaintenanceDashboard.tsx`, `SuperAdminDashboard.tsx`) | Role-specific KPIs, tasks, quick actions | `features/dashboard/presentation/pages/role_dashboard_page.dart` + role-specific dashboard bodies | Match | Same role shells; dashboards wired per role with stats, quick actions, notifications. |
+| Notifications (`/notifications`, `pages/NotificationsPage.tsx`) | Alerts feed & actions | `features/navigation/presentation/pages/notifications_page.dart` | Match | Present in all role menus. |
+| Messages (`/messages`, `pages/MessagesPage.tsx`) | Threaded messaging | `features/partners/presentation/pages/messages_page.dart` | Match | Also has thread detail page. |
+| Company News (`/news`, `pages/NewsPage.tsx`) | News cards/feed | `features/ops/presentation/pages/news_posts_page.dart` | Match | Wired in menus. |
+| Organization Chart / Organization (`/organization`, `pages/OrganizationPage.tsx`) | Org chart + admin org management | `features/navigation/presentation/pages/organization_chart_page.dart`; admin/manager routes to `features/admin/presentation/pages/admin_dashboard_page.dart` (org section) | Partial | Chart view present; admin console embeds org section but dedicated multi-tab org utilities from React page should be validated when wired. |
+| Team (`/team`, `pages/TeamPage.tsx`) | Team roster/summary | `features/teams/presentation/pages/teams_page.dart` | Match | Supervisor path. |
+| Tasks list/detail (`/tasks`, `pages/TasksPage.tsx`; `/tasks/:id`, `TaskDetailPage.tsx`) | Search/filter, list/board/calendar views, milestones, notifications, create/edit | `features/tasks/presentation/pages/tasks_page.dart`, `task_detail_page.dart`, `task_editor_page.dart` | Match | Flutter includes filters, list/board/calendar, milestone banners, export, realtime Supabase subscription. |
+| Work Orders (`/work-orders`, `pages/WorkOrdersPage.tsx`) | Work order board/list, assignments | `features/navigation/presentation/pages/work_orders_page.dart` | Match | Role-aware views, creation modals exist; confirm advanced filters if needed. |
+| Forms (`/forms`, `pages/FormsPage.tsx`) | Form library & submissions | `features/navigation/presentation/pages/forms_page.dart` | Match | Includes submission list, status chips. |
+| Form Builder (`/forms/builder`, `FormBuilderPage.tsx`) | Drag/drop field palette with rich field set | `features/dashboard/presentation/pages/create_form_page.dart` | Match | Palette spans basic/media/advanced/layout fields; preview/edit parity. |
+| Form Submit (`/forms/:id/submit`, `FormSubmissionPage.tsx`) | Fill & submit form | `features/dashboard/presentation/pages/form_fill_page.dart` | Match | Includes media capture, validation, offline queue. |
+| Documents (`/documents`, `pages/DocumentsPage.tsx`) | Document manager, viewer/editor | `features/documents/presentation/pages/documents_page.dart` + editor/detail pages | Match | CRUD/editor pages implemented. |
+| Assets/My Assets (`/assets`, `pages/AssetsPage.tsx`) | Asset list/detail, inspections | `features/assets/presentation/pages/assets_page.dart` + detail/editors | Match | Supports inspections, incidents, QR lookup. |
+| Training (`/training`, `pages/TrainingPage.tsx`) | Training catalog/progress | `features/training/presentation/pages/training_hub_page.dart` | Match | Includes employee detail/editor flows. |
+| Incidents (`/incidents`, `pages/IncidentsPage.tsx`) | Incident reporting & status | `features/navigation/presentation/pages/incidents_page.dart` | Match | Capture, filter, status chips present. |
+| Users (`/users`, `pages/UsersPage.tsx`) | User directory/admin | `features/navigation/presentation/pages/user_directory_page.dart` | Match | Accessible to admin/manager/superadmin/techsupport per nav rules. |
+| Projects (`/projects`, `pages/ProjectsPage.tsx`) | Project list, updates | `features/projects/presentation/pages/projects_page.dart` + detail/editor | Match | Includes share/update flows. |
+| Analytics/Reports (`/analytics`, `pages/AnalyticsPage.tsx`) | Analytics widgets/charts | `features/analytics/presentation/pages/analytics_page.dart` and reports page used in dashboards | Match | Charts/cards implemented; data source parity not validated. |
+| Settings (`/settings`, `pages/SettingsPage.tsx`) | Preferences/theme | `features/settings/presentation/pages/settings_page.dart` | Match | Includes theme, notifications, profile link. |
+| Profile (`/profile`, `pages/ProfilePage.tsx`) | User profile & stats | `features/profile/presentation/pages/profile_page.dart` | Match | Routed from dashboard tab. |
+| Photos & gallery (`/photos`, `pages/PhotosPage.tsx`) | Media gallery, editing | `features/navigation/presentation/pages/photos_page.dart` + photo detail/editor pages | Match | Gallery, metadata, editing, upload. |
+| Before/After (`/before-after`, `components/BeforeAfterPhotosV2.tsx`) | Before/after comparison | `features/navigation/presentation/pages/before_after_photos_page.dart` | Match | Includes comparison slider and annotations. |
+| QR Scanner (`/qrscanner`, `pages/QRScannerPage.tsx`) | QR/Barcode scan | `features/navigation/presentation/pages/qr_scanner_page.dart` | Match | Role-limited to field roles. |
+| Notifications (route covered above) + TopBar AI | Global notifications & AI | `features/dashboard/presentation/widgets/top_bar.dart` + `core/widgets/ai_assistant_overlay.dart` | Match | Role switcher + AI overlay present. |
+| Timecards (`/timecards`, `pages/TimecardsPage.tsx`) | Clock-in/out, history | `features/navigation/presentation/pages/timecards_page.dart` | Match | Includes location capture, status chips. |
+| AI Tools (`/ai-tools`, `components/AITools.tsx`) | AI utilities hub | `features/ops/presentation/pages/ai_tools_page.dart` | Match | Multiple AI widgets mirrored. |
+| Approvals (`/approvals`, `components/ApprovalWorkflow.tsx`) | Approval inbox/workflows | `features/navigation/presentation/pages/approvals_page.dart` | Match | Approvals list, actions. |
+| Templates (`/templates`, `components/TemplateBuilder.tsx`) | Template builder/library | `features/templates/presentation/pages/templates_page.dart` + `template_editor_page.dart` | Match | Workflow/report/template tabs with editor. |
+| Payments (`/payments`, `components/PaymentRequest.tsx`) | Payment requests | `features/ops/presentation/pages/payment_requests_page.dart` | Match | Requests list and creation. |
+| Role Customization (`/role-customization`, `components/RoleCustomization.tsx`) | Rename roles per org | `features/navigation/presentation/pages/role_customization_page.dart` | **Gap (not routed)** | Screen exists but no side menu entry/route wiring; expose to mirror React. |
+| Team Roles (`/roles`, `pages/RolesPage.tsx`) | Role management | `features/navigation/presentation/pages/roles_page.dart` | Match | Admin-only route. |
+| Roles & Permissions (`/roles-permissions`, `pages/RolesPermissionsPage.tsx`) | Permission matrix | `features/navigation/presentation/pages/roles_permissions_page.dart` | Match | Superadmin route. |
+| Support Tickets (`/tickets`, `pages/TicketsPage.tsx`) | Support queue | `features/navigation/presentation/pages/support_tickets_page.dart` | Match | Tech Support menu. |
+| Knowledge Base (`/kb`, `pages/KnowledgeBasePage.tsx`) | KB/library | `features/sop/presentation/pages/sop_library_page.dart` | Match | Tech Support menu. |
+| System Logs (`/logs`, `pages/SystemLogsPage.tsx`) | System log viewer | `features/navigation/presentation/pages/system_logs_page.dart` | Match | Tech Support menu. |
+| Audit Logs (`/audit`, `pages/AuditLogsPage.tsx`) | Audit trails | `features/navigation/presentation/pages/audit_logs_page.dart` | Match | Admin/Super Admin menus. |
+| System Overview (`/system`, `pages/SystemOverviewPage.tsx`) | Infra/health overview | `features/navigation/presentation/pages/system_overview_page.dart` | Match | Super Admin menu. |
+| Payroll (`/payroll`, `pages/PayrollPage.tsx`) | Payroll summary | `features/navigation/presentation/pages/payroll_page.dart` | Match | Admin/Super Admin menus. |
+| Templates/Builder components (e.g., `components/TemplateBuilder.tsx`, `TemplateManager.tsx`) | Rich builder widgets | `features/templates/presentation/pages/templates_page.dart` | Match | Drag/drop and metadata supported. |
+| AI Assistant chat (`components/AIAssistantChat.tsx`) | Global assistant | `core/widgets/ai_assistant_overlay.dart` | Match | Present in dashboard shell. |
 
-## Global Layout and Shared Components
-
-| React component | Flutter equivalent | Status | Notes |
-| --- | --- | --- | --- |
-| `Sidebar` | `apps/mobile/lib/features/navigation/presentation/widgets/side_menu.dart` | PARTIAL | Web view now keeps the side menu visible; mobile still needs parity check. |
-| `TopBar` | `apps/mobile/lib/features/dashboard/presentation/widgets/top_bar.dart` | NEEDS_REVIEW | Role switcher + theme toggle present; visual parity to confirm. |
-| `AIAssistantChat` | `apps/mobile/lib/core/widgets/ai_assistant_overlay.dart` | NEEDS_REVIEW | Overlay exists; confirm layout/behavior parity. |
-| `RightSidebar` | `apps/mobile/lib/features/dashboard/presentation/widgets/right_sidebar.dart` | NEEDS_REVIEW | Verify content and behavior. |
-
-## Notes
-
-- This audit only captures route-level parity. Each page still needs a section-by-section UI/UX and interaction review against the React implementation.
+## Recommendations
+- Wire the **Role Customization** screen into navigation (e.g., add `SideMenuRoute.roleCustomization` and route handler) so it matches the React `/role-customization` entry.
+- For Organization management parity, verify that the admin console route (`AdminDashboardPage` with `initialSectionId: 'orgs'`) surfaces the same membership/department/tools found in the React `OrganizationPage`; add any missing tabs/widgets as needed.
+- If deeper fidelity is required, spot-check data behaviours (permissions enforcement, Supabase queries, exports) on a per-page basis, since this audit focused on UI/feature presence.

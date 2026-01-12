@@ -165,7 +165,6 @@ class _PhotoAnnotatorPageState extends State<PhotoAnnotatorPage> {
                         ),
                         const Spacer(),
                         IconButton(
-                          tooltip: 'Clear',
                           onPressed: _controller.clear,
                           icon: const Icon(Icons.delete_outline),
                         ),

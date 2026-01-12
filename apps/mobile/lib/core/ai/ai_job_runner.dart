@@ -112,6 +112,9 @@ class AiJobRunner {
           notes: notes.isEmpty ? imageContext! : notes,
           imageContext: notes.isEmpty ? null : imageContext,
         );
+      case 'assistant':
+        _ensureInput(combinedInput);
+        return ai.assistantReply(prompt: combinedInput!);
       case 'summary':
       default:
         _ensureInput(combinedInput);

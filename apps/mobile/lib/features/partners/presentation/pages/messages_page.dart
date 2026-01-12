@@ -302,6 +302,7 @@ class _ConversationPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width >= 768;
     return Container(
       decoration: BoxDecoration(
         color: colors.surface,
@@ -312,7 +313,7 @@ class _ConversationPanel extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(isWide ? 16 : 12),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: colors.border),
@@ -332,11 +333,16 @@ class _ConversationPanel extends StatelessWidget {
                     const Spacer(),
                     IconButton(
                       onPressed: () {},
-                      icon: Icon(Icons.more_vert, color: colors.muted),
+                      icon: Icon(Icons.more_vert, color: colors.muted, size: 20),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                SizedBox(height: isWide ? 16 : 12),
                 TextField(
                   controller: searchController,
                   onChanged: onSearchChanged,
@@ -344,6 +350,10 @@ class _ConversationPanel extends StatelessWidget {
                     colors,
                     hintText: 'Search conversations...',
                     prefixIcon: Icons.search,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: isWide ? 16 : 12,
+                      vertical: 8,
+                    ),
                   ),
                 ),
               ],
@@ -368,6 +378,7 @@ class _ConversationPanel extends StatelessWidget {
                         colors: colors,
                         conversation: conversation,
                         selected: selectedId == conversation.id,
+                        isWide: isWide,
                         onTap: () => onSelect(conversation.id),
                       );
                     },
@@ -384,12 +395,14 @@ class _ConversationTile extends StatelessWidget {
     required this.colors,
     required this.conversation,
     required this.selected,
+    required this.isWide,
     required this.onTap,
   });
 
   final _MessagingColors colors;
   final _ConversationDisplay conversation;
   final bool selected;
+  final bool isWide;
   final VoidCallback onTap;
 
   @override
@@ -397,11 +410,15 @@ class _ConversationTile extends StatelessWidget {
     final avatarColor = _avatarColor(conversation.type);
     final background = selected ? colors.selected : Colors.transparent;
     final textColor = selected ? colors.title : colors.body;
+    final padding = EdgeInsets.symmetric(
+      horizontal: isWide ? 16 : 12,
+      vertical: isWide ? 16 : 12,
+    );
 
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: padding,
         color: background,
         child: Row(
           children: [
@@ -411,6 +428,9 @@ class _ConversationTile extends StatelessWidget {
               online: conversation.online,
               type: conversation.type,
               background: avatarColor,
+              size: isWide ? 48 : 44,
+              iconSize: isWide ? 24 : 20,
+              textSize: isWide ? 16 : 14,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -502,6 +522,9 @@ class _ConversationAvatar extends StatelessWidget {
     required this.online,
     required this.type,
     required this.background,
+    required this.size,
+    required this.iconSize,
+    required this.textSize,
   });
 
   final _MessagingColors colors;
@@ -509,6 +532,9 @@ class _ConversationAvatar extends StatelessWidget {
   final bool online;
   final _ConversationType type;
   final Color background;
+  final double size;
+  final double iconSize;
+  final double textSize;
 
   @override
   Widget build(BuildContext context) {
@@ -516,20 +542,21 @@ class _ConversationAvatar extends StatelessWidget {
     return Stack(
       children: [
         Container(
-          width: 44,
-          height: 44,
+          width: size,
+          height: size,
           decoration: BoxDecoration(
             color: background,
             shape: BoxShape.circle,
           ),
           alignment: Alignment.center,
           child: type == _ConversationType.group
-              ? const Icon(Icons.group, color: Colors.white, size: 20)
+              ? Icon(Icons.group, color: Colors.white, size: iconSize)
               : Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
+                    fontSize: textSize,
                   ),
                 ),
         ),
@@ -585,7 +612,7 @@ class _ChatPanel extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(Icons.chat_bubble_outline,
-                  size: 48, color: colors.muted),
+                  size: 64, color: colors.muted),
               const SizedBox(height: 12),
               Text(
                 'Select a conversation to start messaging',
@@ -641,6 +668,7 @@ class _ChatHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width >= 768;
     final avatarColor = _avatarColor(conversation.type);
     final subtitle = conversation.type == _ConversationType.direct
         ? conversation.online
@@ -651,7 +679,10 @@ class _ChatHeader extends StatelessWidget {
             : 'Group chat';
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: isWide ? 16 : 12,
+      ),
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(bottom: BorderSide(color: colors.border)),
@@ -661,8 +692,12 @@ class _ChatHeader extends StatelessWidget {
           if (showBack)
             IconButton(
               onPressed: onBack,
-              icon: Icon(Icons.chevron_left, color: colors.muted),
-              tooltip: 'Back',
+              icon: Icon(Icons.chevron_left, color: colors.muted, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
             ),
           _ConversationAvatar(
             colors: colors,
@@ -670,6 +705,9 @@ class _ChatHeader extends StatelessWidget {
             online: conversation.online,
             type: conversation.type,
             background: avatarColor,
+            size: isWide ? 40 : 36,
+            iconSize: isWide ? 20 : 18,
+            textSize: isWide ? 14 : 13,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -697,16 +735,33 @@ class _ChatHeader extends StatelessWidget {
           if (conversation.type == _ConversationType.direct) ...[
             IconButton(
               onPressed: () {},
-              icon: Icon(Icons.call, color: colors.muted),
+              icon: Icon(Icons.call, color: colors.muted, size: isWide ? 20 : 16),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
             ),
             IconButton(
               onPressed: () {},
-              icon: Icon(Icons.videocam, color: colors.muted),
+              icon:
+                  Icon(Icons.videocam, color: colors.muted, size: isWide ? 20 : 16),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
             ),
           ],
           IconButton(
             onPressed: () {},
-            icon: Icon(Icons.more_vert, color: colors.muted),
+            icon:
+                Icon(Icons.more_vert, color: colors.muted, size: isWide ? 20 : 16),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
           ),
         ],
       ),
@@ -786,13 +841,19 @@ class _MessageListBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: messages.length,
-      itemBuilder: (context, index) {
-        return _MessageBubble(
-          colors: colors,
-          message: messages[index],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 768;
+        return ListView.builder(
+          padding: EdgeInsets.all(isWide ? 16 : 12),
+          itemCount: messages.length,
+          itemBuilder: (context, index) {
+            return _MessageBubble(
+              colors: colors,
+              message: messages[index],
+              isWide: isWide,
+            );
+          },
         );
       },
     );
@@ -803,10 +864,12 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.colors,
     required this.message,
+    required this.isWide,
   });
 
   final _MessagingColors colors;
   final _MessageDisplay message;
+  final bool isWide;
 
   @override
   Widget build(BuildContext context) {
@@ -815,23 +878,34 @@ class _MessageBubble extends StatelessWidget {
     final textColor = isMine ? Colors.white : colors.bubbleOtherText;
     final attachmentBackground = isMine
         ? Colors.white.withValues(alpha: 0.2)
-        : colors.filterSurface;
-    final attachmentForeground = isMine ? Colors.white : colors.body;
+        : const Color(0xFF4B5563).withValues(alpha: 0.2);
+    final attachmentForeground = textColor;
+    final smallRadius = const Radius.circular(4);
+    final largeRadius = const Radius.circular(16);
     final radius = isMine
-        ? const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(16),
-            bottomRight: Radius.circular(6),
+        ? BorderRadius.only(
+            topLeft: largeRadius,
+            topRight: largeRadius,
+            bottomLeft: largeRadius,
+            bottomRight: smallRadius,
           )
-        : const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(6),
-            bottomRight: Radius.circular(16),
+        : BorderRadius.only(
+            topLeft: largeRadius,
+            topRight: largeRadius,
+            bottomLeft: smallRadius,
+            bottomRight: largeRadius,
           );
+    final padding = EdgeInsets.symmetric(
+      horizontal: 12,
+      vertical: 8,
+    );
+    final avatarSize = isWide ? 32.0 : 24.0;
+    final avatarFontSize = isWide ? 12.0 : 10.0;
+    final verticalGap = isWide ? 8.0 : 4.0;
+    final timeSize = isWide ? 12.0 : 11.0;
+    final textSize = isWide ? 14.0 : 13.0;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.symmetric(vertical: verticalGap),
       child: Row(
         mainAxisAlignment:
             isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -842,6 +916,8 @@ class _MessageBubble extends StatelessWidget {
               colors: colors,
               label: message.avatar,
               isMine: false,
+              size: avatarSize,
+              fontSize: avatarFontSize,
             ),
           if (!isMine) const SizedBox(width: 8),
           Flexible(
@@ -850,8 +926,7 @@ class _MessageBubble extends StatelessWidget {
                   isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: padding,
                   decoration: BoxDecoration(
                     color: bubbleColor,
                     borderRadius: radius,
@@ -861,15 +936,12 @@ class _MessageBubble extends StatelessWidget {
                     children: [
                       Text(
                         message.content,
-                        style: TextStyle(color: textColor, fontSize: 14),
+                        style: TextStyle(color: textColor, fontSize: textSize),
                       ),
                       if (message.attachmentCount > 0) ...[
                         const SizedBox(height: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
+                          padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
                             color: attachmentBackground,
                             borderRadius: BorderRadius.circular(8),
@@ -879,7 +951,7 @@ class _MessageBubble extends StatelessWidget {
                             children: [
                               Icon(
                                 Icons.photo,
-                                size: 14,
+                                size: 16,
                                 color: attachmentForeground,
                               ),
                               const SizedBox(width: 6),
@@ -897,11 +969,12 @@ class _MessageBubble extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: 4),
+                SizedBox(height: isWide ? 4 : 2),
                 Text(
                   message.time,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.muted,
+                        fontSize: timeSize,
                       ),
                 ),
               ],
@@ -913,6 +986,8 @@ class _MessageBubble extends StatelessWidget {
               colors: colors,
               label: message.avatar,
               isMine: true,
+              size: avatarSize,
+              fontSize: avatarFontSize,
             ),
         ],
       ),
@@ -925,17 +1000,21 @@ class _BubbleAvatar extends StatelessWidget {
     required this.colors,
     required this.label,
     required this.isMine,
+    required this.size,
+    required this.fontSize,
   });
 
   final _MessagingColors colors;
   final String label;
   final bool isMine;
+  final double size;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 32,
-      height: 32,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: isMine ? colors.primary : colors.avatarMuted,
         shape: BoxShape.circle,
@@ -943,10 +1022,10 @@ class _BubbleAvatar extends StatelessWidget {
       alignment: Alignment.center,
       child: Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.w600,
-          fontSize: 12,
+          fontSize: fontSize,
         ),
       ),
     );
@@ -971,8 +1050,10 @@ class _MessageComposer extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final showExtras = constraints.maxWidth >= 768;
+        final isWide = constraints.maxWidth >= 768;
+        final iconSize = isWide ? 20.0 : 16.0;
         return Container(
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.all(isWide ? 16 : 12),
           decoration: BoxDecoration(
             color: colors.surface,
             border: Border(top: BorderSide(color: colors.border)),
@@ -981,17 +1062,27 @@ class _MessageComposer extends StatelessWidget {
             children: [
               IconButton(
                 onPressed: () {},
-                icon: Icon(Icons.attach_file, color: colors.muted),
+                icon: Icon(Icons.attach_file, color: colors.muted, size: iconSize),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
               if (showExtras)
                 IconButton(
                   onPressed: () {},
-                  icon: Icon(Icons.image_outlined, color: colors.muted),
+                  icon: Icon(Icons.image_outlined,
+                      color: colors.muted, size: iconSize),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
               if (showExtras)
                 IconButton(
                   onPressed: () {},
-                  icon: Icon(Icons.mic_none, color: colors.muted),
+                  icon:
+                      Icon(Icons.mic_none, color: colors.muted, size: iconSize),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
               Expanded(
                 child: TextField(
@@ -1000,20 +1091,39 @@ class _MessageComposer extends StatelessWidget {
                   decoration: _inputDecoration(
                     colors,
                     hintText: 'Type a message...',
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: isWide ? 16 : 12,
+                      vertical: 8,
+                    ),
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              IconButton(
-                onPressed: sending ? null : onSend,
-                icon: sending
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send),
-                color: colors.primary,
+              SizedBox(
+                width: 36,
+                height: 36,
+                child: FilledButton(
+                  onPressed: sending ? null : onSend,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(36, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: sending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Icon(Icons.send, size: iconSize, color: Colors.white),
+                ),
               ),
             ],
           ),
@@ -1188,12 +1298,11 @@ class _MessagingColors {
       body: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
       title: isDark ? Colors.white : const Color(0xFF111827),
       primary: primary,
-      selected: isDark
-          ? const Color(0xFF1E3A8A).withValues(alpha: 0.3)
-          : const Color(0xFFEFF6FF),
+      selected:
+          isDark ? primary.withValues(alpha: 0.2) : const Color(0xFFEFF6FF),
       filterSurface:
           isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
-      inputFill: isDark ? const Color(0xFF0B1220) : Colors.white,
+      inputFill: isDark ? const Color(0xFF111827) : Colors.white,
       inputBorder: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
       bubbleOther: isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
       bubbleOtherText:
@@ -1208,25 +1317,33 @@ InputDecoration _inputDecoration(
   _MessagingColors colors, {
   required String hintText,
   IconData? prefixIcon,
+  EdgeInsetsGeometry? contentPadding,
+  double borderRadius = 8,
+  double prefixIconSize = 16,
 }) {
   return InputDecoration(
     hintText: hintText.isEmpty ? null : hintText,
-    prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 18) : null,
+    prefixIcon:
+        prefixIcon != null ? Icon(prefixIcon, size: prefixIconSize) : null,
+    prefixIconConstraints: prefixIcon != null
+        ? const BoxConstraints(minWidth: 36, minHeight: 36)
+        : null,
     filled: true,
     fillColor: colors.inputFill,
     border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(borderRadius),
       borderSide: BorderSide(color: colors.inputBorder),
     ),
     enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(borderRadius),
       borderSide: BorderSide(color: colors.inputBorder),
     ),
     focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(borderRadius),
       borderSide: BorderSide(color: colors.primary, width: 1.5),
     ),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    contentPadding:
+        contentPadding ?? const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
   );
 }
 

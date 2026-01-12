@@ -70,8 +70,6 @@ class ProfilePage extends ConsumerStatefulWidget {
 }
 
 class _ProfilePageState extends ConsumerState<ProfilePage> {
-  static const _demoAddress = '123 Main St, New York, NY 10001';
-
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -87,7 +85,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   @override
   void initState() {
     super.initState();
-    _addressController.text = _demoAddress;
     _loadProfile();
   }
 
@@ -135,8 +132,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       _lastNameController.text = profile.lastName ?? '';
       _phoneController.text = profile.phone ?? '';
       _emailController.text = profile.email;
-      _addressController.text =
-          _addressController.text.isEmpty ? _demoAddress : _addressController.text;
+      _addressController.text = _addressController.text;
       setState(() {
         _profile = profile;
         _loading = false;
@@ -169,9 +165,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           _lastNameController.text = profile.lastName ?? '';
           _phoneController.text = profile.phone ?? '';
           _emailController.text = profile.email;
-          _addressController.text = _addressController.text.isEmpty
-              ? _demoAddress
-              : _addressController.text;
+          _addressController.text = _addressController.text;
           setState(() {
             _profile = profile;
             _loading = false;
@@ -251,12 +245,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         ? tasks
             .where((task) => task.assignedTo == userId && task.isComplete)
             .length
-        : 142;
+        : 0;
     final certifications =
-        hasTraining ? _buildCertifications(trainingRecords) : _demoCertifications;
+        hasTraining ? _buildCertifications(trainingRecords) : const <_Certification>[];
     final certificationsCount = certifications.length;
     final daysActive = profile.createdAt == null
-        ? 387
+        ? 0
         : DateTime.now().difference(profile.createdAt!).inDays;
 
     return Scaffold(
@@ -295,6 +289,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       final profileCard = _ProfileCard(
                         colors: colors,
                         profile: profile,
+                        address: _addressController.text,
                         onEdit: _scrollToPersonalInfo,
                       );
                       final details = Column(
@@ -394,11 +389,13 @@ class _ProfileCard extends StatelessWidget {
   const _ProfileCard({
     required this.colors,
     required this.profile,
+    required this.address,
     required this.onEdit,
   });
 
   final _ProfileColors colors;
   final ProfileSummary profile;
+  final String address;
   final VoidCallback onEdit;
 
   @override
@@ -455,7 +452,7 @@ class _ProfileCard extends StatelessWidget {
           const SizedBox(height: 20),
           _ContactRow(
             icon: Icons.mail_outline,
-            label: profile.email.isEmpty ? 'john.doe@company.com' : profile.email,
+            label: profile.email,
             colors: colors,
           ),
           const SizedBox(height: 10),
@@ -463,13 +460,13 @@ class _ProfileCard extends StatelessWidget {
             icon: Icons.phone,
             label: profile.phone?.isNotEmpty == true
                 ? profile.phone!
-                : '+1 (555) 123-4567',
+                : 'Not provided',
             colors: colors,
           ),
           const SizedBox(height: 10),
           _ContactRow(
             icon: Icons.location_on_outlined,
-            label: 'New York, NY',
+            label: address.isEmpty ? 'Address not set' : address,
             colors: colors,
           ),
           const SizedBox(height: 10),
@@ -1040,7 +1037,7 @@ String _formatDate(DateTime date) {
 }
 
 String _formatJoinedDate(DateTime? date) {
-  if (date == null) return 'Joined Dec 2023';
+  if (date == null) return 'Joined';
   const months = [
     'Jan',
     'Feb',
@@ -1065,36 +1062,3 @@ String _roleLabel(UserRole role) {
   }
   return role.displayName;
 }
-
-final _demoCertifications = [
-  _Certification(
-    name: 'OSHA Safety Certification',
-    issuedOn: DateTime(2024, 6, 15),
-    status: 'Valid',
-    isValid: true,
-  ),
-  _Certification(
-    name: 'First Aid & CPR',
-    issuedOn: DateTime(2024, 3, 20),
-    status: 'Valid',
-    isValid: true,
-  ),
-  _Certification(
-    name: 'Equipment Operation License',
-    issuedOn: DateTime(2023, 11, 10),
-    status: 'Valid',
-    isValid: true,
-  ),
-  _Certification(
-    name: 'Hazmat Handling',
-    issuedOn: DateTime(2024, 8, 5),
-    status: 'Valid',
-    isValid: true,
-  ),
-  _Certification(
-    name: 'Confined Space Entry',
-    issuedOn: DateTime(2024, 1, 12),
-    status: 'Valid',
-    isValid: true,
-  ),
-];

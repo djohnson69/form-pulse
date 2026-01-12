@@ -21,9 +21,7 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
     final templatesAsync = ref.watch(templatesProvider(null));
     final colors = _TemplateColors.fromTheme(Theme.of(context));
     final templates = templatesAsync.asData?.value ?? const <AppTemplate>[];
-    final templateCards = templates.isNotEmpty
-        ? _templatesFromModels(templates)
-        : _demoTemplates;
+    final templateCards = _templatesFromModels(templates);
     final visible = templateCards
         .where((template) => template.type == _selectedType)
         .toList();
@@ -55,11 +53,30 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
             colors: colors,
             type: _selectedType,
             onCreate: () => _openEditor(context),
-            onDuplicate: (template) => _showSnackBar(
-              context,
-              'Duplicating ${template.name}...',
-            ),
-            onEdit: (template) => _openEditor(context, template: template.source),
+            onDuplicate: (template) {
+              final source = template.source;
+              if (source == null) return;
+              final copy = AppTemplate(
+                id: '',
+                orgId: source.orgId,
+                type: source.type,
+                name: '${template.name} copy',
+                description: source.description,
+                payload: Map<String, dynamic>.from(source.payload),
+                assignedUserIds: List<String>.from(source.assignedUserIds),
+                assignedRoles: List<String>.from(source.assignedRoles),
+                isActive: source.isActive,
+                createdBy: source.createdBy,
+                createdAt: DateTime.now(),
+                updatedAt: null,
+                metadata: source.metadata == null
+                    ? null
+                    : Map<String, dynamic>.from(source.metadata!),
+              );
+              _openEditor(context, template: copy);
+            },
+            onEdit: (template) =>
+                _openEditor(context, template: template.source),
           ),
           const SizedBox(height: 16),
           _FeaturesGrid(colors: colors),
@@ -81,12 +98,6 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
     if (result == true) {
       ref.invalidate(templatesProvider(null));
     }
-  }
-
-  void _showSnackBar(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
   }
 
   List<_TemplateCardData> _templatesFromModels(List<AppTemplate> templates) {
@@ -193,11 +204,11 @@ class _TypeTabs extends StatelessWidget {
     required this.onSelected,
   });
 
-  final _TemplateColors colors;
-  final _TemplateType selectedType;
-  final ValueChanged<_TemplateType> onSelected;
+final _TemplateColors colors;
+final _TemplateType selectedType;
+final ValueChanged<_TemplateType> onSelected;
 
-  @override
+@override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -947,68 +958,3 @@ int? _metaInt(Map<String, dynamic>? metadata, List<String> keys) {
   }
   return null;
 }
-
-final _demoTemplates = [
-  _TemplateCardData(
-    id: '1',
-    name: 'Daily Safety Inspection',
-    type: _TemplateType.checklist,
-    description: 'Standard daily site safety inspection checklist',
-    steps: [
-      'Check PPE compliance',
-      'Inspect equipment',
-      'Review hazards',
-      'Document findings',
-    ],
-    lastModified: DateTime(2025, 12, 20),
-    usageCount: 145,
-  ),
-  _TemplateCardData(
-    id: '2',
-    name: 'Equipment Maintenance Workflow',
-    type: _TemplateType.workflow,
-    description: 'Complete workflow for equipment maintenance requests',
-    steps: [
-      'Submit request',
-      'Manager approval',
-      'Maintenance scheduling',
-      'Work completion',
-      'Sign-off',
-    ],
-    assignedRoles: ['Employee', 'Manager', 'Maintenance Lead'],
-    lastModified: DateTime(2025, 12, 18),
-    usageCount: 89,
-  ),
-  _TemplateCardData(
-    id: '3',
-    name: 'Incident Report Template',
-    type: _TemplateType.report,
-    description: 'Standardized incident reporting format',
-    fields: [
-      'Incident Type',
-      'Date & Time',
-      'Location',
-      'Description',
-      'Witnesses',
-      'Photos',
-    ],
-    lastModified: DateTime(2025, 12, 22),
-    usageCount: 67,
-  ),
-  _TemplateCardData(
-    id: '4',
-    name: 'New Employee Onboarding',
-    type: _TemplateType.workflow,
-    description: 'Multi-step employee onboarding process',
-    steps: [
-      'Documentation',
-      'Safety Training',
-      'Tool Assignment',
-      'Site Orientation',
-      'Supervisor Meeting',
-    ],
-    assignedRoles: ['HR', 'Safety Manager', 'Site Supervisor'],
-    lastModified: DateTime(2025, 12, 15),
-    usageCount: 34,
-  ),
-];

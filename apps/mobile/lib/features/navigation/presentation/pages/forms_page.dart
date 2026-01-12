@@ -705,20 +705,17 @@ class _FormGridCard extends StatelessWidget {
               const SizedBox(width: 8),
               _IconActionButton(
                 icon: Icons.visibility_outlined,
-                tooltip: 'View',
                 onPressed: onView,
               ),
               if (canManageForms) ...[
                 const SizedBox(width: 8),
                 _IconActionButton(
                   icon: Icons.edit_outlined,
-                  tooltip: 'Edit',
                   onPressed: onEdit,
                 ),
                 const SizedBox(width: 8),
                 _IconActionButton(
                   icon: Icons.copy_outlined,
-                  tooltip: 'Duplicate',
                   onPressed: onDuplicate,
                 ),
               ],
@@ -1029,29 +1026,24 @@ class _FormIconBadge extends StatelessWidget {
 class _IconActionButton extends StatelessWidget {
   const _IconActionButton({
     required this.icon,
-    required this.tooltip,
     required this.onPressed,
   });
 
   final IconData icon;
-  final String tooltip;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          minimumSize: const Size(0, 40),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: const Size(0, 40),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(icon, size: 16),
       ),
+      child: Icon(icon, size: 16),
     );
   }
 }

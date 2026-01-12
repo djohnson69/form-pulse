@@ -32,12 +32,10 @@ class _EmployeeDetailPageState extends ConsumerState<EmployeeDetailPage> {
         title: Text(_employee.fullName),
         actions: [
           IconButton(
-            tooltip: 'Edit employee',
             icon: const Icon(Icons.edit),
             onPressed: _editEmployee,
           ),
           IconButton(
-            tooltip: 'Assign training',
             icon: const Icon(Icons.school),
             onPressed: _assignTraining,
           ),

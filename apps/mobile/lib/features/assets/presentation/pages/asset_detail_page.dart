@@ -26,7 +26,6 @@ class AssetDetailPage extends ConsumerWidget {
             onPressed: () => _openEditor(context, ref),
           ),
           IconButton(
-            tooltip: 'Print QR',
             icon: const Icon(Icons.qr_code),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(

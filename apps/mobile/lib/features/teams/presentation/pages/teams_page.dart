@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared/shared.dart';
 
 import '../../../tasks/data/tasks_provider.dart';
 import '../../../tasks/data/tasks_repository.dart';
 import '../../../tasks/presentation/pages/tasks_page.dart';
+import '../../../navigation/presentation/pages/user_directory_page.dart';
 
 class TeamsPage extends ConsumerStatefulWidget {
   const TeamsPage({super.key});
@@ -27,7 +29,13 @@ class _TeamsPageState extends ConsumerState<TeamsPage> {
   Widget build(BuildContext context) {
     final colors = _TeamColors.fromTheme(Theme.of(context));
     final membersAsync = ref.watch(taskAssigneesProvider);
-    final baseMembers = _buildBaseMembers(membersAsync);
+    final tasksAsync = ref.watch(tasksProvider);
+    final tasks = tasksAsync.maybeWhen(
+      data: (data) => data,
+      orElse: () => const <Task>[],
+    );
+    final taskStats = _groupTasksByAssignee(tasks);
+    final baseMembers = _buildBaseMembers(membersAsync, taskStats);
     final members = [...baseMembers, ..._localMembers];
     final filtered = _applyFilters(members);
     final stats = _TeamStats.fromMembers(members);
@@ -77,15 +85,17 @@ class _TeamsPageState extends ConsumerState<TeamsPage> {
 
   List<_TeamMemberEntry> _buildBaseMembers(
     AsyncValue<List<TaskAssignee>> membersAsync,
+    Map<String, List<Task>> tasksByAssignee,
   ) {
     final members = membersAsync.maybeWhen(
       data: (data) => data,
       orElse: () => const <TaskAssignee>[],
     );
-    if (members.isEmpty) {
-      return List<_TeamMemberEntry>.from(_demoMembers);
-    }
-    return members.map(_mapAssignee).toList();
+    if (members.isEmpty) return const <_TeamMemberEntry>[];
+    return members.map((assignee) {
+      final assignedTasks = tasksByAssignee[assignee.id] ?? const <Task>[];
+      return _mapAssignee(assignee, assignedTasks);
+    }).toList();
   }
 
   List<_TeamMemberEntry> _applyFilters(List<_TeamMemberEntry> members) {
@@ -101,6 +111,11 @@ class _TeamsPageState extends ConsumerState<TeamsPage> {
   }
 
   void _handleAddMember() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const UserDirectoryPage(),
+      ),
+    );
   }
 
   void _handleAssignTask(_TeamMemberEntry member) {
@@ -115,6 +130,11 @@ class _TeamsPageState extends ConsumerState<TeamsPage> {
   }
 
   void _handleViewDetails(_TeamMemberEntry member) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const UserDirectoryPage(),
+      ),
+    );
   }
 }
 
@@ -920,9 +940,10 @@ class _TeamMemberEntry {
   final String lastActive;
 }
 
-const List<String> _statusOptions = ['all', 'active', 'away', 'offline'];
+const List<String> _statusOptions = ['all', 'active', 'offline'];
 
 String _statusLabel(String status) {
+  if (status.isEmpty) return 'Unknown';
   return status[0].toUpperCase() + status.substring(1);
 }
 
@@ -930,8 +951,6 @@ Color _statusColor(String status) {
   switch (status) {
     case 'active':
       return const Color(0xFF22C55E);
-    case 'away':
-      return const Color(0xFFF59E0B);
     case 'offline':
       return const Color(0xFF9CA3AF);
     default:
@@ -971,145 +990,75 @@ InputDecoration _inputDecoration(
   );
 }
 
-final List<_TeamMemberEntry> _demoMembers = [
-  _TeamMemberEntry(
-    id: '1',
-    name: 'Sarah Johnson',
-    role: 'Field Technician',
-    email: 'sarah.j@company.com',
-    phone: '(555) 123-4567',
-    location: 'North Region',
-    status: 'active',
-    tasksCompleted: 47,
-    tasksTotal: 50,
-    performance: 94,
-    joinDate: DateTime(2023, 1, 1),
-    lastActive: '2 hours ago',
-  ),
-  _TeamMemberEntry(
-    id: '2',
-    name: 'Mike Chen',
-    role: 'Senior Technician',
-    email: 'mike.c@company.com',
-    phone: '(555) 234-5678',
-    location: 'East Region',
-    status: 'active',
-    tasksCompleted: 38,
-    tasksTotal: 40,
-    performance: 95,
-    joinDate: DateTime(2022, 3, 1),
-    lastActive: '1 hour ago',
-  ),
-  _TeamMemberEntry(
-    id: '3',
-    name: 'Emily Davis',
-    role: 'Field Technician',
-    email: 'emily.d@company.com',
-    phone: '(555) 345-6789',
-    location: 'West Region',
-    status: 'away',
-    tasksCompleted: 28,
-    tasksTotal: 35,
-    performance: 80,
-    joinDate: DateTime(2023, 6, 1),
-    lastActive: '5 hours ago',
-  ),
-  _TeamMemberEntry(
-    id: '4',
-    name: 'Tom Brown',
-    role: 'Junior Technician',
-    email: 'tom.b@company.com',
-    phone: '(555) 456-7890',
-    location: 'South Region',
-    status: 'active',
-    tasksCompleted: 22,
-    tasksTotal: 30,
-    performance: 73,
-    joinDate: DateTime(2023, 9, 1),
-    lastActive: '30 min ago',
-  ),
-  _TeamMemberEntry(
-    id: '5',
-    name: 'Lisa White',
-    role: 'Field Technician',
-    email: 'lisa.w@company.com',
-    phone: '(555) 567-8901',
-    location: 'North Region',
-    status: 'offline',
-    tasksCompleted: 31,
-    tasksTotal: 38,
-    performance: 82,
-    joinDate: DateTime(2023, 2, 1),
-    lastActive: '1 day ago',
-  ),
-];
+Map<String, List<Task>> _groupTasksByAssignee(List<Task> tasks) {
+  final Map<String, List<Task>> grouped = {};
+  for (final task in tasks) {
+    final assigneeId = task.assignedTo;
+    if (assigneeId == null || assigneeId.isEmpty) continue;
+    grouped.putIfAbsent(assigneeId, () => []).add(task);
+  }
+  return grouped;
+}
 
-const List<String> _roleOptions = [
-  'Field Technician',
-  'Senior Technician',
-  'Junior Technician',
-  'Operations Lead',
-];
-
-const List<String> _phoneOptions = [
-  '(555) 123-4567',
-  '(555) 234-5678',
-  '(555) 345-6789',
-  '(555) 456-7890',
-  '(555) 567-8901',
-];
-
-const List<String> _locationOptions = [
-  'North Region',
-  'East Region',
-  'West Region',
-  'South Region',
-];
-
-const List<String> _lastActiveOptions = [
-  '30 min ago',
-  '1 hour ago',
-  '2 hours ago',
-  '5 hours ago',
-  '1 day ago',
-];
-
-_TeamMemberEntry _mapAssignee(TaskAssignee assignee) {
-  final seed = assignee.id.hashCode.abs();
-  final status = _statusOptions[(seed % (_statusOptions.length - 1)) + 1];
-  final tasksTotal = 30 + (seed % 20);
-  final completionRate = 0.6 + ((seed % 35) / 100);
-  final tasksCompleted = (tasksTotal * completionRate).round();
-  final performance = ((tasksCompleted / tasksTotal) * 100).round();
-  final joinDate =
-      DateTime.now().subtract(Duration(days: 30 * ((seed % 24) + 1)));
-  final role = _roleOptions[seed % _roleOptions.length];
+_TeamMemberEntry _mapAssignee(
+  TaskAssignee assignee,
+  List<Task> tasks,
+) {
+  final totalTasks = tasks.length;
+  final completedTasks =
+      tasks.where((t) => t.status == TaskStatus.completed).length;
+  final performance =
+      totalTasks == 0 ? 0 : ((completedTasks / totalTasks) * 100).round();
+  final lastActivity = _latestActivity(tasks) ?? assignee.createdAt;
+  final lastActive = _formatRelative(lastActivity);
   final email = assignee.email ?? _buildEmail(assignee.name);
+  final joinDate = assignee.createdAt ?? DateTime.now();
+
   return _TeamMemberEntry(
     id: assignee.id,
     name: assignee.name,
-    role: role,
+    role: assignee.role?.isNotEmpty == true ? assignee.role! : 'Member',
     email: email,
-    phone: _phoneOptions[seed % _phoneOptions.length],
-    location: _locationOptions[seed % _locationOptions.length],
-    status: status,
-    tasksCompleted: tasksCompleted,
-    tasksTotal: tasksTotal,
+    phone: 'Not provided',
+    location: 'Not set',
+    status: assignee.isActive ? 'active' : 'offline',
+    tasksCompleted: completedTasks,
+    tasksTotal: totalTasks,
     performance: performance,
     joinDate: joinDate,
-    lastActive: _lastActiveOptions[seed % _lastActiveOptions.length],
+    lastActive: lastActive,
   );
 }
 
+DateTime? _latestActivity(List<Task> tasks) {
+  DateTime? latest;
+  for (final task in tasks) {
+    final candidate = task.updatedAt ?? task.completedAt ?? task.createdAt;
+    if (latest == null || candidate.isAfter(latest)) {
+      latest = candidate;
+    }
+  }
+  return latest;
+}
+
+String _formatRelative(DateTime? value) {
+  if (value == null) return 'No activity';
+  final diff = DateTime.now().difference(value);
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
+}
+
 String _buildEmail(String name) {
-  final parts = name.trim().toLowerCase().split(RegExp(r'\\s+'));
+  final parts = name.trim().toLowerCase().split(RegExp(r'\s+'));
   if (parts.isEmpty || parts.first.isEmpty) return 'user@company.com';
   final prefix = parts.take(2).join('.');
   return '$prefix@company.com';
 }
 
 String _initialsFor(String name) {
-  final parts = name.trim().split(RegExp(r'\\s+'));
+  final parts = name.trim().split(RegExp(r'\s+'));
   if (parts.isEmpty) return '';
   if (parts.length == 1) {
     return parts.first.isNotEmpty ? parts.first[0].toUpperCase() : '';

@@ -363,7 +363,6 @@ class _RoleGrid extends StatelessWidget {
                           IconButton(
                             onPressed: () => onReset(role.id),
                             icon: Icon(Icons.refresh, color: colors.muted),
-                            tooltip: 'Reset to default',
                           ),
                         ],
                       ],

@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -122,21 +123,23 @@ class _InspectionEditorPageState extends ConsumerState<InspectionEditorPage> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: () => _pickPhoto(ImageSource.camera),
-                    icon: const Icon(Icons.photo_camera),
-                    label: const Text('Photo'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () => _pickVideo(ImageSource.camera),
-                    icon: const Icon(Icons.videocam),
-                    label: const Text('Video'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _toggleRecording,
-                    icon: Icon(_recording ? Icons.stop : Icons.mic),
-                    label: Text(_recording ? 'Stop audio' : 'Record audio'),
-                  ),
+                  if (!kIsWeb) ...[
+                    OutlinedButton.icon(
+                      onPressed: () => _pickPhoto(ImageSource.camera),
+                      icon: const Icon(Icons.photo_camera),
+                      label: const Text('Photo'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _pickVideo(ImageSource.camera),
+                      icon: const Icon(Icons.videocam),
+                      label: const Text('Video'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _toggleRecording,
+                      icon: Icon(_recording ? Icons.stop : Icons.mic),
+                      label: Text(_recording ? 'Stop audio' : 'Record audio'),
+                    ),
+                  ],
                   OutlinedButton.icon(
                     onPressed: _pickFile,
                     icon: const Icon(Icons.attach_file),

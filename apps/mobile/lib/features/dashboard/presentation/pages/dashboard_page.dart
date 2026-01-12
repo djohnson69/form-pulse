@@ -1022,7 +1022,6 @@ class DashboardHomeView extends ConsumerWidget {
         ),
       ),
       PopupMenuButton<String>(
-        tooltip: 'Account',
         onSelected: (value) async {
           switch (value) {
             case 'preferences':

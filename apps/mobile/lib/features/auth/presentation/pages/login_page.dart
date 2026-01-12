@@ -2,16 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:mobile/core/services/api_service.dart';
-import 'package:mobile/features/dashboard/presentation/pages/role_dashboard_page.dart';
-import 'package:shared/shared.dart';
 import 'package:mobile/core/state/demo_mode_provider.dart';
-import '../widgets/azure_ad_login_button.dart';
-
-const _apiBaseUrl = String.fromEnvironment(
-  'API_BASE_URL',
-  defaultValue: 'http://localhost:8080',
-);
 
 /// Login page for authentication
 class LoginPage extends ConsumerStatefulWidget {
@@ -29,30 +20,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   OAuthProvider? _oauthLoadingProvider;
   bool _obscurePassword = true;
   final _supabase = Supabase.instance.client;
-  final _apiService = ApiService(baseUrl: _apiBaseUrl);
-
-  Future<void> _handleAzureAdLogin(String accessToken) async {
-    try {
-      ref.read(demoModeProvider.notifier).state = false;
-      await _apiService.azureAdLogin(accessToken);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Azure AD login successful!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      // TODO: Navigate or update auth state as needed
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Azure AD login failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
 
   @override
   void dispose() {
@@ -60,6 +27,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     _passwordController.dispose();
     super.dispose();
   }
+
+
 
   Future<void> _handleOAuthLogin(OAuthProvider provider) async {
     ref.read(demoModeProvider.notifier).state = false;
@@ -254,7 +223,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 12),
-                  AzureAdLoginButton(onLogin: _handleAzureAdLogin),
+                  OutlinedButton.icon(
+                    onPressed: _oauthLoadingProvider == null
+                        ? () => _handleOAuthLogin(OAuthProvider.azure)
+                        : null,
+                    icon: _oauthLoadingProvider == OAuthProvider.azure
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.window),
+                    label: const Text('Login with Microsoft'),
+                  ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: _oauthLoadingProvider == null
@@ -282,19 +263,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           )
                         : const Icon(Icons.apple),
                     label: const Text('Login with Apple'),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: () {
-                      ref.read(demoModeProvider.notifier).state = true;
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const RoleDashboardPage(role: UserRole.superAdmin),
-                        ),
-                      );
-                    },
-                    child: const Text('Continue in Demo Mode'),
                   ),
                 ],
               ),

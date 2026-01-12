@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared/shared.dart';
@@ -13,6 +15,8 @@ import '../../../projects/data/projects_provider.dart';
 import '../../data/documents_provider.dart';
 import 'document_detail_page.dart';
 import 'document_editor_page.dart';
+import '../../../dashboard/presentation/pages/photo_annotator_page.dart';
+import '../../../dashboard/presentation/pages/signature_pad_page.dart';
 
 enum _DocumentsViewMode { grid, list }
 
@@ -32,6 +36,7 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
   String _selectedFolder = 'all';
   _DocumentsViewMode _viewMode = _DocumentsViewMode.list;
   RealtimeChannel? _documentsChannel;
+  final ImagePicker _picker = ImagePicker();
   static const _bucketName =
       String.fromEnvironment('SUPABASE_BUCKET', defaultValue: 'formbridge-attachments');
 
@@ -225,19 +230,13 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
           _ToolButton(
             icon: Icons.document_scanner,
             label: 'Scan Document',
-            onPressed: () => _openEditor(context),
+            onPressed: () => _openScanner(context),
           ),
           _ToolButton(
             icon: Icons.edit_outlined,
             label: 'Annotate',
             onPressed: () async {
-              final doc = await _pickDocument(context, docs);
-              if (doc == null || !context.mounted) return;
-              await _openEditor(
-                context,
-                document: doc,
-                mode: DocumentEditorMode.version,
-              );
+              await _openAnnotateDocument(context, docs);
             },
           ),
           _ToolButton(
@@ -246,16 +245,14 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
             onPressed: () async {
               final doc = await _pickDocument(context, docs);
               if (doc == null || !context.mounted) return;
-              await _openDetail(doc);
+              await _openDetail(doc.document);
             },
           ),
           _ToolButton(
             icon: Icons.approval_outlined,
             label: 'Collect Signatures',
             onPressed: () async {
-              final doc = await _pickDocument(context, docs);
-              if (doc == null || !context.mounted) return;
-              await _openDetail(doc, openSignatureOnLoad: true);
+              await _collectSignature(context, docs);
             },
           ),
           _ToolButton(
@@ -452,6 +449,9 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
     BuildContext context, {
     Document? document,
     DocumentEditorMode mode = DocumentEditorMode.create,
+    Uint8List? initialBytes,
+    String? initialFilename,
+    String? initialMimeType,
   }) async {
     final result = await Navigator.of(context).push<Document?>(
       MaterialPageRoute(
@@ -459,6 +459,9 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
           document: document,
           projectId: widget.projectId,
           mode: mode,
+          initialBytes: initialBytes,
+          initialFilename: initialFilename,
+          initialMimeType: initialMimeType,
         ),
       ),
     );
@@ -515,15 +518,136 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
   ) async {
     final doc = await _pickDocument(context, docs);
     if (doc == null || !context.mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _CollaborativeEditorSheet(document: doc),
+    await _openEditor(
+      context,
+      document: doc.document,
+      mode: DocumentEditorMode.edit,
     );
   }
 
-  Future<Document?> _pickDocument(
+  Future<void> _openScanner(BuildContext context) async {
+    try {
+      final capture = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+      );
+      if (capture == null) return;
+      final bytes = await capture.readAsBytes();
+      final filename = capture.name.isNotEmpty
+          ? capture.name
+          : 'scan-${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await _openEditor(
+        context,
+        initialBytes: bytes,
+        initialFilename: filename,
+        initialMimeType: 'image/jpeg',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Scan failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _openAnnotateDocument(
+    BuildContext context,
+    List<_DocumentViewModel> docs,
+  ) async {
+    final doc = await _pickDocument(context, docs);
+    if (doc == null || !context.mounted) return;
+    final bytes = await _downloadDocumentBytes(doc.document);
+    if (bytes == null || !context.mounted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to load document for annotation')),
+        );
+      }
+      return;
+    }
+    final annotated = await Navigator.of(context).push<Uint8List?>(
+      MaterialPageRoute(
+        builder: (_) => PhotoAnnotatorPage(
+          imageBytes: bytes,
+          title: 'Annotate ${doc.title}',
+        ),
+      ),
+    );
+    if (annotated == null || !context.mounted) return;
+    final repo = ref.read(documentsRepositoryProvider);
+    try {
+      final versionLabel =
+          'annotated-${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}';
+      await repo.addVersion(
+        document: doc.document,
+        bytes: annotated,
+        filename: doc.filename,
+        mimeType: doc.mimeType,
+        fileSize: annotated.length,
+        version: versionLabel,
+        title: doc.title,
+        description: doc.description,
+        category: doc.folder,
+        projectId: widget.projectId,
+      );
+      ref.invalidate(documentsProvider(widget.projectId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Annotated version saved')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Annotation save failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _collectSignature(
+    BuildContext context,
+    List<_DocumentViewModel> docs,
+  ) async {
+    final doc = await _pickDocument(context, docs);
+    if (doc == null || !context.mounted) return;
+    final result = await Navigator.of(context).push<SignatureResult?>(
+      MaterialPageRoute(
+        builder: (_) => const SignaturePadPage(title: 'Collect signature'),
+      ),
+    );
+    if (result == null || !context.mounted) return;
+    final repo = ref.read(documentsRepositoryProvider);
+    try {
+      await repo.addSignature(
+        document: doc.document,
+        bytes: result.bytes,
+        signerName: result.name,
+      );
+      ref.invalidate(documentsProvider(widget.projectId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Signature added')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Signature add failed: $e')),
+      );
+    }
+  }
+
+  Future<Uint8List?> _downloadDocumentBytes(Document doc) async {
+    final metadata = doc.metadata ?? const {};
+    final path = metadata['storagePath']?.toString() ??
+        metadata['path']?.toString();
+    final bucket = metadata['bucket']?.toString() ?? _bucketName;
+    if (path == null || path.isEmpty) return null;
+    try {
+      final bytes = await Supabase.instance.client.storage
+          .from(bucket)
+          .download(path);
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<_DocumentViewModel?> _pickDocument(
     BuildContext context,
     List<_DocumentViewModel> docs,
   ) async {
@@ -534,7 +658,7 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
       );
       return null;
     }
-    return showModalBottomSheet<Document>(
+    return showModalBottomSheet<_DocumentViewModel>(
       context: context,
       builder: (context) => _DocumentPickerSheet(
         title: 'Select a document',
@@ -588,7 +712,7 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
     final message = StringBuffer()
       ..writeln(doc.title)
       ..writeln(doc.fileUrl);
-    await SharePlus.instance.share(ShareParams(text: message.toString()));
+    await Share.share(message.toString());
   }
 
   Future<void> _openDocumentUrl(Document doc) async {
@@ -829,6 +953,8 @@ class _DocumentViewModel {
     required this.folder,
     required this.uploadedBy,
     required this.updatedAt,
+    required this.mimeType,
+    required this.description,
     required this.starred,
     required this.views,
     required this.isShared,
@@ -843,6 +969,8 @@ class _DocumentViewModel {
   final String folder;
   final String uploadedBy;
   final DateTime updatedAt;
+  final String mimeType;
+  final String? description;
   final bool starred;
   final int views;
   final bool isShared;
@@ -877,6 +1005,8 @@ class _DocumentViewModel {
       folder: folder,
       uploadedBy: uploadedBy.isNotEmpty ? uploadedBy : 'Team',
       updatedAt: updatedAt,
+      mimeType: doc.mimeType,
+      description: doc.description,
       starred: starred,
       views: viewCount,
       isShared: isShared,
@@ -2811,17 +2941,14 @@ class _DocumentsListTable extends StatelessWidget {
                           child: Row(
                             children: [
                               IconButton(
-                                tooltip: 'Download',
                                 icon: const Icon(Icons.download_outlined),
                                 onPressed: () => onDownload(doc.document),
                               ),
                               IconButton(
-                                tooltip: 'Share',
                                 icon: const Icon(Icons.share_outlined),
                                 onPressed: () => onShare(doc.document),
                               ),
                               IconButton(
-                                tooltip: 'Delete',
                                 icon: const Icon(Icons.delete_outline),
                                 onPressed: () => onDelete(doc.document),
                               ),
@@ -2925,7 +3052,6 @@ class _DocumentGridCard extends StatelessWidget {
                   else
                     const SizedBox(height: 16),
                   PopupMenuButton<_DocumentMenuAction>(
-                    tooltip: 'More',
                     icon: const Icon(Icons.more_vert),
                     onSelected: (value) {
                       switch (value) {
@@ -2994,12 +3120,10 @@ class _DocumentGridCard extends StatelessWidget {
               ),
               const Spacer(),
               IconButton(
-                tooltip: 'Download',
                 icon: const Icon(Icons.download_outlined),
                 onPressed: onDownload,
               ),
               IconButton(
-                tooltip: 'Share',
                 icon: const Icon(Icons.share_outlined),
                 onPressed: onShare,
               ),
@@ -3321,7 +3445,7 @@ class _DocumentPickerSheet extends StatelessWidget {
                     leading: Icon(_iconForType(doc.type)),
                     title: Text(doc.title),
                     subtitle: Text('${doc.folder} • ${doc.sizeLabel}'),
-                    onTap: () => Navigator.pop(context, doc.document),
+                    onTap: () => Navigator.pop(context, doc),
                   );
                 },
               ),

@@ -29,9 +29,7 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
     final paymentsAsync = ref.watch(paymentRequestsProvider);
     final colors = _PaymentColors.fromTheme(Theme.of(context));
     final payments = paymentsAsync.asData?.value ?? const <PaymentRequest>[];
-    final entries = payments.isNotEmpty
-        ? _entriesFromRequests(payments)
-        : _demoPayments;
+    final entries = _entriesFromRequests(payments);
     final totals = _PaymentTotals.fromEntries(entries);
 
     return Scaffold(
@@ -47,6 +45,13 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
             ),
           _Header(muted: colors.muted),
           const SizedBox(height: 16),
+          if (entries.isEmpty && !paymentsAsync.isLoading) ...[
+            _EmptyState(
+              colors: colors,
+              onCreate: () => _openCreate(),
+            ),
+            const SizedBox(height: 16),
+          ],
           LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 900;
@@ -115,6 +120,12 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
         setState(() => _isSubmitting = false);
       }
     }
+  }
+
+  void _openCreate() {
+    setState(() => _paymentMethod = _PaymentMethod.card);
+    _amountController.clear();
+    _descriptionController.clear();
   }
 
   void _showSnackBar(String message) {
@@ -675,6 +686,55 @@ class _StatusStyle {
   final Color foreground;
 }
 
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.colors, required this.onCreate});
+
+  final _PaymentColors colors;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'No payment requests yet',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: colors.title,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Submit a payment request to track approvals and payouts.',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: colors.muted),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: onCreate,
+            icon: const Icon(Icons.add),
+            label: const Text('New payment request'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PaymentColors {
   const _PaymentColors({
     required this.background,
@@ -754,30 +814,3 @@ String _formatCurrency(double amount) {
   final format = NumberFormat.currency(symbol: '\$');
   return format.format(amount);
 }
-
-final _demoPayments = [
-  _PaymentEntry(
-    id: '1',
-    amount: 5250.00,
-    status: _PaymentStatus.paid,
-    date: DateTime(2025, 12, 20),
-    project: 'Building A - Foundation',
-    method: 'ACH',
-  ),
-  _PaymentEntry(
-    id: '2',
-    amount: 3800.00,
-    status: _PaymentStatus.pending,
-    date: DateTime(2025, 12, 22),
-    project: 'Site B - Framing',
-    method: 'Card',
-  ),
-  _PaymentEntry(
-    id: '3',
-    amount: 12000.00,
-    status: _PaymentStatus.approved,
-    date: DateTime(2025, 12, 18),
-    project: 'Equipment Purchase',
-    method: 'Check',
-  ),
-];

@@ -20,8 +20,7 @@ class _SopLibraryPageState extends ConsumerState<SopLibraryPage> {
   Widget build(BuildContext context) {
     final asyncSops = ref.watch(sopDocumentsProvider);
     final sops = asyncSops.asData?.value ?? const <SopDocument>[];
-    final articles =
-        sops.isNotEmpty ? _articlesFromSops(sops) : _demoArticles;
+    final articles = _articlesFromSops(sops);
     final filteredArticles = _filterArticles(articles);
     final categories = _buildCategories(articles);
     final colors = _KnowledgeBaseColors.fromTheme(Theme.of(context));
@@ -58,12 +57,7 @@ class _SopLibraryPageState extends ConsumerState<SopLibraryPage> {
             articles: filteredArticles,
             colors: colors,
             onOpen: (article) {
-              if (article.document == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Demo article')),
-                );
-                return;
-              }
+              if (article.document == null) return;
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => SopDetailPage(document: article.document!),
@@ -100,20 +94,17 @@ class _SopLibraryPageState extends ConsumerState<SopLibraryPage> {
         return bDate.compareTo(aDate);
       });
     return [
-      for (var i = 0; i < sorted.length; i++)
+      for (final sop in sorted)
         _KbArticle(
-          id: sorted[i].id,
-          title: sorted[i].title,
-          excerpt: _excerptFromSop(sorted[i]),
-          category: _categoryForSop(sorted[i]),
-          views: _metaInt(sorted[i].metadata, ['views', 'view_count']) ??
-              (1200 - (i * 110)).clamp(120, 1600).toInt(),
-          likes: _metaInt(sorted[i].metadata, ['likes', 'like_count']) ??
-              (80 - (i * 6)).clamp(12, 100).toInt(),
-          rating: _metaDouble(sorted[i].metadata, ['rating', 'score']) ??
-              (4.7 - (i * 0.1)).clamp(3.8, 4.9),
-          lastUpdated: _relativeTime(sorted[i].updatedAt ?? sorted[i].createdAt),
-          document: sorted[i],
+          id: sop.id,
+          title: sop.title,
+          excerpt: _excerptFromSop(sop),
+          category: _categoryForSop(sop),
+          views: _metaInt(sop.metadata, ['views', 'view_count']) ?? 0,
+          likes: _metaInt(sop.metadata, ['likes', 'like_count']) ?? 0,
+          rating: _metaDouble(sop.metadata, ['rating', 'score']) ?? 0,
+          lastUpdated: _relativeTime(sop.updatedAt ?? sop.createdAt),
+          document: sop,
         ),
     ];
   }
@@ -760,66 +751,3 @@ double? _metaDouble(Map<String, dynamic>? metadata, List<String> keys) {
   }
   return null;
 }
-
-const _demoArticles = [
-  _KbArticle(
-    id: '1',
-    title: 'How to Submit a Form',
-    excerpt: 'Learn the step-by-step process for submitting inspection forms...',
-    category: 'getting-started',
-    views: 1234,
-    likes: 89,
-    rating: 4.5,
-    lastUpdated: '2 days ago',
-  ),
-  _KbArticle(
-    id: '2',
-    title: 'QR Code Scanning Best Practices',
-    excerpt: 'Tips and tricks for efficiently scanning asset QR codes...',
-    category: 'tutorials',
-    views: 892,
-    likes: 67,
-    rating: 4.8,
-    lastUpdated: '1 week ago',
-  ),
-  _KbArticle(
-    id: '3',
-    title: 'Cannot Access Training Module',
-    excerpt: 'Common issues and solutions for training portal access...',
-    category: 'troubleshooting',
-    views: 756,
-    likes: 45,
-    rating: 4.2,
-    lastUpdated: '3 days ago',
-  ),
-  _KbArticle(
-    id: '4',
-    title: 'Managing Your Team',
-    excerpt: 'A complete guide for supervisors on team management...',
-    category: 'tutorials',
-    views: 654,
-    likes: 52,
-    rating: 4.6,
-    lastUpdated: '5 days ago',
-  ),
-  _KbArticle(
-    id: '5',
-    title: 'Form Submission Errors',
-    excerpt: 'Resolving common errors when submitting forms...',
-    category: 'troubleshooting',
-    views: 543,
-    likes: 38,
-    rating: 4.3,
-    lastUpdated: '1 week ago',
-  ),
-  _KbArticle(
-    id: '6',
-    title: 'Setting Up Your Profile',
-    excerpt: 'Complete your profile and customize your dashboard...',
-    category: 'getting-started',
-    views: 432,
-    likes: 29,
-    rating: 4.7,
-    lastUpdated: '2 weeks ago',
-  ),
-];

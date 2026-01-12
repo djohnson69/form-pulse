@@ -22,7 +22,6 @@ class _NotificationRulesPageState extends ConsumerState<NotificationRulesPage> {
         title: const Text('Automation Rules'),
         actions: [
           IconButton(
-            tooltip: 'Run due automations',
             onPressed: _runningSweep ? null : _runAutomationSweep,
             icon: _runningSweep
                 ? const SizedBox(

@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../dashboard/data/active_role_provider.dart';
 
@@ -12,14 +16,45 @@ class WorkOrdersPage extends ConsumerStatefulWidget {
   ConsumerState<WorkOrdersPage> createState() => _WorkOrdersPageState();
 }
 
+enum _WorkOrderViewMode { list, board }
+
 class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
+  _WorkOrderViewMode _viewMode = _WorkOrderViewMode.list;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _statusFilter = 'all';
   String _priorityFilter = 'all';
   String _typeFilter = 'all';
   String? _expandedOrderId;
-  late final List<WorkOrder> _orders = _seedOrders();
+  List<WorkOrder> _orders = const [];
+  bool _loading = true;
+  final _supabase = Supabase.instance.client;
+  String? _orgId;
+  String? _userName;
+  List<String> _teamMembers = const [];
+
+  String _resolveUserName() {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return 'User';
+    final metadata = user.userMetadata ?? const <String, dynamic>{};
+    return metadata['name']?.toString() ??
+        metadata['full_name']?.toString() ??
+        user.email ??
+        'User';
+  }
+
+  void _showSnackBar(BuildContext context, String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
 
   @override
   void dispose() {
@@ -27,11 +62,56 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     super.dispose();
   }
 
+  Future<void> _bootstrap() async {
+    setState(() => _loading = true);
+    try {
+      final role = ref.read(activeRoleProvider);
+      final isGlobal = role == UserRole.techSupport;
+      final orgId = isGlobal ? null : await _resolveOrgId();
+      _orgId = orgId;
+      _userName = _resolveUserName();
+      _teamMembers = await _resolveTeamMembers(orgId);
+      await _loadOrders(role, orgId: orgId, isGlobal: isGlobal);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadOrders(
+    UserRole role, {
+    required String? orgId,
+    required bool isGlobal,
+  }) async {
+    try {
+      dynamic query = _supabase.from('work_orders').select();
+      if (!isGlobal && orgId != null) {
+        query = query.eq('org_id', orgId);
+      }
+      query = query
+          .order('due_date', ascending: true)
+          .order('created_at', ascending: false);
+      final res = await query;
+      final rows = (res as List<dynamic>)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .map(_mapOrder)
+          .toList();
+      setState(() => _orders = rows);
+    } catch (_) {
+      setState(() => _orders = const []);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    final isWide = MediaQuery.sizeOf(context).width >= 768;
     final role = ref.watch(activeRoleProvider);
-    final userName = _demoUserName(role);
-    final teamMembers = _demoTeamMembers(role);
+    final userName = _userName ?? _resolveUserName();
+    final teamMembers = _teamMembers;
     final visibleOrders =
         _applyRoleVisibility(_orders, role, userName, teamMembers);
     final filteredOrders = _applyFilters(visibleOrders);
@@ -40,7 +120,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
 
     return Scaffold(
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(isWide ? 24 : 16),
         children: [
           _buildHeader(
             context,
@@ -78,6 +158,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 720;
+        final showExportLabel = constraints.maxWidth >= 640;
         final titleBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -98,12 +179,12 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
               const SizedBox(height: 10),
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1E3A8A).withOpacity(0.2)
                       : const Color(0xFFDBEAFE),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: isDark
                         ? const Color(0xFF60A5FA).withOpacity(0.3)
@@ -114,7 +195,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.info_outline,
+                      Icons.error_outline,
                       size: 16,
                       color: isDark
                           ? const Color(0xFF93C5FD)
@@ -140,26 +221,38 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
           ],
         );
 
-        final actions = Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.download_outlined),
-              label: const Text('Export'),
+        final exportButton = OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            backgroundColor: isDark ? const Color(0xFF1F2937) : Colors.white,
+            foregroundColor:
+                isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            side: BorderSide(
+              color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
             ),
-            if (canManage)
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF2563EB),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () => _openCreateDialog(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Create Work Order'),
-              ),
-          ],
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          onPressed: _orders.isEmpty ? null : _handleExport,
+          icon: const Icon(Icons.download_outlined, size: 18),
+          label: showExportLabel ? const Text('Export') : const SizedBox.shrink(),
+        );
+
+        final createButton = FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF2563EB),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            elevation: 2,
+            shadowColor: const Color(0xFF2563EB).withValues(alpha: 0.2),
+          ),
+          onPressed: () => _openCreateDialog(context),
+          icon: const Icon(Icons.add, size: 20),
+          label: const Text('Create Work Order'),
         );
 
         if (isWide) {
@@ -169,7 +262,14 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
             children: [
               Expanded(child: titleBlock),
               const SizedBox(width: 16),
-              actions,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  exportButton,
+                  if (canManage) const SizedBox(width: 12),
+                  if (canManage) createButton,
+                ],
+              ),
             ],
           );
         }
@@ -178,7 +278,13 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
           children: [
             titleBlock,
             const SizedBox(height: 16),
-            actions,
+            Row(
+              children: [
+                exportButton,
+                if (canManage) const SizedBox(width: 12),
+                if (canManage) Expanded(child: createButton),
+              ],
+            ),
           ],
         );
       },
@@ -188,7 +294,8 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
   Widget _buildStatsGrid(BuildContext context, _WorkOrderStats stats) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return LayoutBuilder(
       builder: (context, constraints) {
         var columns = 2;
@@ -267,13 +374,44 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
   Widget _buildFilters(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final inputBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(
+        color: isDark ? const Color(0xFF4B5563) : const Color(0xFFD1D5DB),
+      ),
+    );
+    final inputDecoration = InputDecoration(
+      prefixIcon: const Icon(Icons.search, size: 20),
+      hintText: 'Search work orders, assets, locations...',
+      hintStyle: TextStyle(
+        color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+      ),
+      prefixIconColor:
+          isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+      filled: true,
+      fillColor: isDark ? const Color(0xFF374151) : Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      border: inputBorder,
+      enabledBorder: inputBorder,
+      focusedBorder: inputBorder.copyWith(
+        borderSide: const BorderSide(color: Color(0xFF2563EB), width: 2),
+      ),
+    );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -285,10 +423,10 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
                   flex: 2,
                   child: TextField(
                     controller: _searchController,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      hintText: 'Search work orders, assets, locations...',
-                      border: OutlineInputBorder(),
+                    decoration: inputDecoration,
+                    style: TextStyle(
+                      color:
+                          isDark ? Colors.white : const Color(0xFF111827),
                     ),
                     onChanged: (value) {
                       setState(() => _searchQuery = value.trim().toLowerCase());
@@ -296,11 +434,11 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                Expanded(child: _buildStatusFilter()),
+                Expanded(child: _buildStatusFilter(inputDecoration)),
                 const SizedBox(width: 12),
-                Expanded(child: _buildPriorityFilter()),
+                Expanded(child: _buildPriorityFilter(inputDecoration)),
                 const SizedBox(width: 12),
-                Expanded(child: _buildTypeFilter()),
+                Expanded(child: _buildTypeFilter(inputDecoration)),
               ],
             );
           }
@@ -308,21 +446,20 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
             children: [
               TextField(
                 controller: _searchController,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Search work orders, assets, locations...',
-                  border: OutlineInputBorder(),
+                decoration: inputDecoration,
+                style: TextStyle(
+                  color: isDark ? Colors.white : const Color(0xFF111827),
                 ),
                 onChanged: (value) {
                   setState(() => _searchQuery = value.trim().toLowerCase());
                 },
               ),
               const SizedBox(height: 12),
-              _buildStatusFilter(),
+              _buildStatusFilter(inputDecoration),
               const SizedBox(height: 12),
-              _buildPriorityFilter(),
+              _buildPriorityFilter(inputDecoration),
               const SizedBox(height: 12),
-              _buildTypeFilter(),
+              _buildTypeFilter(inputDecoration),
             ],
           );
         },
@@ -330,11 +467,19 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     );
   }
 
-  Widget _buildStatusFilter() {
+  Widget _buildStatusFilter(InputDecoration decoration) {
     return DropdownButtonFormField<String>(
       value: _statusFilter,
       isExpanded: true,
-      decoration: const InputDecoration(border: OutlineInputBorder()),
+      decoration: decoration.copyWith(prefixIcon: null),
+      style: TextStyle(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : const Color(0xFF111827),
+      ),
+      dropdownColor: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF1F2937)
+          : Colors.white,
       items: const [
         DropdownMenuItem(
           value: 'all',
@@ -371,11 +516,19 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     );
   }
 
-  Widget _buildPriorityFilter() {
+  Widget _buildPriorityFilter(InputDecoration decoration) {
     return DropdownButtonFormField<String>(
       value: _priorityFilter,
       isExpanded: true,
-      decoration: const InputDecoration(border: OutlineInputBorder()),
+      decoration: decoration.copyWith(prefixIcon: null),
+      style: TextStyle(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : const Color(0xFF111827),
+      ),
+      dropdownColor: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF1F2937)
+          : Colors.white,
       items: const [
         DropdownMenuItem(
           value: 'all',
@@ -405,11 +558,19 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     );
   }
 
-  Widget _buildTypeFilter() {
+  Widget _buildTypeFilter(InputDecoration decoration) {
     return DropdownButtonFormField<String>(
       value: _typeFilter,
       isExpanded: true,
-      decoration: const InputDecoration(border: OutlineInputBorder()),
+      decoration: decoration.copyWith(prefixIcon: null),
+      style: TextStyle(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : const Color(0xFF111827),
+      ),
+      dropdownColor: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF1F2937)
+          : Colors.white,
       items: const [
         DropdownMenuItem(
           value: 'all',
@@ -450,13 +611,13 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     bool canManage,
   ) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     if (orders.isEmpty) {
-      final isDark = theme.brightness == Brightness.dark;
       return Container(
         padding: const EdgeInsets.all(32),
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
           ),
@@ -491,32 +652,53 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '${orders.length} Work Order${orders.length == 1 ? '' : 's'}',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              '${orders.length} Work Order${orders.length == 1 ? '' : 's'}',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            _WorkOrderViewToggle(
+              viewMode: _viewMode,
+              onChanged: (mode) => setState(() => _viewMode = mode),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
-        ...orders.map(
-          (order) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _WorkOrderCard(
-              order: order,
-              isExpanded: _expandedOrderId == order.id,
-              canManage: canManage,
-              onToggle: () {
-                setState(() {
-                  _expandedOrderId =
-                      _expandedOrderId == order.id ? null : order.id;
-                });
-              },
-              onEdit: () => _openEditDialog(context, order),
-              onViewDetails: () =>
-                  _openDetailsDialog(context, order, canManage),
+        if (_viewMode == _WorkOrderViewMode.list)
+          ...orders.map(
+            (order) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _WorkOrderCard(
+                order: order,
+                isExpanded: _expandedOrderId == order.id,
+                canManage: canManage,
+                onToggle: () {
+                  setState(() {
+                    _expandedOrderId =
+                        _expandedOrderId == order.id ? null : order.id;
+                  });
+                },
+                onEdit: () => _openEditDialog(context, order),
+                onViewDetails: () =>
+                    _openDetailsDialog(context, order, canManage),
+                onDelete: () => _showDeleteConfirmation(order.id),
+              ),
             ),
+          )
+        else
+          _WorkOrderBoard(
+            orders: orders,
+            canManage: canManage,
+            onEdit: (order) => _openEditDialog(context, order),
+            onViewDetails: (order) =>
+                _openDetailsDialog(context, order, canManage),
+            onDelete: (order) => _showDeleteConfirmation(order.id),
+            isDark: isDark,
           ),
-        ),
       ],
     );
   }
@@ -532,11 +714,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
       ),
     );
     if (result == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Work order created: ${result.title}'),
-      ),
-    );
+    await _createWorkOrder(result);
   }
 
   Future<void> _openEditDialog(BuildContext context, WorkOrder order) async {
@@ -550,11 +728,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
       ),
     );
     if (result == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Work order updated: ${result.title}'),
-      ),
-    );
+    await _updateWorkOrder(order.id, result);
   }
 
   Future<void> _openDetailsDialog(
@@ -621,6 +795,408 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
           matchesType;
     }).toList();
   }
+
+  Future<void> _createWorkOrder(WorkOrderFormData data) async {
+    final orgId = _orgId ?? await _resolveOrgId();
+    if (orgId == null) {
+      _showSnackBar(context, 'Organization required to create work orders.');
+      return;
+    }
+    try {
+      final payload = {
+        'org_id': orgId,
+        'title': data.title,
+        'description': data.description,
+        'priority': data.priority.filterValue,
+        'type': data.type.filterValue,
+        'asset_name': data.assetName,
+        'asset_location': data.assetLocation,
+        'assigned_to': data.assignedTo,
+        'due_date': data.dueDate?.toIso8601String(),
+        'estimated_hours': data.estimatedHours,
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      final res = await _supabase
+          .from('work_orders')
+          .insert(payload)
+          .select()
+          .single();
+      final created = _mapOrder(Map<String, dynamic>.from(res as Map));
+      if (!mounted) return;
+      setState(() => _orders = [created, ..._orders]);
+      _showSnackBar(context, 'Work order created: ${data.title}');
+    } catch (_) {
+      _showSnackBar(context, 'Failed to create work order.');
+    }
+  }
+
+  Future<void> _updateWorkOrder(String id, WorkOrderFormData data) async {
+    try {
+      final payload = {
+        'title': data.title,
+        'description': data.description,
+        'priority': data.priority.filterValue,
+        'type': data.type.filterValue,
+        'asset_name': data.assetName,
+        'asset_location': data.assetLocation,
+        'assigned_to': data.assignedTo,
+        'due_date': data.dueDate?.toIso8601String(),
+        'estimated_hours': data.estimatedHours,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      final res = await _supabase
+          .from('work_orders')
+          .update(payload)
+          .eq('id', id)
+          .select()
+          .maybeSingle();
+      final updated = res == null
+          ? null
+          : _mapOrder(Map<String, dynamic>.from(res as Map));
+      if (!mounted) return;
+      setState(() {
+        _orders = _orders
+            .map((o) => o.id == id ? (updated ?? o) : o)
+            .toList();
+      });
+      _showSnackBar(context, 'Work order updated: ${data.title}');
+    } catch (_) {
+      _showSnackBar(context, 'Failed to update work order.');
+    }
+  }
+
+  Future<void> _handleExport() async {
+    if (_orders.isEmpty) {
+      _showSnackBar(context, 'No work orders to export.');
+      return;
+    }
+    final csv = _buildWorkOrdersCsv(_orders);
+    final filename =
+        'work-orders-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv';
+    final file = XFile.fromData(
+      utf8.encode(csv),
+      mimeType: 'text/csv',
+      name: filename,
+    );
+    try {
+      await Share.shareXFiles([file], text: 'Work orders export');
+    } catch (_) {
+      await Share.share(csv);
+    }
+  }
+
+  String _buildWorkOrdersCsv(List<WorkOrder> orders) {
+    const headers = [
+      'Number',
+      'Title',
+      'Status',
+      'Priority',
+      'Type',
+      'Asset',
+      'Location',
+      'Assigned To',
+      'Requester',
+      'Due Date',
+      'Estimated Hours',
+      'Actual Hours',
+    ];
+    final rows = orders.map((order) {
+      return [
+        order.number,
+        order.title,
+        order.status.label,
+        order.priority.label,
+        order.type.label,
+        order.asset.name,
+        order.asset.location,
+        order.assignedTo ?? '-',
+        order.requester,
+        DateFormat('yyyy-MM-dd').format(order.dueDate),
+        order.estimatedHours.toString(),
+        order.actualHours?.toString() ?? '',
+      ];
+    });
+    return ([headers, ...rows])
+        .map((row) => row.map(_csvEscape).join(','))
+        .join('\n');
+  }
+
+  String _csvEscape(String value) {
+    if (value.contains(',') || value.contains('"') || value.contains('\n')) {
+      final escaped = value.replaceAll('"', '""');
+      return '"$escaped"';
+    }
+    return value;
+  }
+
+  Future<void> _deleteWorkOrder(String id) async {
+    try {
+      await _supabase.from('work_orders').delete().eq('id', id);
+      if (!mounted) return;
+      setState(() {
+        _orders = _orders.where((o) => o.id != id).toList();
+      });
+    } catch (_) {
+      _showSnackBar(context, 'Failed to delete work order.');
+    }
+  }
+
+  Future<void> _showDeleteConfirmation(String id) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete work order?'),
+        content: const Text('This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await _deleteWorkOrder(id);
+              if (!mounted) return;
+              Navigator.of(context).pop();
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _resolveOrgId() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return null;
+      final res = await _supabase
+          .from('org_members')
+          .select('org_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return null;
+    try {
+      final res = await _supabase
+          .from('profiles')
+          .select('org_id')
+          .eq('id', userId)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    return null;
+  }
+
+  WorkOrder _mapOrder(Map<String, dynamic> row) {
+    final status = _statusFromString(row['status']?.toString() ?? 'open');
+    final priority =
+        _priorityFromString(row['priority']?.toString() ?? 'medium');
+    final type = _typeFromString(row['type']?.toString() ?? 'repair');
+    final dueDate = row['due_date'] == null
+        ? null
+        : DateTime.tryParse(row['due_date'].toString());
+    final createdDate = row['created_at'] == null
+        ? DateTime.now()
+        : DateTime.tryParse(row['created_at'].toString()) ?? DateTime.now();
+    final safeDueDate = dueDate ?? createdDate.add(const Duration(days: 7));
+    final parts = (row['parts'] as List?)
+            ?.map((e) => WorkOrderPart.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList() ??
+        const [];
+    final notes = (row['notes'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const [];
+    final checklist = (row['checklist'] as List?)
+            ?.map((e) => WorkOrderChecklistItem.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList() ??
+        const [];
+    return WorkOrder(
+      id: row['id']?.toString() ?? '',
+      number: row['number']?.toString() ?? 'WO-${row['id'] ?? ''}',
+      title: row['title']?.toString() ?? 'Untitled',
+      description: row['description']?.toString() ?? '',
+      status: status,
+      priority: priority,
+      type: type,
+      asset: WorkOrderAsset(
+        id: (row['asset_id'] ?? '').toString(),
+        name: row['asset_name']?.toString() ?? 'Unassigned Asset',
+        location: row['asset_location']?.toString() ?? 'Unknown',
+        category: row['asset_category']?.toString() ?? 'Uncategorized',
+      ),
+      assignedTo: row['assigned_to']?.toString(),
+      requester: row['requester']?.toString() ?? 'Requester',
+      createdDate: createdDate,
+      dueDate: safeDueDate,
+      completedDate: row['completed_at'] == null
+          ? null
+          : DateTime.tryParse(row['completed_at'].toString()),
+      estimatedHours:
+          (row['estimated_hours'] as num?)?.toDouble() ?? 0.0,
+      actualHours: (row['actual_hours'] as num?)?.toDouble(),
+      parts: parts,
+      notes: notes,
+      checklist: checklist,
+    );
+  }
+
+  WorkOrderStatus _statusFromString(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'assigned':
+        return WorkOrderStatus.assigned;
+      case 'in-progress':
+      case 'in_progress':
+        return WorkOrderStatus.inProgress;
+      case 'on-hold':
+      case 'on_hold':
+        return WorkOrderStatus.onHold;
+      case 'completed':
+        return WorkOrderStatus.completed;
+      case 'cancelled':
+        return WorkOrderStatus.cancelled;
+      case 'open':
+      default:
+        return WorkOrderStatus.open;
+    }
+  }
+
+  WorkOrderPriority _priorityFromString(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'low':
+        return WorkOrderPriority.low;
+      case 'high':
+        return WorkOrderPriority.high;
+      case 'urgent':
+        return WorkOrderPriority.urgent;
+      case 'medium':
+      default:
+        return WorkOrderPriority.medium;
+    }
+  }
+
+  WorkOrderType _typeFromString(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'repair':
+        return WorkOrderType.repair;
+      case 'preventive':
+        return WorkOrderType.preventive;
+      case 'inspection':
+        return WorkOrderType.inspection;
+      case 'installation':
+        return WorkOrderType.installation;
+      case 'emergency':
+        return WorkOrderType.emergency;
+      default:
+        return WorkOrderType.repair;
+    }
+  }
+}
+
+class _WorkOrderViewToggle extends StatelessWidget {
+  const _WorkOrderViewToggle({
+    required this.viewMode,
+    required this.onChanged,
+  });
+
+  final _WorkOrderViewMode viewMode;
+  final ValueChanged<_WorkOrderViewMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6);
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          _ViewToggleButton(
+            label: 'List',
+            icon: Icons.list,
+            selected: viewMode == _WorkOrderViewMode.list,
+            onTap: () => onChanged(_WorkOrderViewMode.list),
+          ),
+          _ViewToggleButton(
+            label: 'Board',
+            icon: Icons.grid_view,
+            selected: viewMode == _WorkOrderViewMode.board,
+            onTap: () => onChanged(_WorkOrderViewMode.board),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ViewToggleButton extends StatelessWidget {
+  const _ViewToggleButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final selectedBackground = isDark ? const Color(0xFF374151) : Colors.white;
+    final selectedColor = isDark ? Colors.white : Colors.black;
+    final unselectedColor =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? selectedBackground : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: selected ? selectedColor : unselectedColor,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: selected ? selectedColor : unselectedColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _StatCard extends StatelessWidget {
@@ -644,11 +1220,18 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -663,6 +1246,8 @@ class _StatCard extends StatelessWidget {
                     color: theme.brightness == Brightness.dark
                         ? Colors.grey[400]
                         : Colors.grey[600],
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -694,6 +1279,375 @@ class _StatCard extends StatelessWidget {
   }
 }
 
+class _WorkOrderBoard extends StatelessWidget {
+  const _WorkOrderBoard({
+    required this.orders,
+    required this.canManage,
+    required this.onEdit,
+    required this.onViewDetails,
+    required this.onDelete,
+    required this.isDark,
+  });
+
+  final List<WorkOrder> orders;
+  final bool canManage;
+  final ValueChanged<WorkOrder> onEdit;
+  final ValueChanged<WorkOrder> onViewDetails;
+  final ValueChanged<WorkOrder> onDelete;
+  final bool isDark;
+
+  static const _columns = [
+    WorkOrderStatus.open,
+    WorkOrderStatus.assigned,
+    WorkOrderStatus.inProgress,
+    WorkOrderStatus.onHold,
+    WorkOrderStatus.completed,
+    WorkOrderStatus.cancelled,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final content = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < _columns.length; i++) ...[
+              Expanded(
+                child: _WorkOrderBoardColumn(
+                  status: _columns[i],
+                  orders: orders
+                      .where((o) => o.status == _columns[i])
+                      .toList(),
+                  canManage: canManage,
+                  onEdit: onEdit,
+                  onViewDetails: onViewDetails,
+                  onDelete: onDelete,
+                  isDark: isDark,
+                ),
+              ),
+              if (i != _columns.length - 1) const SizedBox(width: 12),
+            ],
+          ],
+        );
+        if (constraints.maxWidth < 1100) {
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: _columns.length * 280,
+              child: content,
+            ),
+          );
+        }
+        return content;
+      },
+    );
+  }
+}
+
+class _WorkOrderBoardColumn extends StatelessWidget {
+  const _WorkOrderBoardColumn({
+    required this.status,
+    required this.orders,
+    required this.canManage,
+    required this.onEdit,
+    required this.onViewDetails,
+    required this.onDelete,
+    required this.isDark,
+  });
+
+  final WorkOrderStatus status;
+  final List<WorkOrder> orders;
+  final bool canManage;
+  final ValueChanged<WorkOrder> onEdit;
+  final ValueChanged<WorkOrder> onViewDetails;
+  final ValueChanged<WorkOrder> onDelete;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final statusColor = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                status.label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${orders.length}',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (orders.isEmpty)
+            Text(
+              'No items',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: isDark ? Colors.grey[500] : Colors.grey[600],
+              ),
+            )
+          else
+            Column(
+              children: orders
+                  .map(
+                    (order) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _WorkOrderBoardCard(
+                        order: order,
+                        canManage: canManage,
+                        onEdit: () => onEdit(order),
+                        onViewDetails: () => onViewDetails(order),
+                        onDelete: () => onDelete(order),
+                        isDark: isDark,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkOrderBoardCard extends StatelessWidget {
+  const _WorkOrderBoardCard({
+    required this.order,
+    required this.canManage,
+    required this.onEdit,
+    required this.onViewDetails,
+    required this.onDelete,
+    required this.isDark,
+  });
+
+  final WorkOrder order;
+  final bool canManage;
+  final VoidCallback onEdit;
+  final VoidCallback onViewDetails;
+  final VoidCallback onDelete;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final priorityColor = _priorityColor(order.priority, isDark);
+    final statusColor = _statusColor(order.status);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            order.number,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            order.title,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _MiniTag(
+                icon: Icons.person_outline,
+                label: order.assignedTo ?? 'Unassigned',
+              ),
+              _MiniTag(
+                icon: Icons.calendar_today_outlined,
+                label: DateFormat('MMM d').format(order.dueDate),
+              ),
+              _MiniTag(
+                icon: Icons.place_outlined,
+                label: order.asset.location,
+              ),
+              _StatusPill(
+                label: order.status.label,
+                color: statusColor,
+              ),
+              _MiniPriority(priorityColor: priorityColor, label: order.priority.label),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              OutlinedButton(
+                onPressed: onViewDetails,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 36),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                child: const Text('View'),
+              ),
+              const SizedBox(width: 8),
+              if (canManage)
+                FilledButton.tonal(
+                  onPressed: onEdit,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                  ),
+                  child: const Text('Edit'),
+                ),
+              if (canManage) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  color: Colors.redAccent,
+                  onPressed: onDelete,
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniTag extends StatelessWidget {
+  const _MiniTag({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: isDark ? Colors.grey[300] : Colors.grey[700]),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: isDark ? Colors.grey[300] : Colors.grey[700],
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniPriority extends StatelessWidget {
+  const _MiniPriority({required this.priorityColor, required this.label});
+
+  final Color priorityColor;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: priorityColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: priorityColor.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.warning_amber, size: 14, color: priorityColor),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: priorityColor,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class _WorkOrderCard extends StatelessWidget {
   const _WorkOrderCard({
     required this.order,
@@ -702,6 +1656,7 @@ class _WorkOrderCard extends StatelessWidget {
     required this.onToggle,
     required this.onEdit,
     required this.onViewDetails,
+    required this.onDelete,
   });
 
   final WorkOrder order;
@@ -710,12 +1665,14 @@ class _WorkOrderCard extends StatelessWidget {
   final VoidCallback onToggle;
   final VoidCallback onEdit;
   final VoidCallback onViewDetails;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final statusColor = _statusColor(order.status);
     final priorityColor = _priorityColor(order.priority, isDark);
     final typeIcon = _typeIcon(order.type);
@@ -723,7 +1680,7 @@ class _WorkOrderCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
       ),
       child: Column(
@@ -851,7 +1808,7 @@ class _WorkOrderCard extends StatelessWidget {
               width: double.infinity,
               decoration: BoxDecoration(
                 color: isDark
-                    ? const Color(0xFF111827)
+                    ? const Color(0xFF1F2937)
                     : const Color(0xFFF9FAFB),
                 border: Border(
                   top: BorderSide(color: borderColor),
@@ -883,25 +1840,51 @@ class _WorkOrderCard extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      if (canManage)
+                  Container(
+                    padding: const EdgeInsets.only(top: 16),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: borderColor)),
+                    ),
+                    child: Row(
+                      children: [
+                        if (canManage)
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF2563EB),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            onPressed: onEdit,
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            label: const Text('Edit'),
+                          ),
+                        if (canManage) const SizedBox(width: 12),
                         FilledButton.icon(
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF2563EB),
-                            foregroundColor: Colors.white,
+                            backgroundColor:
+                                isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
+                            foregroundColor:
+                                isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                           ),
-                          onPressed: onEdit,
-                          icon: const Icon(Icons.edit_outlined),
-                          label: const Text('Edit'),
+                          onPressed: onViewDetails,
+                          icon: const Icon(Icons.visibility_outlined, size: 16),
+                          label: const Text('View Details'),
                         ),
-                      if (canManage) const SizedBox(width: 12),
-                      OutlinedButton.icon(
-                        onPressed: onViewDetails,
-                        icon: const Icon(Icons.visibility_outlined),
-                        label: const Text('View Details'),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -953,8 +1936,8 @@ class _ChecklistAndParts extends StatelessWidget {
                   child: Row(
                     children: [
                       Container(
-                        width: 18,
-                        height: 18,
+                        width: 20,
+                        height: 20,
                         decoration: BoxDecoration(
                           color: item.completed
                               ? const Color(0xFF22C55E)
@@ -974,11 +1957,12 @@ class _ChecklistAndParts extends StatelessWidget {
                                 size: 12, color: Colors.white)
                             : null,
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           item.item,
                           style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 12,
                             color: item.completed
                                 ? (isDark
                                     ? Colors.grey[500]
@@ -1010,7 +1994,7 @@ class _ChecklistAndParts extends StatelessWidget {
                       color: isDark ? Colors.grey[300] : Colors.grey[700]),
                   const SizedBox(width: 8),
                   Text(
-                    'Parts and Materials',
+                    'Parts & Materials',
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -1122,15 +2106,8 @@ class _NotesAndTime extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: isDark
-                          ? const Color(0xFF1F2937)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isDark
-                            ? const Color(0xFF374151)
-                            : const Color(0xFFE5E7EB),
-                      ),
+                      color: isDark ? const Color(0xFF1F2937) : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       '• $note',
@@ -1161,12 +2138,12 @@ class _NotesAndTime extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         _TimeRow(
-          label: 'Estimated Hours',
+          label: 'Estimated Hours:',
           value: '${order.estimatedHours}h',
         ),
         if (order.actualHours != null)
           _TimeRow(
-            label: 'Actual Hours',
+            label: 'Actual Hours:',
             value: '${order.actualHours}h',
           ),
       ],
@@ -1252,7 +2229,7 @@ class _StatusBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withOpacity(isDark ? 0.2 : 0.12),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withOpacity(isDark ? 0.4 : 0.3)),
       ),
       child: Row(
@@ -1265,6 +2242,7 @@ class _StatusBadge extends StatelessWidget {
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w600,
+                  fontSize: 11,
                 ),
           ),
         ],
@@ -2127,6 +3105,22 @@ class WorkOrderPart {
   final String name;
   final int quantity;
   final double cost;
+
+  factory WorkOrderPart.fromJson(Map<String, dynamic> json) {
+    return WorkOrderPart(
+      name: json['name']?.toString() ?? 'Part',
+      quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+      cost: (json['cost'] as num?)?.toDouble() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'quantity': quantity,
+      'cost': cost,
+    };
+  }
 }
 
 class WorkOrderChecklistItem {
@@ -2134,8 +3128,23 @@ class WorkOrderChecklistItem {
 
   final String item;
   final bool completed;
+
+  factory WorkOrderChecklistItem.fromJson(Map<String, dynamic> json) {
+    return WorkOrderChecklistItem(
+      item: json['item']?.toString() ?? 'Item',
+      completed: json['completed'] == true,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'item': item,
+      'completed': completed,
+    };
+  }
 }
 
+// ignore: unused_element
 List<WorkOrder> _seedOrders() {
   return [
     WorkOrder(
@@ -2389,37 +3398,26 @@ bool _canManageOrders(UserRole role) {
       role == UserRole.techSupport;
 }
 
+// ignore: unused_element
 String _demoUserName(UserRole role) {
-  switch (role) {
-    case UserRole.employee:
-    case UserRole.maintenance:
-      return 'Mike Johnson';
-    case UserRole.supervisor:
-      return 'Sarah Chen';
-    case UserRole.manager:
-      return 'Alex Morgan';
-    case UserRole.techSupport:
-      return 'Casey Jordan';
-    case UserRole.admin:
-    case UserRole.superAdmin:
-      return 'Admin User';
-    case UserRole.client:
-    case UserRole.vendor:
-    case UserRole.viewer:
-      return 'Guest User';
-  }
+  final user = Supabase.instance.client.auth.currentUser;
+  return user?.userMetadata?['name']?.toString() ??
+      user?.email ??
+      'User';
 }
 
-List<String> _demoTeamMembers(UserRole role) {
-  switch (role) {
-    case UserRole.supervisor:
-      return const [
-        'Mike Johnson',
-        'Janet Smith',
-        'Sarah Chen',
-        'David Lee',
-      ];
-    default:
-      return const [];
+Future<List<String>> _resolveTeamMembers(String? orgId) async {
+  if (orgId == null) return const [];
+  try {
+    final res = await Supabase.instance.client
+        .from('org_members')
+        .select('user_id')
+        .eq('org_id', orgId);
+    return (res as List<dynamic>)
+        .map((row) => (row as Map)['user_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList();
+  } catch (_) {
+    return const [];
   }
 }

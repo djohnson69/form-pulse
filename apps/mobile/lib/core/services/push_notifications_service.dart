@@ -6,6 +6,9 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../firebase_options.dart';
 
+const String _kWebVapidKey =
+    String.fromEnvironment('FIREBASE_WEB_VAPID_KEY', defaultValue: '');
+
 class PushNotificationsService {
   Future<void> initialize() async {
     try {
@@ -20,7 +23,9 @@ class PushNotificationsService {
     try {
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission();
-      final token = await messaging.getToken();
+      final token = kIsWeb
+          ? await _getWebToken(messaging)
+          : await messaging.getToken();
       if (token != null) {
         await _storeToken(token);
       }
@@ -71,6 +76,14 @@ class PushNotificationsService {
       if (orgId != null) return orgId.toString();
     } catch (_) {}
     return null;
+  }
+
+  Future<String?> _getWebToken(FirebaseMessaging messaging) async {
+    if (_kWebVapidKey.isEmpty) {
+      developer.log('Web push requires FIREBASE_WEB_VAPID_KEY.');
+      return null;
+    }
+    return messaging.getToken(vapidKey: _kWebVapidKey);
   }
 
   String _platformLabel() {

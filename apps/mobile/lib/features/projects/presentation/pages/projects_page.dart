@@ -27,10 +27,12 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     final projectsAsync = ref.watch(projectsProvider);
     final role = ref.watch(activeRoleProvider);
     final canCreate = _canCreateProjects(role);
+    final isWide = MediaQuery.sizeOf(context).width >= 768;
+    final listPadding = EdgeInsets.all(isWide ? 24 : 16);
     return projectsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, st) => ListView(
-        padding: const EdgeInsets.all(16),
+        padding: listPadding,
         children: [
           Card(
             color: Theme.of(context).colorScheme.errorContainer,
@@ -91,7 +93,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             await ref.read(projectsProvider.future);
           },
           child: ListView(
-            padding: const EdgeInsets.all(16),
+            padding: listPadding,
             children: [
               _buildHeader(context, canCreate),
               const SizedBox(height: 16),
@@ -115,25 +117,50 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 720;
         final showProjectLabel = constraints.maxWidth >= 640;
+        final titleStyle = Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: isWide ? 30 : 24,
+            );
+        final subtitleStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: isWide ? 16 : 14,
+            );
+        final newProjectStyle = ButtonStyle(
+          backgroundColor: MaterialStateProperty.resolveWith(
+            (states) => states.contains(MaterialState.hovered) ||
+                    states.contains(MaterialState.pressed)
+                ? const Color(0xFF1D4ED8)
+                : const Color(0xFF2563EB),
+          ),
+          foregroundColor: MaterialStateProperty.all(Colors.white),
+          padding: MaterialStateProperty.all(
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          ),
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          elevation: MaterialStateProperty.all(2),
+          shadowColor: MaterialStateProperty.all(
+            const Color(0xFF2563EB).withValues(alpha: 0.2),
+          ),
+        );
         final titleBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Projects',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: titleStyle,
             ),
             const SizedBox(height: 4),
             Text(
               'Manage all active and completed projects',
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: subtitleStyle,
             ),
           ],
         );
 
         final controls = Wrap(
-          spacing: 8,
+          spacing: 12,
           runSpacing: 8,
           children: [
             _ViewToggle(
@@ -142,6 +169,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             ),
             if (canCreate)
               FilledButton(
+                style: newProjectStyle,
                 onPressed: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
@@ -152,7 +180,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.add),
+                    const Icon(Icons.add, size: 20),
                     if (showProjectLabel) ...[
                       const SizedBox(width: 8),
                       const Text('New Project'),
@@ -191,6 +219,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       case UserRole.manager:
       case UserRole.admin:
       case UserRole.superAdmin:
+      case UserRole.developer:
       case UserRole.maintenance:
         return true;
       case UserRole.employee:
@@ -205,14 +234,52 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   Widget _buildFilters(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB);
+    final inputDecoration = InputDecoration(
+      prefixIcon: const Icon(Icons.search),
+      hintText: 'Search projects...',
+      hintStyle: TextStyle(
+        color: isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+      ),
+      prefixIconColor:
+          isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+      filled: true,
+      fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
+      ),
+    );
+    final outlineButtonStyle = OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      foregroundColor:
+          isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+      side: BorderSide(color: borderColor),
+    );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
-        ),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -221,11 +288,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             Expanded(
               flex: isWide ? 2 : 0,
               child: TextField(
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Search projects...',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: inputDecoration,
                 onChanged: (value) =>
                     setState(() => _searchQuery = value.trim().toLowerCase()),
               ),
@@ -234,9 +297,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             Expanded(
               child: DropdownButtonFormField<String>(
                 value: _filterStatus,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                ),
+                decoration: inputDecoration.copyWith(prefixIcon: null),
                 items: const [
                   DropdownMenuItem(value: 'all', child: Text('All Status')),
                   DropdownMenuItem(value: 'active', child: Text('Active')),
@@ -250,8 +311,9 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             ),
             SizedBox(width: isWide ? 12 : 0, height: isWide ? 0 : 12),
             OutlinedButton.icon(
+              style: outlineButtonStyle,
               onPressed: () {},
-              icon: const Icon(Icons.filter_list),
+              icon: const Icon(Icons.filter_list, size: 20),
               label: const Text('More Filters'),
             ),
           ];
@@ -281,8 +343,8 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             crossAxisCount: crossAxisCount,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 16,
-            crossAxisSpacing: 16,
+            mainAxisSpacing: 24,
+            crossAxisSpacing: 24,
             childAspectRatio: crossAxisCount > 1 ? 0.9 : 0.85,
             children: projects
                 .map((project) => _ProjectGridCard(project: project))
@@ -314,6 +376,14 @@ class _ProjectStatsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final neutralNote =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    final activeNote =
+        isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
+    final progressNote =
+        isDark ? const Color(0xFFFB923C) : const Color(0xFFEA580C);
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = constraints.maxWidth >= 900 ? 4 : 2;
@@ -329,6 +399,7 @@ class _ProjectStatsGrid extends StatelessWidget {
               label: 'Total Projects',
               value: stats.totalProjects.toString(),
               note: 'Across all locations',
+              noteColor: neutralNote,
               icon: Icons.work_outline,
               color: const Color(0xFF3B82F6),
             ),
@@ -336,6 +407,7 @@ class _ProjectStatsGrid extends StatelessWidget {
               label: 'Active Projects',
               value: stats.activeProjects.toString(),
               note: 'In progress',
+              noteColor: activeNote,
               icon: Icons.track_changes,
               color: const Color(0xFF22C55E),
             ),
@@ -343,6 +415,7 @@ class _ProjectStatsGrid extends StatelessWidget {
               label: 'Team Members',
               value: stats.teamMembers.toString(),
               note: 'Across all teams',
+              noteColor: neutralNote,
               icon: Icons.people_outline,
               color: const Color(0xFF8B5CF6),
             ),
@@ -350,6 +423,7 @@ class _ProjectStatsGrid extends StatelessWidget {
               label: 'Avg Progress',
               value: '${stats.avgProgress}%',
               note: 'Overall completion',
+              noteColor: progressNote,
               icon: Icons.trending_up,
               color: const Color(0xFFF97316),
             ),
@@ -365,6 +439,7 @@ class _ProjectStatCard extends StatelessWidget {
     required this.label,
     required this.value,
     required this.note,
+    required this.noteColor,
     required this.icon,
     required this.color,
   });
@@ -372,6 +447,7 @@ class _ProjectStatCard extends StatelessWidget {
   final String label;
   final String value;
   final String note;
+  final Color noteColor;
   final IconData icon;
   final Color color;
 
@@ -381,16 +457,16 @@ class _ProjectStatCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -404,9 +480,11 @@ class _ProjectStatCard extends StatelessWidget {
                 label,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              Icon(icon, color: color),
+              Icon(icon, color: color, size: 20),
             ],
           ),
           const SizedBox(height: 8),
@@ -414,14 +492,16 @@ class _ProjectStatCard extends StatelessWidget {
             value,
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w700,
+              fontSize: 24,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             note,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
+              color: noteColor,
               fontWeight: FontWeight.w600,
+              fontSize: 11,
             ),
           ),
         ],
@@ -440,12 +520,13 @@ class _ViewToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    final background =
+        isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6);
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -483,20 +564,20 @@ class _ToggleButton extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected
               ? (isDark ? const Color(0xFF374151) : Colors.white)
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           boxShadow: isSelected
               ? [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 6,
-                    offset: const Offset(0, 3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
                   ),
                 ]
               : null,
@@ -523,7 +604,7 @@ class _ProjectGridCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    final background = theme.colorScheme.surface;
+    final background = isDark ? const Color(0xFF1F2937) : Colors.white;
     return InkWell(
       onTap: () {
         Navigator.of(context).push(
@@ -532,18 +613,22 @@ class _ProjectGridCard extends StatelessWidget {
           ),
         );
       },
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12),
+      hoverColor:
+          isDark ? const Color(0xFF374151).withValues(alpha: 0.4) : const Color(0xFFF9FAFB),
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: background,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: border),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 16,
-              offset: const Offset(0, 8),
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -559,19 +644,28 @@ class _ProjectGridCard extends StatelessWidget {
                     children: [
                       Text(
                         project.name,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                          color: theme.colorScheme.onSurface,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.place_outlined, size: 16),
+                          Icon(
+                            Icons.place_outlined,
+                            size: 16,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               project.location,
-                              style: theme.textTheme.bodySmall,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontSize: 13,
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -582,10 +676,16 @@ class _ProjectGridCard extends StatelessWidget {
                 ),
                 IconButton(
                   onPressed: () {},
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(width: 32, height: 32),
                   icon: Icon(
                     Icons.more_horiz,
+                    size: 20,
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
+                  hoverColor: isDark
+                      ? const Color(0xFF374151)
+                      : const Color(0xFFF3F4F6),
                 ),
               ],
             ),
@@ -595,11 +695,19 @@ class _ProjectGridCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Progress', style: theme.textTheme.bodySmall),
+                Text(
+                  'Progress',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
+                ),
                 Text(
                   '${project.progress}%',
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -679,12 +787,16 @@ class _ProjectGridCard extends StatelessWidget {
                           children: [
                             Text(
                               'Manager',
-                              style: theme.textTheme.labelSmall,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontSize: 11,
+                              ),
                             ),
                             Text(
                               project.manager,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w600,
+                                fontSize: 12,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -701,12 +813,16 @@ class _ProjectGridCard extends StatelessWidget {
                   children: [
                     Text(
                       'Due Date',
-                      style: theme.textTheme.labelSmall,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
                     ),
                     Text(
                       project.dueDateLabel,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w600,
+                        fontSize: 12,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -734,9 +850,16 @@ class _ProjectListTable extends StatelessWidget {
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -745,13 +868,13 @@ class _ProjectListTable extends StatelessWidget {
           child: Column(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? const Color(0xFF111827)
+                      ? const Color(0xFF111827).withValues(alpha: 0.5)
                       : const Color(0xFFF9FAFB),
                   borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(16)),
+                      const BorderRadius.vertical(top: Radius.circular(12)),
                   border: Border(bottom: BorderSide(color: border)),
                 ),
                 child: Row(
@@ -778,9 +901,12 @@ class _ProjectListTable extends StatelessWidget {
                       ),
                     );
                   },
+                  hoverColor: isDark
+                      ? const Color(0xFF374151).withValues(alpha: 0.5)
+                      : const Color(0xFFF9FAFB),
                   child: Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                     decoration: BoxDecoration(
                       border: Border(bottom: BorderSide(color: border)),
                     ),
@@ -792,21 +918,41 @@ class _ProjectListTable extends StatelessWidget {
                             project.name,
                             style: theme.textTheme.bodyMedium?.copyWith(
                               fontWeight: FontWeight.w600,
+                              color: theme.colorScheme.onSurface,
                             ),
                           ),
                         ),
-                        _TableCell(flex: 2, child: Text(project.location)),
-                        _TableCell(flex: 2, child: Text(project.manager)),
+                        _TableCell(
+                          flex: 2,
+                          child: Text(
+                            project.location,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        _TableCell(
+                          flex: 2,
+                          child: Text(
+                            project.manager,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
                         _TableCell(
                           flex: 2,
                           child: Row(
                             children: [
-                              Expanded(
+                              SizedBox(
+                                width: 96,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(999),
                                   child: LinearProgressIndicator(
                                     value: project.progress / 100,
-                                    minHeight: 6,
+                                    minHeight: 8,
                                     backgroundColor: isDark
                                         ? const Color(0xFF374151)
                                         : const Color(0xFFE5E7EB),
@@ -817,7 +963,13 @@ class _ProjectListTable extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              Text('${project.progress}%'),
+                              Text(
+                                '${project.progress}%',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: 13,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -826,21 +978,46 @@ class _ProjectListTable extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(project.budgetLabel),
+                              Text(
+                                project.budgetLabel,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: 13,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
                               Text(
                                 '${project.spentLabel} spent',
                                 style: theme.textTheme.labelSmall?.copyWith(
                                   color: theme.colorScheme.onSurfaceVariant,
+                                  fontSize: 11,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        _TableCell(flex: 1, child: Text('${project.team}')),
-                        _TableCell(flex: 2, child: Text(project.dueDateLabel)),
                         _TableCell(
                           flex: 1,
-                          child: _StatusPill(status: project.status),
+                          child: Text(
+                            '${project.team}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        _TableCell(
+                          flex: 2,
+                          child: Text(
+                            project.dueDateLabel,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        _TableCell(
+                          flex: 1,
+                          child: _ListStatusPill(status: project.status),
                         ),
                       ],
                     ),
@@ -870,6 +1047,8 @@ class _TableHeader extends StatelessWidget {
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
               fontWeight: FontWeight.w700,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 11,
+              letterSpacing: 0.8,
             ),
       ),
     );
@@ -904,6 +1083,7 @@ class _MetricTile extends StatelessWidget {
           label,
           style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
+            fontSize: 11,
           ),
         ),
         const SizedBox(height: 4),
@@ -911,6 +1091,8 @@ class _MetricTile extends StatelessWidget {
           value,
           style: theme.textTheme.bodySmall?.copyWith(
             fontWeight: FontWeight.w600,
+            fontSize: 13,
+            color: theme.colorScheme.onSurface,
           ),
         ),
       ],
@@ -927,7 +1109,7 @@ class _StatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _statusColor(status);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(999),
@@ -937,7 +1119,42 @@ class _StatusPill extends StatelessWidget {
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: color,
               fontWeight: FontWeight.w600,
+              fontSize: 13,
             ),
+      ),
+    );
+  }
+}
+
+class _ListStatusPill extends StatelessWidget {
+  const _ListStatusPill({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final isActive = status == 'active';
+    final background = isActive
+        ? const Color(0xFF22C55E).withValues(alpha: 0.2)
+        : (isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6));
+    final textColor = isActive
+        ? const Color(0xFF4ADE80)
+        : (isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151));
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        status,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: textColor,
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+        ),
       ),
     );
   }
@@ -971,6 +1188,7 @@ class _ManagerAvatar extends StatelessWidget {
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
+                fontSize: 11,
               ),
         ),
       ),
@@ -1039,7 +1257,7 @@ class _ProjectViewModel {
 
   String get dueDateLabel {
     if (dueDate == null) return 'TBD';
-    return DateFormat.yMMMd().format(dueDate!);
+    return DateFormat.yMd().format(dueDate!);
   }
 
   factory _ProjectViewModel.fromProject(Project project) {

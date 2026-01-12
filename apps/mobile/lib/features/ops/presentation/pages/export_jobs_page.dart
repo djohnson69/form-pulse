@@ -51,7 +51,6 @@ class _ExportJobsPageState extends ConsumerState<ExportJobsPage> {
                   trailing: job.fileUrl == null
                       ? null
                       : IconButton(
-                          tooltip: 'Download',
                           icon: const Icon(Icons.open_in_new),
                           onPressed: () => _openFile(job.fileUrl!),
                         ),

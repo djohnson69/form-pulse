@@ -40,7 +40,7 @@ class _TasksPageState extends ConsumerState<TasksPage> {
   _TaskViewMode _viewMode = _TaskViewMode.list;
   DateTime _calendarDate = DateTime.now();
   DateTime? _selectedDate;
-  List<_TaskNotification> _notifications = List.from(_demoNotifications);
+  List<_TaskNotification> _notifications = const [];
   RealtimeChannel? _tasksChannel;
 
   @override
@@ -81,6 +81,7 @@ class _TasksPageState extends ConsumerState<TasksPage> {
     final canManageTasks = role == UserRole.maintenance ||
         role == UserRole.supervisor ||
         role.canManage;
+    
     final isSupervisorOrHigher =
         role == UserRole.supervisor || role.canManage;
 
@@ -91,11 +92,10 @@ class _TasksPageState extends ConsumerState<TasksPage> {
         error: (e, _) => _TasksErrorView(error: e.toString()),
         data: (tasks) {
           final mappedTasks = tasks.map(_mapTask).toList();
-          final allTasks = mappedTasks.isEmpty
-              ? List<_TaskView>.from(_demoTasks)
-              : mappedTasks;
+          final allTasks = mappedTasks;
           final roleTasks = _applyRoleFilter(allTasks, role);
           final filteredTasks = _applyFilters(roleTasks);
+          _syncNotifications(roleTasks);
           final userId = Supabase.instance.client.auth.currentUser?.id;
           final isLimitedView = role == UserRole.employee ||
               role == UserRole.maintenance ||
@@ -167,7 +167,7 @@ class _TasksPageState extends ConsumerState<TasksPage> {
                 teams: _teams(roleTasks),
                 showMoreFilters: _showMoreFilters,
                 onSearchChanged: (value) =>
-                    setState(() => _searchQuery = value),
+                    setState(() => _searchQuery = value.toLowerCase()),
                 onStatusChanged: (value) =>
                     setState(() => _filterStatus = value),
                 onPriorityChanged: (value) =>
@@ -210,8 +210,12 @@ class _TasksPageState extends ConsumerState<TasksPage> {
       return filtered.isEmpty ? tasks : filtered;
     }
     if (role == UserRole.supervisor) {
-      final filtered =
-          tasks.where((task) => task.assignedTeam != null).toList();
+      final filtered = tasks.where((task) {
+        final hasTeamAssignment = task.assignedTeam != null;
+        final isDirectAssignee =
+            userId != null && task.assigneeId == userId;
+        return hasTeamAssignment || isDirectAssignee;
+      }).toList();
       return filtered.isEmpty ? tasks : filtered;
     }
     return tasks;
@@ -738,6 +742,111 @@ class _TasksPageState extends ConsumerState<TasksPage> {
     });
   }
 
+  void _syncNotifications(List<_TaskView> tasks) {
+    final next = _buildNotifications(tasks);
+    if (_notificationsEqual(next, _notifications)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_notificationsEqual(next, _notifications)) return;
+      setState(() => _notifications = next);
+    });
+  }
+
+  bool _notificationsEqual(
+    List<_TaskNotification> a,
+    List<_TaskNotification> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id || a[i].read != b[i].read) return false;
+    }
+    return true;
+  }
+
+  List<_TaskNotification> _buildNotifications(List<_TaskView> tasks) {
+    final now = DateTime.now();
+    final List<_TaskNotification> items = [];
+
+    for (final task in tasks) {
+      if (task.completedAt != null) {
+        items.add(
+          _TaskNotification(
+            id: 'completion-${task.id}'.hashCode,
+            type: 'completion',
+            taskTitle: task.title,
+            message:
+                'Task completed by ${task.assignee}${task.assignedTeam != null ? " (${task.assignedTeam})" : ""}',
+            timestamp: task.completedAt!,
+            icon: Icons.check_circle,
+            assignee: task.assignee,
+            team: task.assignedTeam,
+            read: false,
+          ),
+        );
+      }
+
+      for (final milestone in task.milestones) {
+        if (milestone.completed) continue;
+        final daysUntil =
+            milestone.dueDate.difference(now).inDays;
+        if (daysUntil < 0) {
+          items.add(
+            _TaskNotification(
+              id: 'overdue-${task.id}-${milestone.title}'.hashCode,
+              type: 'overdue',
+              taskTitle: task.title,
+              message:
+                  'Milestone "${milestone.title}" is ${daysUntil.abs()} day${daysUntil.abs() == 1 ? "" : "s"} overdue',
+              timestamp: now,
+              icon: Icons.warning_amber_outlined,
+              assignee: task.assignee,
+              team: task.assignedTeam,
+              read: false,
+            ),
+          );
+        } else if (daysUntil <= milestone.reminderDays) {
+          items.add(
+            _TaskNotification(
+              id: 'milestone-${task.id}-${milestone.title}'.hashCode,
+              type: 'milestone',
+              taskTitle: task.title,
+              message:
+                  'Milestone "${milestone.title}" due in $daysUntil day${daysUntil == 1 ? "" : "s"}',
+              timestamp: now,
+              icon: Icons.flag_outlined,
+              assignee: task.assignee,
+              team: task.assignedTeam,
+              read: false,
+            ),
+          );
+        }
+      }
+
+      if (task.status == 'overdue' && task.dueDate != null) {
+        final daysOver = now.difference(task.dueDate!).inDays;
+        items.add(
+          _TaskNotification(
+            id: 'task-overdue-${task.id}'.hashCode,
+            type: 'overdue',
+            taskTitle: task.title,
+            message: daysOver == 0
+                ? 'Task is overdue today'
+                : 'Task is $daysOver day${daysOver == 1 ? "" : "s"} overdue',
+            timestamp: now,
+            icon: Icons.warning_amber_outlined,
+            assignee: task.assignee,
+            team: task.assignedTeam,
+            read: false,
+          ),
+        );
+      }
+    }
+
+    items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return items;
+  }
+
   void _openTaskDetail(_TaskView task, String? userId) {
     if (task.sourceTask != null) {
       Navigator.of(context).push(
@@ -794,39 +903,38 @@ class _TasksHeader extends StatelessWidget {
       _ => 'Manage tasks, track milestones, and collaborate with teams',
     };
 
-    final actionButtons = Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        TextButton.icon(
-          onPressed: onExport,
-          icon: const Icon(Icons.download_outlined),
-          label: const Text('Export'),
-          style: TextButton.styleFrom(
-            foregroundColor: isDark ? Colors.grey[400] : Colors.grey[700],
-          ),
+    final exportButton = TextButton.icon(
+      onPressed: onExport,
+      icon: const Icon(Icons.download_outlined, size: 16),
+      label: const Text('Export'),
+      style: TextButton.styleFrom(
+        foregroundColor: isDark ? Colors.grey[400] : Colors.grey[600],
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
         ),
-        if (canManageTasks)
-          FilledButton.icon(
-            onPressed: onCreate,
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2563EB),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            icon: const Icon(Icons.add),
-            label: const Text('Create Task'),
-          ),
-      ],
+      ),
     );
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 820;
+        final createLabel = isWide ? 'Create Task' : 'New Task';
+        final createButton = FilledButton.icon(
+          onPressed: onCreate,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF2563EB),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            elevation: 2,
+            shadowColor: const Color(0x332563EB),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          icon: const Icon(Icons.add, size: 20),
+          label: Text(createLabel),
+        );
         final headerText = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -846,13 +954,15 @@ class _TasksHeader extends StatelessWidget {
             if (accessLabel != null) ...[
               const SizedBox(height: 10),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1E3A8A).withOpacity(0.3)
                       : const Color(0xFFDBEAFE),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: isDark
                         ? const Color(0xFF3B82F6).withOpacity(0.3)
@@ -863,10 +973,10 @@ class _TasksHeader extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.info_outline,
+                      Icons.error_outline,
                       size: 16,
                       color: isDark
-                          ? const Color(0xFF93C5FD)
+                          ? const Color(0xFF60A5FA)
                           : const Color(0xFF2563EB),
                     ),
                     const SizedBox(width: 8),
@@ -874,9 +984,10 @@ class _TasksHeader extends StatelessWidget {
                       accessLabel!,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: isDark
-                            ? const Color(0xFFBFDBFE)
+                            ? const Color(0xFF93C5FD)
                             : const Color(0xFF1D4ED8),
                         fontWeight: FontWeight.w600,
+                        fontSize: 12,
                       ),
                     ),
                   ],
@@ -893,7 +1004,14 @@ class _TasksHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(child: headerText),
-                actionButtons,
+                Wrap(
+                  spacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    exportButton,
+                    if (canManageTasks) createButton,
+                  ],
+                ),
               ],
             ),
           );
@@ -906,7 +1024,11 @@ class _TasksHeader extends StatelessWidget {
             children: [
               headerText,
               const SizedBox(height: 12),
-              actionButtons,
+              exportButton,
+              if (canManageTasks) ...[
+                const SizedBox(height: 12),
+                SizedBox(width: double.infinity, child: createButton),
+              ],
             ],
           ),
         );
@@ -935,7 +1057,7 @@ class _NotificationsCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
         ),
@@ -982,21 +1104,30 @@ class _NotificationsCard extends StatelessWidget {
               if (unreadCount > 0)
                 TextButton(
                   onPressed: onMarkAllRead,
+                  style: TextButton.styleFrom(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    foregroundColor:
+                        isDark ? Colors.grey[400] : Colors.grey[600],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                   child: const Text('Mark all read'),
                 ),
             ],
           ),
           const SizedBox(height: 12),
           Column(
-            children: notifications
-                .take(5)
-                .map(
-                  (notification) => _NotificationRow(
-                    notification: notification,
-                    onMarkRead: onMarkRead,
-                  ),
-                )
-                .toList(),
+            children: [
+              for (var i = 0; i < (notifications.length > 5 ? 5 : notifications.length); i++)
+                _NotificationRow(
+                  notification: notifications[i],
+                  onMarkRead: onMarkRead,
+                  showDivider:
+                      i != (notifications.length > 5 ? 4 : notifications.length - 1),
+                ),
+            ],
           ),
           if (notifications.length > 5) ...[
             const SizedBox(height: 12),
@@ -1018,89 +1149,101 @@ class _NotificationRow extends StatelessWidget {
   const _NotificationRow({
     required this.notification,
     required this.onMarkRead,
+    required this.showDivider,
   });
 
   final _TaskNotification notification;
   final ValueChanged<int> onMarkRead;
+  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final accent = _notificationAccent(notification.type);
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+    final rowContent = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: accent.background,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(notification.icon, color: accent.icon, size: 16),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                notification.taskTitle,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                notification.message,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (notification.assignee != null)
+                    _MetaTag(
+                      icon: Icons.person_outline,
+                      label: notification.assignee!,
+                    ),
+                  if (notification.team != null)
+                    _MetaTag(
+                      icon: Icons.groups_outlined,
+                      label: notification.team!,
+                      highlighted: true,
+                    ),
+                  Text(
+                    _formatDateTime(notification.timestamp),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: isDark ? Colors.grey[500] : Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: accent.background,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(notification.icon, color: accent.icon, size: 16),
+        if (!notification.read)
+          IconButton(
+            onPressed: () => onMarkRead(notification.id),
+            icon: const Icon(Icons.check, size: 16),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            color: isDark ? Colors.grey[400] : Colors.grey[500],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  notification.taskTitle,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+      ],
+    );
+
+    return Opacity(
+      opacity: notification.read ? 0.6 : 1,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          border: showDivider
+              ? Border(
+                  bottom: BorderSide(
+                    color:
+                        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  notification.message,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (notification.assignee != null)
-                      _MetaTag(
-                        icon: Icons.person_outline,
-                        label: notification.assignee!,
-                      ),
-                    if (notification.team != null)
-                      _MetaTag(
-                        icon: Icons.groups_outlined,
-                        label: notification.team!,
-                        highlighted: true,
-                      ),
-                    Text(
-                      _formatDateTime(notification.timestamp),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: isDark ? Colors.grey[500] : Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (!notification.read)
-            IconButton(
-              onPressed: () => onMarkRead(notification.id),
-              icon: const Icon(Icons.check),
-              tooltip: 'Mark as read',
-            ),
-        ],
+                )
+              : null,
+        ),
+        child: rowContent,
       ),
     );
   }
@@ -1115,15 +1258,21 @@ class _MilestoneBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final accent = const Color(0xFFF59E0B);
+    final background =
+        isDark ? accent.withValues(alpha: 0.1) : const Color(0xFFFFFBEB);
+    final border =
+        isDark ? accent.withValues(alpha: 0.5) : const Color(0xFFFCD34D);
+    final titleColor =
+        isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
+    final bodyColor =
+        isDark ? const Color(0xFFFCD34D) : const Color(0xFFB45309);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? const Color(0xFF92400E) : const Color(0xFFFCD34D),
-          width: 2,
-        ),
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border, width: 2),
       ),
       child: Row(
         children: [
@@ -1137,16 +1286,14 @@ class _MilestoneBanner extends StatelessWidget {
                   'Upcoming Milestones Reminder',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color:
-                        isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309),
+                    color: titleColor,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '$count milestone${count == 1 ? '' : 's'} due soon - review and prioritize to stay on track',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color:
-                        isDark ? const Color(0xFFFCD34D) : const Color(0xFFB45309),
+                    color: bodyColor,
                   ),
                 ),
               ],
@@ -1275,10 +1422,10 @@ class _TaskStatCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final iconTint = iconColor ?? (isDark ? Colors.grey[400]! : Colors.grey[600]!);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
         ),
@@ -1362,11 +1509,44 @@ class _TaskFilters extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final inputFill = isDark ? const Color(0xFF111827) : Colors.white;
+    final inputBorder = isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB);
+    InputDecoration inputDecoration({
+      String? hintText,
+      IconData? prefixIcon,
+    }) {
+      return InputDecoration(
+        hintText: hintText,
+        prefixIcon: prefixIcon == null
+            ? null
+            : Icon(
+                prefixIcon,
+                size: 20,
+                color: isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+              ),
+        filled: true,
+        fillColor: inputFill,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: inputBorder),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: inputBorder),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 1.5),
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
       ),
       child: Column(
@@ -1377,10 +1557,12 @@ class _TaskFilters extends StatelessWidget {
               final searchField = Expanded(
                 flex: isWide ? 2 : 0,
                 child: TextField(
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
+                  decoration: inputDecoration(
                     hintText: 'Search tasks...',
-                    border: OutlineInputBorder(),
+                    prefixIcon: Icons.search,
+                  ),
+                  style: TextStyle(
+                    color: isDark ? Colors.white : const Color(0xFF111827),
                   ),
                   onChanged: onSearchChanged,
                 ),
@@ -1389,9 +1571,10 @@ class _TaskFilters extends StatelessWidget {
                 child: DropdownButtonFormField<String>(
                   value: status,
                   isExpanded: true,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: inputDecoration(),
+                  dropdownColor: inputFill,
+                  iconEnabledColor:
+                      isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
                   items: const [
                     DropdownMenuItem(
                       value: 'all',
@@ -1441,9 +1624,10 @@ class _TaskFilters extends StatelessWidget {
                 child: DropdownButtonFormField<String>(
                   value: priority,
                   isExpanded: true,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: inputDecoration(),
+                  dropdownColor: inputFill,
+                  iconEnabledColor:
+                      isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
                   items: const [
                     DropdownMenuItem(
                       value: 'all',
@@ -1483,8 +1667,18 @@ class _TaskFilters extends StatelessWidget {
               );
               final filterButton = OutlinedButton.icon(
                 onPressed: onToggleMore,
-                icon: const Icon(Icons.filter_list),
+                icon: const Icon(Icons.filter_list, size: 20),
                 label: Text(showMoreFilters ? 'Hide Filters' : 'More Filters'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor:
+                      isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+                  side: BorderSide(color: inputBorder),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               );
 
               if (isWide) {
@@ -1527,10 +1721,11 @@ class _TaskFilters extends StatelessWidget {
                     child: DropdownButtonFormField<String>(
                       value: category,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Category',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: inputDecoration(hintText: 'All Categories'),
+                      dropdownColor: inputFill,
+                      iconEnabledColor: isDark
+                          ? const Color(0xFF9CA3AF)
+                          : const Color(0xFF6B7280),
                       items: categories
                           .map(
                             (item) => DropdownMenuItem(
@@ -1551,10 +1746,11 @@ class _TaskFilters extends StatelessWidget {
                     child: DropdownButtonFormField<String>(
                       value: team,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Team',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: inputDecoration(hintText: 'All Teams'),
+                      dropdownColor: inputFill,
+                      iconEnabledColor: isDark
+                          ? const Color(0xFF9CA3AF)
+                          : const Color(0xFF6B7280),
                       items: teams
                           .map(
                             (item) => DropdownMenuItem(
@@ -1674,6 +1870,13 @@ class _TaskListView extends StatelessWidget {
   }
 }
 
+class _BoardStatus {
+  const _BoardStatus(this.status, this.label);
+
+  final String status;
+  final String label;
+}
+
 class _TaskBoardView extends StatelessWidget {
   const _TaskBoardView({
     required this.tasks,
@@ -1687,32 +1890,58 @@ class _TaskBoardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final columns = <String, List<_TaskView>>{
-      'Pending': tasks.where((task) => task.status == 'pending').toList(),
-      'In Progress': tasks
-          .where((task) => task.status == 'in-progress')
-          .toList(),
-      'Completed': tasks.where((task) => task.status == 'completed').toList(),
-      'Overdue': tasks.where((task) => task.status == 'overdue').toList(),
-    };
+    final columns = [
+      _BoardStatus('pending', 'Pending'),
+      _BoardStatus('in-progress', 'In Progress'),
+      _BoardStatus('completed', 'Completed'),
+      _BoardStatus('overdue', 'Overdue'),
+    ];
 
     return _ViewCard(
       title: 'Task Board',
       viewMode: viewMode,
       onViewModeChanged: onViewModeChanged,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: columns.entries.map((entry) {
-            return Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: _BoardColumn(
-                title: entry.key,
-                tasks: entry.value,
-              ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 1024;
+          if (isWide) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < columns.length; i++) ...[
+                  Expanded(
+                    child: _BoardColumn(
+                      title: columns[i].label,
+                      status: columns[i].status,
+                      tasks: tasks
+                          .where((task) => task.status == columns[i].status)
+                          .toList(),
+                    ),
+                  ),
+                  if (i != columns.length - 1) const SizedBox(width: 16),
+                ],
+              ],
             );
-          }).toList(),
-        ),
+          }
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (var i = 0; i < columns.length; i++) ...[
+                  _BoardColumn(
+                    title: columns[i].label,
+                    status: columns[i].status,
+                    tasks: tasks
+                        .where((task) => task.status == columns[i].status)
+                        .toList(),
+                    width: 280,
+                  ),
+                  if (i != columns.length - 1) const SizedBox(width: 16),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -1744,90 +1973,200 @@ class _TaskCalendarView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final isCompact = MediaQuery.of(context).size.width < 600;
     final days = _buildCalendarDays(calendarDate);
-    final selectedTasks = selectedDate == null
-        ? const <_TaskView>[]
-        : tasks.where((task) {
-            if (task.dueDate == null) return false;
-            return _isSameDay(task.dueDate!, selectedDate!);
-          }).toList();
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final cardBackground = isDark ? const Color(0xFF1F2937) : Colors.white;
+
+    List<_TaskView> tasksForDate(DateTime date) {
+      return tasks
+          .where((task) =>
+              task.dueDate != null && _isSameDay(task.dueDate!, date))
+          .toList();
+    }
+
+    List<({ _TaskView task, _Milestone milestone })> milestonesForDate(
+        DateTime date) {
+      final results = <({ _TaskView task, _Milestone milestone })>[];
+      for (final task in tasks) {
+        for (final milestone in task.milestones) {
+          if (_isSameDay(milestone.dueDate, date)) {
+            results.add((task: task, milestone: milestone));
+          }
+        }
+      }
+      return results;
+    }
+
+    final selectedTasks =
+        selectedDate == null ? <_TaskView>[] : tasksForDate(selectedDate!);
+    final selectedMilestones = selectedDate == null
+        ? <({ _TaskView task, _Milestone milestone })>[]
+        : milestonesForDate(selectedDate!);
+
+    Widget navButton(IconData icon, VoidCallback onTap) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(
+            icon,
+            size: 20,
+            color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+          ),
+        ),
+      );
+    }
+
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     return _ViewCard(
       title: 'Calendar View',
       viewMode: viewMode,
       onViewModeChanged: onViewModeChanged,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _formatMonth(calendarDate),
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cardBackground,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: borderColor)),
               ),
-              Row(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  IconButton(
-                    onPressed: onPrev,
-                    icon: const Icon(Icons.chevron_left),
+                  navButton(Icons.chevron_left, onPrev),
+                  Text(
+                    _formatMonth(calendarDate),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
                   ),
-                  IconButton(
-                    onPressed: onNext,
-                    icon: const Icon(Icons.chevron_right),
+                  navButton(Icons.chevron_right, onNext),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      for (final label in dayLabels)
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Center(
+                              child: Text(
+                                isCompact ? label[0] : label,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? const Color(0xFF9CA3AF)
+                                      : const Color(0xFF6B7280),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  GridView.count(
+                    crossAxisCount: 7,
+                    shrinkWrap: true,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: days.map((day) {
+                      if (day == null) {
+                        return const SizedBox.shrink();
+                      }
+                      final dayTasks = tasksForDate(day);
+                      final milestonesForDay = milestonesForDate(day);
+                      final isSelected = selectedDate != null &&
+                          _isSameDay(day, selectedDate!);
+                      return _CalendarDayCell(
+                        date: day,
+                        tasks: dayTasks,
+                        milestoneCount: milestonesForDay.length,
+                        selected: isSelected,
+                        isToday: _isToday(day),
+                        onTap: () => onDateSelected(day),
+                      );
+                    }).toList(),
                   ),
                 ],
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 7,
-            shrinkWrap: true,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            physics: const NeverScrollableScrollPhysics(),
-            children: days.map((day) {
-              if (day == null) {
-                return const SizedBox.shrink();
-              }
-              final dayTasks = tasks
-                  .where((task) =>
-                      task.dueDate != null &&
-                      _isSameDay(task.dueDate!, day))
-                  .toList();
-              final isSelected =
-                  selectedDate != null && _isSameDay(day, selectedDate!);
-              return _CalendarDayCell(
-                date: day,
-                tasks: dayTasks,
-                selected: isSelected,
-                onTap: () => onDateSelected(day),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            selectedDate == null
-                ? 'Select a date to view tasks.'
-                : 'Tasks for ${_formatDate(selectedDate!)}',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
             ),
-          ),
-          const SizedBox(height: 8),
-          if (selectedDate != null && selectedTasks.isEmpty)
-            const Text('No tasks due on this date.')
-          else
-            ...selectedTasks.map(
-              (task) => _TaskListCard(
-                task: task,
-                onTap: () => onOpenTask(task),
+            if (selectedDate != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: borderColor)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      DateFormat('EEEE, MMMM d, y').format(selectedDate!),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color:
+                            isDark ? Colors.white : const Color(0xFF111827),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (selectedTasks.isEmpty && selectedMilestones.isEmpty)
+                      Text(
+                        'No tasks or milestones scheduled',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: isDark
+                              ? const Color(0xFF9CA3AF)
+                              : const Color(0xFF6B7280),
+                        ),
+                      )
+                    else
+                      Column(
+                        children: [
+                          ...selectedTasks.map(
+                            (task) => _CalendarTaskCard(
+                              task: task,
+                              onTap: () => onOpenTask(task),
+                            ),
+                          ),
+                          ...selectedMilestones.map(
+                            (entry) => _CalendarMilestoneCard(
+                              task: entry.task,
+                              milestone: entry.milestone,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1849,37 +2188,27 @@ class _ViewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
               ),
-              _ViewModeSelector(
-                viewMode: viewMode,
-                onChanged: onViewModeChanged,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
+            ),
+            _ViewModeSelector(
+              viewMode: viewMode,
+              onChanged: onViewModeChanged,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        child,
+      ],
     );
   }
 }
@@ -1899,7 +2228,7 @@ class _ViewModeSelector extends StatelessWidget {
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
@@ -1945,14 +2274,17 @@ class _ViewModeButton extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final selectedBackground = isDark ? const Color(0xFF374151) : Colors.white;
+    final selectedColor = isDark ? Colors.white : Colors.black;
+    final unselectedColor =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: selected ? selectedBackground : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           boxShadow: selected
               ? [
                   BoxShadow(
@@ -1965,14 +2297,16 @@ class _ViewModeButton extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: selected ? Colors.black : Colors.grey),
+            Icon(
+              icon,
+              size: 16,
+              color: selected ? selectedColor : unselectedColor,
+            ),
             const SizedBox(width: 6),
             Text(
               label,
               style: theme.textTheme.labelMedium?.copyWith(
-                color: selected
-                    ? (isDark ? Colors.white : Colors.black)
-                    : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                color: selected ? selectedColor : unselectedColor,
               ),
             ),
           ],
@@ -1996,13 +2330,13 @@ class _TaskListCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
             ),
@@ -2012,10 +2346,10 @@ class _TaskListCard extends StatelessWidget {
             children: [
               Container(
                 width: 4,
-                height: 80,
+                height: 60,
                 decoration: BoxDecoration(
                   color: _priorityBarColor(task.priority),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(4),
                 ),
               ),
               const SizedBox(width: 12),
@@ -2032,6 +2366,8 @@ class _TaskListCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       task.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: isDark ? Colors.grey[400] : Colors.grey[600],
                       ),
@@ -2076,7 +2412,7 @@ class _TaskListCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: statusColors.background,
                   borderRadius: BorderRadius.circular(999),
@@ -2087,6 +2423,7 @@ class _TaskListCard extends StatelessWidget {
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: statusColors.text,
                     fontWeight: FontWeight.w600,
+                    fontSize: 12,
                   ),
                 ),
               ),
@@ -2117,7 +2454,7 @@ class _MilestoneProgress extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.flag_outlined, size: 14),
+                const Icon(Icons.track_changes, size: 14),
                 const SizedBox(width: 4),
                 Text(
                   'Milestones: $completed/$total',
@@ -2146,43 +2483,97 @@ class _MilestoneProgress extends StatelessWidget {
 }
 
 class _BoardColumn extends StatelessWidget {
-  const _BoardColumn({required this.title, required this.tasks});
+  const _BoardColumn({
+    required this.title,
+    required this.status,
+    required this.tasks,
+    this.width,
+  });
 
   final String title;
+  final String status;
   final List<_TaskView> tasks;
+  final double? width;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final statusColors = _statusColors(status, isDark);
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+              ),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: statusColors.background,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: statusColors.border),
+                ),
+                child: Text(
+                  tasks.length.toString(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: statusColors.text,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 600),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: tasks.isEmpty
+                ? Text(
+                    'No tasks',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                    ),
+                  )
+                : Column(
+                    children: [
+                      for (var i = 0; i < tasks.length; i++) ...[
+                        _BoardTaskCard(task: tasks[i]),
+                        if (i != tasks.length - 1) const SizedBox(height: 12),
+                      ],
+                    ],
+                  ),
+          ),
+        ),
+      ],
+    );
+
     return Container(
-      width: 280,
-      padding: const EdgeInsets.all(12),
+      width: width,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$title (${tasks.length})',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (tasks.isEmpty)
-            const Text('No tasks')
-          else
-            ...tasks.map(
-              (task) => _BoardTaskCard(task: task),
-            ),
-        ],
-      ),
+      child: content,
     );
   }
 }
@@ -2196,16 +2587,17 @@ class _BoardTaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final statusColors = _statusColors(task.status, isDark);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
+          color: isDark
+              ? const Color(0xFF374151).withValues(alpha: 0.5)
+              : const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+            color: isDark ? const Color(0xFF4B5563) : const Color(0xFFE5E7EB),
           ),
         ),
         child: Row(
@@ -2216,7 +2608,7 @@ class _BoardTaskCard extends StatelessWidget {
               height: 40,
               decoration: BoxDecoration(
                 color: _priorityBarColor(task.priority),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(4),
               ),
             ),
             const SizedBox(width: 8),
@@ -2231,6 +2623,15 @@ class _BoardTaskCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
+                  Text(
+                    task.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 4,
@@ -2244,24 +2645,252 @@ class _BoardTaskCard extends StatelessWidget {
                           icon: Icons.calendar_today_outlined,
                           label: _formatShortDate(task.dueDate!),
                         ),
+                      if (task.assignedTeam != null)
+                        _MetaTag(
+                          icon: Icons.groups_outlined,
+                          label: task.assignedTeam!,
+                          highlighted: true,
+                        ),
                     ],
                   ),
+                  if (task.milestones.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.track_changes,
+                            size: 12, color: Color(0xFF8B5CF6)),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${task.milestones.where((m) => m.completed).length}/${task.milestones.length}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: task.milestones.isEmpty
+                            ? 0
+                            : task.milestones
+                                    .where((m) => m.completed)
+                                    .length /
+                                task.milestones.length,
+                        minHeight: 4,
+                        backgroundColor: isDark
+                            ? const Color(0xFF4B5563)
+                            : const Color(0xFFE5E7EB),
+                        valueColor: const AlwaysStoppedAnimation(
+                          Color(0xFF7C3AED),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: statusColors.background,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: statusColors.border),
-              ),
-              child: Text(
-                task.status.replaceAll('-', ' '),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: statusColors.text,
-                  fontWeight: FontWeight.w600,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CalendarTaskCard extends StatelessWidget {
+  const _CalendarTaskCard({required this.task, required this.onTap});
+
+  final _TaskView task;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final statusColors = _statusColors(task.status, isDark);
+    final background = isDark
+        ? const Color(0xFF374151).withValues(alpha: 0.5)
+        : const Color(0xFFF9FAFB);
+    final borderColor =
+        isDark ? const Color(0xFF4B5563) : const Color(0xFFE5E7EB);
+    final baseMetaColor =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    final teamMetaColor =
+        isDark ? const Color(0xFF818CF8) : const Color(0xFF4F46E5);
+
+    Widget metaTag(IconData icon, String label, Color color) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 10,
+              color: color,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 4,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: _priorityBarColor(task.priority),
+                  borderRadius: BorderRadius.circular(4),
                 ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      task.title,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color:
+                            isDark ? Colors.white : const Color(0xFF111827),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        metaTag(Icons.person_outline, task.assignee,
+                            baseMetaColor),
+                        if (task.assignedTeam != null)
+                          metaTag(Icons.groups_outlined, task.assignedTeam!,
+                              teamMetaColor),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: statusColors.background,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: statusColors.border),
+                          ),
+                          child: Text(
+                            task.status.replaceAll('-', ' '),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: statusColors.text,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CalendarMilestoneCard extends StatelessWidget {
+  const _CalendarMilestoneCard({
+    required this.task,
+    required this.milestone,
+  });
+
+  final _TaskView task;
+  final _Milestone milestone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark
+        ? const Color(0xFF7C3AED).withValues(alpha: 0.1)
+        : const Color(0xFFF5F3FF);
+    final borderColor = isDark
+        ? const Color(0xFF7C3AED).withValues(alpha: 0.3)
+        : const Color(0xFFE9D5FF);
+    final titleColor =
+        isDark ? const Color(0xFFD8B4FE) : const Color(0xFF4C1D95);
+    final subtitleColor =
+        isDark ? const Color(0xFFC4B5FD) : const Color(0xFF6D28D9);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.track_changes,
+              size: 16,
+              color: Color(0xFF8B5CF6),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    milestone.title,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: titleColor,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Task: ${task.title}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: subtitleColor,
+                    ),
+                  ),
+                  if (milestone.completed) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle,
+                            size: 12, color: Color(0xFF22C55E)),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Completed',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: const Color(0xFF22C55E),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
@@ -2275,13 +2904,17 @@ class _CalendarDayCell extends StatelessWidget {
   const _CalendarDayCell({
     required this.date,
     required this.tasks,
+    required this.milestoneCount,
     required this.selected,
+    required this.isToday,
     required this.onTap,
   });
 
   final DateTime date;
   final List<_TaskView> tasks;
+  final int milestoneCount;
   final bool selected;
+  final bool isToday;
   final VoidCallback onTap;
 
   @override
@@ -2290,18 +2923,30 @@ class _CalendarDayCell extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final border = selected
         ? const Color(0xFF2563EB)
-        : (isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB));
+        : isToday
+            ? const Color(0xFF8B5CF6)
+            : (isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB));
+    final background = selected
+        ? (isDark ? const Color(0xFF1E3A8A) : const Color(0xFFEFF6FF))
+        : isToday
+            ? (isDark
+                ? const Color(0xFF7C3AED).withValues(alpha: 0.12)
+                : const Color(0xFFF5F3FF))
+            : (isDark
+                ? const Color(0xFF1F2937).withValues(alpha: 0.5)
+                : Colors.white);
+    final dayColor = isToday
+        ? (isDark ? const Color(0xFFC4B5FD) : const Color(0xFF7C3AED))
+        : (isDark ? Colors.white : const Color(0xFF111827));
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-          color: selected
-              ? (isDark ? const Color(0xFF1E3A8A) : const Color(0xFFEFF6FF))
-              : theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: border),
+          color: background,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: border, width: 2),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2310,23 +2955,63 @@ class _CalendarDayCell extends StatelessWidget {
               date.day.toString(),
               style: theme.textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w600,
+                color: dayColor,
               ),
             ),
-            const SizedBox(height: 6),
-            if (tasks.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF1F2937)
-                      : const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(999),
+            const SizedBox(height: 4),
+            if (tasks.isNotEmpty) ...[
+              for (final task in tasks.take(2))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _calendarTaskChipColor(task).withValues(alpha: 0.8),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      task.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 9,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
                 ),
-                child: Text(
-                  '${tasks.length} task${tasks.length == 1 ? '' : 's'}',
-                  style: theme.textTheme.labelSmall,
+              if (tasks.length > 2)
+                Text(
+                  '+${tasks.length - 2} more',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 9,
+                    color: isDark
+                        ? const Color(0xFF9CA3AF)
+                        : const Color(0xFF6B7280),
+                  ),
                 ),
+            ] else if (milestoneCount > 0) ...[
+              Row(
+                children: [
+                  const Icon(
+                    Icons.track_changes,
+                    size: 12,
+                    color: Color(0xFF8B5CF6),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    milestoneCount.toString(),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 9,
+                      color: isDark
+                          ? const Color(0xFF9CA3AF)
+                          : const Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
               ),
+            ],
           ],
         ),
       ),
@@ -2376,7 +3061,7 @@ class _CategoryChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
         label,
@@ -2670,6 +3355,11 @@ bool _isSameDay(DateTime a, DateTime b) {
   return a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
+bool _isToday(DateTime date) {
+  final today = DateTime.now();
+  return _isSameDay(date, today);
+}
+
 class _PillColors {
   const _PillColors({
     required this.background,
@@ -2730,6 +3420,22 @@ Color _priorityBarColor(String priority) {
   }
 }
 
+Color _calendarTaskChipColor(_TaskView task) {
+  if (task.status == 'completed') {
+    return const Color(0xFF22C55E);
+  }
+  if (task.status == 'overdue') {
+    return const Color(0xFFEF4444);
+  }
+  if (task.priority == 'high') {
+    return const Color(0xFFEF4444);
+  }
+  if (task.priority == 'medium') {
+    return const Color(0xFFF59E0B);
+  }
+  return const Color(0xFF22C55E);
+}
+
 _NotificationAccent _notificationAccent(String type) {
   switch (type) {
     case 'completion':
@@ -2756,139 +3462,3 @@ class _NotificationAccent {
   final Color background;
   final Color icon;
 }
-
-final _demoTasks = <_TaskView>[
-  _TaskView(
-    id: '1',
-    title: 'Complete Safety Inspection - Building A',
-    description:
-        'Conduct comprehensive safety inspection including fire exits, equipment, and hazard identification',
-    assignee: 'John Doe',
-    location: 'Main Construction Site',
-    dueDate: DateTime(2026, 1, 10),
-    priority: 'high',
-    status: 'in-progress',
-    category: 'Safety',
-    milestones: [
-      _Milestone(
-        title: 'Complete fire exit inspection',
-        dueDate: DateTime(2026, 1, 5),
-        completed: true,
-        reminderDays: 2,
-      ),
-      _Milestone(
-        title: 'Equipment safety checks',
-        dueDate: DateTime(2026, 1, 7),
-        completed: false,
-        reminderDays: 2,
-      ),
-      _Milestone(
-        title: 'Hazard identification and reporting',
-        dueDate: DateTime(2026, 1, 9),
-        completed: false,
-        reminderDays: 2,
-      ),
-    ],
-  ),
-  _TaskView(
-    id: '2',
-    title: 'Equipment Maintenance Log',
-    description: 'Update maintenance records for all heavy machinery',
-    assignee: 'Jane Smith',
-    assignedTeam: 'Maintenance Crew',
-    location: 'Warehouse',
-    dueDate: DateTime(2026, 1, 8),
-    priority: 'medium',
-    status: 'in-progress',
-    category: 'Maintenance',
-    milestones: [
-      _Milestone(
-        title: 'Inventory all equipment',
-        dueDate: DateTime(2026, 1, 4),
-        completed: true,
-        reminderDays: 1,
-      ),
-      _Milestone(
-        title: 'Update digital records',
-        dueDate: DateTime(2026, 1, 6),
-        completed: false,
-        reminderDays: 1,
-      ),
-      _Milestone(
-        title: 'Generate summary report',
-        dueDate: DateTime(2026, 1, 8),
-        completed: false,
-        reminderDays: 1,
-      ),
-    ],
-  ),
-  _TaskView(
-    id: '3',
-    title: 'Daily Progress Report Submission',
-    description: 'Submit end-of-day progress report with photos and notes',
-    assignee: 'Mike Johnson',
-    location: 'Site B',
-    dueDate: DateTime(2026, 1, 2),
-    priority: 'high',
-    status: 'overdue',
-    category: 'Reporting',
-    milestones: [],
-  ),
-  _TaskView(
-    id: '4',
-    title: 'Install Electrical Panels',
-    description: 'Install and test electrical panels in units 5-10',
-    assignee: 'Sarah Williams',
-    assignedTeam: 'Electrical Team',
-    location: 'Residential Complex',
-    dueDate: DateTime(2026, 1, 15),
-    priority: 'medium',
-    status: 'pending',
-    category: 'Installation',
-    milestones: [],
-  ),
-  _TaskView(
-    id: '5',
-    title: 'Quality Check - HVAC System',
-    description: 'Verify HVAC installation meets specifications',
-    assignee: 'Tom Brown',
-    location: 'Office Building',
-    dueDate: DateTime(2025, 12, 28),
-    priority: 'low',
-    status: 'completed',
-    category: 'Quality',
-    milestones: [],
-  ),
-];
-
-final _demoNotifications = [
-  _TaskNotification(
-    id: 1,
-    type: 'completion',
-    taskTitle: 'Safety Inspection Complete',
-    message: 'John Doe marked Safety Inspection complete',
-    timestamp: DateTime(2025, 12, 20, 9, 30),
-    icon: Icons.check_circle,
-    assignee: 'John Doe',
-    read: false,
-  ),
-  _TaskNotification(
-    id: 2,
-    type: 'milestone',
-    taskTitle: 'Equipment Maintenance Log',
-    message: 'Milestone due in 2 days for Maintenance Log',
-    timestamp: DateTime(2025, 12, 20, 8, 30),
-    icon: Icons.flag_outlined,
-    team: 'Maintenance Crew',
-    read: false,
-  ),
-  _TaskNotification(
-    id: 3,
-    type: 'overdue',
-    taskTitle: 'Daily Progress Report',
-    message: 'Task is overdue and needs attention',
-    timestamp: DateTime(2025, 12, 19, 18, 0),
-    icon: Icons.warning_amber_outlined,
-    read: true,
-  ),
-];

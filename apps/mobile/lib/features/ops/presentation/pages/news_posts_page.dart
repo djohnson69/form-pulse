@@ -31,9 +31,26 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => _ErrorState(message: e.toString()),
         data: (posts) {
-          final useDemo = posts.isEmpty;
-          final items = useDemo ? _demoNewsItems : _mapPosts(posts, projectNames);
+          final items = _mapPosts(posts, projectNames);
           final visiblePosts = _applyCategoryFilter(items);
+          final announcements = _buildAnnouncements(items);
+          final stats = _NewsStats.fromPosts(items);
+          final categorySummaries = _buildCategorySummaries(items);
+          final trending = _buildTrending(items);
+          if (items.isEmpty) {
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _Header(onCreate: () => _openCreateSheet(context, ref)),
+                const SizedBox(height: 16),
+                _EmptyState(
+                  title: 'No news posts yet',
+                  message:
+                      'Create the first company update so your team stays informed.',
+                ),
+              ],
+            );
+          }
           return LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 1024;
@@ -45,7 +62,8 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
                     onCreate: () => _openCreateSheet(context, ref),
                   ),
                   const SizedBox(height: 24),
-                  _AnnouncementsBanner(items: _announcements),
+                  if (announcements.isNotEmpty)
+                    _AnnouncementsBanner(items: announcements),
                   const SizedBox(height: 24),
                   if (isWide)
                     Row(
@@ -65,9 +83,9 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
                         Expanded(
                           child: _NewsSidebar(
                             posts: items,
-                            statsOverride: useDemo ? _demoNewsStats : null,
-                            categoriesOverride:
-                                useDemo ? _demoCategorySummaries : null,
+                            stats: stats,
+                            categories: categorySummaries,
+                            trending: trending,
                           ),
                         ),
                       ],
@@ -85,9 +103,9 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
                         const SizedBox(height: 24),
                         _NewsSidebar(
                           posts: items,
-                          statsOverride: useDemo ? _demoNewsStats : null,
-                          categoriesOverride:
-                              useDemo ? _demoCategorySummaries : null,
+                          stats: stats,
+                          categories: categorySummaries,
+                          trending: trending,
                         ),
                       ],
                     ),
@@ -171,6 +189,35 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
     final raw = post.metadata?['views'];
     if (raw is num) return raw.toInt();
     return 120 + (post.title.length * 3);
+  }
+
+  List<_Announcement> _buildAnnouncements(List<_NewsItem> items) {
+    return items
+        .where((item) => item.isPinned || item.priority == _NewsPriority.high)
+        .take(3)
+        .map(
+          (item) => _Announcement(
+            text: item.title,
+            type: item.priority == _NewsPriority.high
+                ? _AnnouncementType.alert
+                : _AnnouncementType.info,
+          ),
+        )
+        .toList();
+  }
+
+  List<_TrendingItem> _buildTrending(List<_NewsItem> items) {
+    final counts = <String, int>{};
+    for (final item in items) {
+      final key = _normalizeCategory(item.category);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    final sorted = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted
+        .take(5)
+        .map((e) => _TrendingItem(e.key, e.value))
+        .toList();
   }
 
   Future<void> _openCreateSheet(BuildContext context, WidgetRef ref) async {
@@ -312,7 +359,6 @@ class _CreateAnnouncementSheetState
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Close',
                     onPressed: () => Navigator.of(context).pop(false),
                     icon: const Icon(Icons.close),
                   ),
@@ -442,7 +488,7 @@ class _Header extends StatelessWidget {
           style: ElevatedButton.styleFrom(
             backgroundColor: colors.primary,
             foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -510,7 +556,7 @@ class _AnnouncementsBanner extends StatelessWidget {
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(item.type.icon, color: style.accent),
+                      Icon(item.type.icon, color: style.accent, size: 20),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -596,14 +642,13 @@ class _NewsFeed extends StatelessWidget {
                   },
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 8),
               IconButton(
                 onPressed: () {},
-                tooltip: 'More options',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(width: 36, height: 36),
                 visualDensity: VisualDensity.compact,
-                icon: Icon(Icons.more_vert, color: colors.muted),
+                icon: Icon(Icons.more_vert, color: colors.muted, size: 20),
               ),
             ],
           ),
@@ -613,14 +658,15 @@ class _NewsFeed extends StatelessWidget {
               title: 'No news yet',
               message: 'Share company or site updates here.',
             )
-          else
+          else ...[
             ...posts.map((post) => _NewsCard(item: post)),
-          const SizedBox(height: 24),
-          TextButton(
-            onPressed: () {},
-            style: TextButton.styleFrom(foregroundColor: colors.primary),
-            child: const Text('Load More News'),
-          ),
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: () {},
+              style: TextButton.styleFrom(foregroundColor: colors.primary),
+              child: const Text('Load More News'),
+            ),
+          ],
         ],
       ),
     );
@@ -640,6 +686,7 @@ class _NewsCard extends StatelessWidget {
     final hoverColor = colors.isDark
         ? Colors.white.withValues(alpha: 0.04)
         : Colors.black.withValues(alpha: 0.03);
+    final isWide = MediaQuery.of(context).size.width >= 768;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Material(
@@ -686,13 +733,13 @@ class _NewsCard extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
-                                vertical: 4,
+                                vertical: 2,
                               ),
                               decoration: BoxDecoration(
                                 color: priorityColor.withValues(
                                   alpha: colors.isDark ? 0.2 : 0.15,
                                 ),
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
                                 item.priority.label,
@@ -716,7 +763,7 @@ class _NewsCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Wrap(
-                          spacing: 8,
+                          spacing: isWide ? 16 : 8,
                           runSpacing: 6,
                           children: [
                             Container(
@@ -726,7 +773,7 @@ class _NewsCard extends StatelessWidget {
                               ),
                               decoration: BoxDecoration(
                                 color: colors.primarySoft,
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
                                 item.category,
@@ -747,6 +794,12 @@ class _NewsCard extends StatelessWidget {
                                     color: colors.muted,
                                   ),
                             ),
+                            if (isWide)
+                              Text('•',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(color: colors.muted)),
                             Text(
                               item.dateLabel,
                               style: Theme.of(context)
@@ -756,6 +809,12 @@ class _NewsCard extends StatelessWidget {
                                     color: colors.muted,
                                   ),
                             ),
+                            if (isWide)
+                              Text('•',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(color: colors.muted)),
                             Text(
                               '${item.views} views',
                               style: Theme.of(context)
@@ -771,7 +830,7 @@ class _NewsCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Icon(Icons.chevron_right, color: colors.muted),
+                  Icon(Icons.chevron_right, color: colors.muted, size: 20),
                 ],
               ),
             ),
@@ -785,26 +844,27 @@ class _NewsCard extends StatelessWidget {
 class _NewsSidebar extends StatelessWidget {
   const _NewsSidebar({
     required this.posts,
-    this.statsOverride,
-    this.categoriesOverride,
+    required this.stats,
+    required this.categories,
+    required this.trending,
   });
 
   final List<_NewsItem> posts;
-  final _NewsStats? statsOverride;
-  final List<_CategorySummary>? categoriesOverride;
+  final _NewsStats stats;
+  final List<_CategorySummary> categories;
+  final List<_TrendingItem> trending;
 
   @override
   Widget build(BuildContext context) {
-    final stats = statsOverride ?? _NewsStats.fromPosts(posts);
     return Column(
       children: [
         _StatsCard(stats: stats),
         const SizedBox(height: 24),
-        _CategoriesCard(posts: posts, categoriesOverride: categoriesOverride),
-        const SizedBox(height: 24),
-        const _UpcomingEventsCard(),
-        const SizedBox(height: 24),
-        const _TrendingCard(),
+        _CategoriesCard(posts: posts, categoriesOverride: categories),
+        if (trending.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          _TrendingCard(topics: trending),
+        ],
       ],
     );
   }
@@ -880,6 +940,7 @@ class _StatRow extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: highlight ? colors.danger : colors.title,
                   fontWeight: FontWeight.w600,
+                  fontSize: 18,
                 ),
           ),
         ],
@@ -889,15 +950,16 @@ class _StatRow extends StatelessWidget {
 }
 
 class _CategoriesCard extends StatelessWidget {
-  const _CategoriesCard({required this.posts, this.categoriesOverride});
+  const _CategoriesCard({required this.posts, required this.categoriesOverride});
 
   final List<_NewsItem> posts;
-  final List<_CategorySummary>? categoriesOverride;
+  final List<_CategorySummary> categoriesOverride;
 
   @override
   Widget build(BuildContext context) {
     final colors = _NewsColors.fromTheme(Theme.of(context));
-    final entries = categoriesOverride ?? _buildCategorySummaries(posts);
+    final entries =
+        categoriesOverride.isNotEmpty ? categoriesOverride : _buildCategorySummaries(posts);
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -930,34 +992,47 @@ class _CategoriesCard extends StatelessWidget {
               final dotColor = _categoryColor(entry.name, colors);
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: dotColor,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {},
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: dotColor,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              entry.name,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: colors.body),
+                            ),
+                          ),
+                          Text(
+                            entry.count.toString(),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: colors.muted, fontSize: 12),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        entry.name,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: colors.body),
-                      ),
-                    ),
-                    Text(
-                      entry.count.toString(),
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: colors.muted),
-                    ),
-                  ],
+                  ),
                 ),
               );
             }),
@@ -967,95 +1042,14 @@ class _CategoriesCard extends StatelessWidget {
   }
 }
 
-class _UpcomingEventsCard extends StatelessWidget {
-  const _UpcomingEventsCard();
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = _NewsColors.fromTheme(Theme.of(context));
-    final events = const [
-      _EventItem('All-Hands Meeting', 'Dec 27', '2:00 PM'),
-      _EventItem('Equipment Training', 'Dec 28', '9:00 AM'),
-      _EventItem('Safety Workshop', 'Jan 3', '10:00 AM'),
-    ];
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-        boxShadow: colors.cardShadow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Upcoming Events',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: colors.title,
-                    ),
-              ),
-              const Spacer(),
-              Icon(Icons.calendar_today, size: 16, color: colors.muted),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...events.map(
-            (event) => Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                color: colors.filterSurface,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    event.title,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: colors.title,
-                        ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(Icons.event, size: 14, color: colors.muted),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${event.date} • ${event.time}',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: colors.muted),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _TrendingCard extends StatelessWidget {
-  const _TrendingCard();
+  const _TrendingCard({required this.topics});
+
+  final List<_TrendingItem> topics;
 
   @override
   Widget build(BuildContext context) {
     final colors = _NewsColors.fromTheme(Theme.of(context));
-    final topics = const [
-      _TrendingItem('#SafetyFirst', 45),
-      _TrendingItem('#ProjectAlpha', 32),
-      _TrendingItem('#Training2024', 28),
-    ];
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1069,7 +1063,7 @@ class _TrendingCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.trending_up, color: colors.primary),
+              Icon(Icons.trending_up, color: colors.primary, size: 20),
               const SizedBox(width: 8),
               Text(
                 'Trending',
@@ -1205,14 +1199,13 @@ class _NewsColors {
   factory _NewsColors.fromTheme(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
     const primary = Color(0xFF2563EB);
-    final primarySoft = isDark
-        ? const Color(0xFF1E3A8A).withValues(alpha: 0.3)
-        : const Color(0xFFEFF6FF);
+    final primarySoft =
+        isDark ? primary.withValues(alpha: 0.2) : const Color(0xFFEFF6FF);
     final trendingGradient = LinearGradient(
       colors: isDark
           ? [
-              const Color(0xFF1E3A8A).withValues(alpha: 0.35),
-              const Color(0xFF312E81).withValues(alpha: 0.35),
+              const Color(0xFF3B82F6).withValues(alpha: 0.1),
+              const Color(0xFF6366F1).withValues(alpha: 0.1),
             ]
           : [
               const Color(0xFFDBEAFE),
@@ -1240,7 +1233,7 @@ class _NewsColors {
       primarySoft: primarySoft,
       filterSurface:
           isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
-      inputFill: isDark ? const Color(0xFF0B1220) : Colors.white,
+      inputFill: isDark ? const Color(0xFF111827) : Colors.white,
       inputBorder: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
       danger: const Color(0xFFDC2626),
       warning: const Color(0xFFF59E0B),
@@ -1269,13 +1262,31 @@ _AnnouncementStyle _announcementStyle(
   _NewsColors colors,
 ) {
   final accent = switch (type) {
-    _AnnouncementType.alert => colors.danger,
-    _AnnouncementType.warning => colors.warning,
-    _AnnouncementType.info => colors.primary,
+    _AnnouncementType.alert => const Color(0xFFEF4444),
+    _AnnouncementType.warning => const Color(0xFFF59E0B),
+    _AnnouncementType.info => const Color(0xFF3B82F6),
   };
+  final background = colors.isDark
+      ? accent.withValues(alpha: 0.1)
+      : switch (type) {
+          _AnnouncementType.alert => const Color(0xFFFEF2F2),
+          _AnnouncementType.warning => const Color(0xFFFFFBEB),
+          _AnnouncementType.info => const Color(0xFFEFF6FF),
+        };
+  final foreground = colors.isDark
+      ? switch (type) {
+          _AnnouncementType.alert => const Color(0xFFF87171),
+          _AnnouncementType.warning => const Color(0xFFFBBF24),
+          _AnnouncementType.info => const Color(0xFF60A5FA),
+        }
+      : switch (type) {
+          _AnnouncementType.alert => const Color(0xFF7F1D1D),
+          _AnnouncementType.warning => const Color(0xFF78350F),
+          _AnnouncementType.info => const Color(0xFF1E3A8A),
+        };
   return _AnnouncementStyle(
-    background: accent.withValues(alpha: colors.isDark ? 0.12 : 0.1),
-    foreground: accent,
+    background: background,
+    foreground: foreground,
     accent: accent,
   );
 }
@@ -1330,7 +1341,7 @@ InputDecoration _selectDecoration(_NewsColors colors) {
     isDense: true,
     filled: true,
     fillColor: colors.inputFill,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),
       borderSide: BorderSide(color: colors.inputBorder),
@@ -1441,14 +1452,6 @@ extension _AnnouncementTypeStyle on _AnnouncementType {
   }
 }
 
-class _EventItem {
-  const _EventItem(this.title, this.date, this.time);
-
-  final String title;
-  final String date;
-  final String time;
-}
-
 class _TrendingItem {
   const _TrendingItem(this.tag, this.mentions);
 
@@ -1456,102 +1459,10 @@ class _TrendingItem {
   final int mentions;
 }
 
-const _announcements = [
-  _Announcement(
-    text: 'Maintenance: System will be down for updates tonight 10pm-12am',
-    type: _AnnouncementType.warning,
-  ),
-  _Announcement(
-    text: 'Weather Alert: High winds expected tomorrow, review safety procedures',
-    type: _AnnouncementType.alert,
-  ),
-  _Announcement(
-    text: 'Reminder: Monthly all-hands meeting this Friday at 2pm',
-    type: _AnnouncementType.info,
-  ),
-];
-
 const _newsCategoryFilters = [
   'All Categories',
   'Safety',
   'Announcements',
   'Training',
   'Projects',
-];
-
-const _demoNewsStats = _NewsStats(
-  newPosts: 12,
-  totalViews: 2341,
-  activeAlerts: 3,
-);
-
-const _demoCategorySummaries = [
-  _CategorySummary('Safety', 24),
-  _CategorySummary('Announcements', 18),
-  _CategorySummary('Training', 15),
-  _CategorySummary('Projects', 12),
-  _CategorySummary('HR Updates', 8),
-];
-
-const _demoNewsItems = [
-  _NewsItem(
-    id: 'demo-1',
-    title: 'New Safety Protocol Effective January 1st',
-    body:
-        'All employees must complete the updated safety training module by end of month. New hard hat requirements now in effect.',
-    category: 'Safety',
-    priority: _NewsPriority.high,
-    isPinned: true,
-    author: 'Safety Team',
-    dateLabel: '2 days ago',
-    views: 342,
-  ),
-  _NewsItem(
-    id: 'demo-2',
-    title: 'Holiday Schedule Updates',
-    body:
-        'Office will be closed Dec 24-26 and Jan 1. Emergency contacts will be available.',
-    category: 'Announcement',
-    priority: _NewsPriority.medium,
-    isPinned: true,
-    author: 'HR Department',
-    dateLabel: '1 week ago',
-    views: 589,
-  ),
-  _NewsItem(
-    id: 'demo-3',
-    title: 'Q4 Performance Review Results',
-    body:
-        'Congratulations to all teams! We exceeded our quarterly goals by 15%. Employee bonuses will be distributed next week.',
-    category: 'Company News',
-    priority: _NewsPriority.medium,
-    isPinned: false,
-    author: 'Management',
-    dateLabel: '1 week ago',
-    views: 721,
-  ),
-  _NewsItem(
-    id: 'demo-4',
-    title: 'New Equipment Training Session',
-    body:
-        'Training on new excavation equipment scheduled for Dec 28th at the main warehouse. RSVP required.',
-    category: 'Training',
-    priority: _NewsPriority.medium,
-    isPinned: false,
-    author: 'Training Dept',
-    dateLabel: '2 weeks ago',
-    views: 234,
-  ),
-  _NewsItem(
-    id: 'demo-5',
-    title: 'Site A Project Completion',
-    body:
-        'Major milestone achieved! Building A construction completed ahead of schedule. Thank you to all team members involved.',
-    category: 'Project Update',
-    priority: _NewsPriority.low,
-    isPinned: false,
-    author: 'Project Management',
-    dateLabel: '2 weeks ago',
-    views: 456,
-  ),
 ];

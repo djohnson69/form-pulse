@@ -26,6 +26,7 @@ import '../../../navigation/presentation/pages/organization_chart_page.dart';
 import '../../../navigation/presentation/pages/payroll_page.dart';
 import '../../../navigation/presentation/pages/photos_page.dart';
 import '../../../navigation/presentation/pages/roles_permissions_page.dart';
+import '../../../navigation/presentation/pages/role_customization_page.dart';
 import '../../../navigation/presentation/pages/support_tickets_page.dart';
 import '../../../navigation/presentation/pages/system_overview_page.dart';
 import '../../../navigation/presentation/pages/system_logs_page.dart';
@@ -45,9 +46,11 @@ class SuperAdminDashboardPage extends ConsumerStatefulWidget {
   const SuperAdminDashboardPage({
     super.key,
     this.initialRoute = SideMenuRoute.dashboard,
+    this.role = UserRole.superAdmin,
   });
 
   final SideMenuRoute initialRoute;
+  final UserRole role;
 
   @override
   ConsumerState<SuperAdminDashboardPage> createState() =>
@@ -71,12 +74,16 @@ class _SuperAdminDashboardPageState
   @override
   Widget build(BuildContext context) {
     return DashboardShell(
-      role: UserRole.superAdmin,
+      role: widget.role,
       activeRoute: _activeRoute,
       onNavigate: _setRoute,
       showRightSidebar: false,
       maxContentWidth: 1400,
-      child: _superAdminPageForRoute(_activeRoute, onNavigate: _setRoute),
+      child: _superAdminPageForRoute(
+        _activeRoute,
+        onNavigate: _setRoute,
+        role: widget.role,
+      ),
     );
   }
 }
@@ -84,6 +91,7 @@ class _SuperAdminDashboardPageState
 Widget _superAdminPageForRoute(
   SideMenuRoute route, {
   required ValueChanged<SideMenuRoute> onNavigate,
+  required UserRole role,
 }) {
   if (route == SideMenuRoute.dashboard) {
     return _SuperAdminDashboardBody(onNavigate: onNavigate);
@@ -93,7 +101,7 @@ Widget _superAdminPageForRoute(
     SideMenuRoute.messages => const MessagesPage(),
     SideMenuRoute.companyNews => const NewsPostsPage(),
     SideMenuRoute.organizationChart =>
-        const OrganizationChartPage(role: UserRole.superAdmin),
+        OrganizationChartPage(role: role),
     SideMenuRoute.systemOverview => const SystemOverviewPage(),
     SideMenuRoute.users => const UserDirectoryPage(),
     SideMenuRoute.rolesPermissions => const RolesPermissionsPage(),
@@ -114,6 +122,7 @@ Widget _superAdminPageForRoute(
     SideMenuRoute.payroll => const PayrollPage(),
     SideMenuRoute.reports => const ReportsPage(),
     SideMenuRoute.auditLogs => const AuditLogsPage(),
+    SideMenuRoute.roleCustomization => const RoleCustomizationPage(),
     SideMenuRoute.settings => const SettingsPage(),
     SideMenuRoute.supportTickets => const SupportTicketsPage(),
     SideMenuRoute.knowledgeBase => const SopLibraryPage(),
@@ -2818,7 +2827,7 @@ List<NotificationItem> _superAdminNotifications() {
   return [
     NotificationItem(
       id: 'critical',
-      title: 'Critical: System Outage',
+      title: 'CRITICAL: System Outage',
       description: 'Database server is down - immediate action required',
       timeLabel: 'Just now',
       icon: Icons.warning_amber_outlined,
@@ -2827,7 +2836,7 @@ List<NotificationItem> _superAdminNotifications() {
     NotificationItem(
       id: 'security',
       title: 'Security Alert',
-      description: 'Multiple failed login attempts detected',
+      description: 'Multiple failed login attempts detected from IP 192.168.1.45',
       timeLabel: '2 min ago',
       icon: Icons.security_outlined,
       priority: NotificationPriority.high,

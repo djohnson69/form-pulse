@@ -126,25 +126,27 @@ class _AiAssistantOverlayState extends ConsumerState<AiAssistantOverlay> {
                                   ],
                                 ),
                               ),
-                              IconButton(
-                                tooltip: 'Open AI tools',
-                                icon: const Icon(Icons.open_in_new, size: 18),
-                                color: Colors.white,
-                                onPressed: () {
+                              GestureDetector(
+                                onTap: () {
                                   Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (_) => const AiToolsPage(),
                                     ),
                                   );
                                 },
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  child: const Icon(Icons.open_in_new, size: 18, color: Colors.white),
+                                ),
                               ),
-                              IconButton(
-                                tooltip: 'Minimize',
-                                icon: const Icon(Icons.minimize),
-                                color: Colors.white,
-                                onPressed: () => setState(() {
+                              GestureDetector(
+                                onTap: () => setState(() {
                                   _expanded = false;
                                 }),
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  child: const Icon(Icons.minimize, color: Colors.white),
+                                ),
                               ),
                             ],
                           ),

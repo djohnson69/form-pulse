@@ -161,11 +161,6 @@ class _ProjectUpdateEditorPageState
           spacing: 12,
           children: [
             OutlinedButton.icon(
-              onPressed: () => _pickPhoto(ImageSource.camera),
-              icon: const Icon(Icons.photo_camera),
-              label: const Text('Camera'),
-            ),
-            OutlinedButton.icon(
               onPressed: () => _pickPhoto(ImageSource.gallery),
               icon: const Icon(Icons.photo_library),
               label: const Text('Gallery'),
@@ -176,16 +171,6 @@ class _ProjectUpdateEditorPageState
         return Wrap(
           spacing: 12,
           children: [
-            OutlinedButton.icon(
-              onPressed: () => _pickVideo(ImageSource.camera),
-              icon: const Icon(Icons.videocam),
-              label: const Text('Record'),
-            ),
-            OutlinedButton.icon(
-              onPressed: _pickDualVideo,
-              icon: const Icon(Icons.switch_video),
-              label: const Text('Dual video'),
-            ),
             OutlinedButton.icon(
               onPressed: () => _pickVideo(ImageSource.gallery),
               icon: const Icon(Icons.video_library),
@@ -343,7 +328,6 @@ class _ProjectUpdateEditorPageState
                 if (attachment.type == 'photo')
                   IconButton(
                     icon: const Icon(Icons.edit),
-                    tooltip: 'Annotate',
                     onPressed: () => _annotateAttachment(attachment),
                   ),
                 IconButton(
@@ -391,44 +375,6 @@ class _ProjectUpdateEditorPageState
       capturedAt: DateTime.now(),
     );
     setState(() => _attachments.add(item));
-  }
-
-  Future<void> _pickDualVideo() async {
-    final pairId = const Uuid().v4();
-    final first = await _picker.pickVideo(source: ImageSource.camera);
-    if (first == null) return;
-    final firstSize = await first.length();
-    final firstItem = _UpdateAttachment(
-      id: const Uuid().v4(),
-      type: 'video',
-      label: 'Dual video (1/2)',
-      path: first.path,
-      filename: first.name,
-      fileSize: firstSize,
-      mimeType: _guessMimeType(first.path) ?? 'video/mp4',
-      capturedAt: DateTime.now(),
-      metadata: {'dualMode': true, 'pairId': pairId, 'slot': 'primary'},
-    );
-    setState(() => _attachments.add(firstItem));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Record second angle.')),
-    );
-    final second = await _picker.pickVideo(source: ImageSource.camera);
-    if (second == null) return;
-    final secondSize = await second.length();
-    final secondItem = _UpdateAttachment(
-      id: const Uuid().v4(),
-      type: 'video',
-      label: 'Dual video (2/2)',
-      path: second.path,
-      filename: second.name,
-      fileSize: secondSize,
-      mimeType: _guessMimeType(second.path) ?? 'video/mp4',
-      capturedAt: DateTime.now(),
-      metadata: {'dualMode': true, 'pairId': pairId, 'slot': 'secondary'},
-    );
-    setState(() => _attachments.add(secondItem));
   }
 
   Future<void> _toggleRecording() async {

@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class TimecardsPage extends StatefulWidget {
   const TimecardsPage({super.key, this.role = UserRole.employee});
@@ -19,24 +21,83 @@ class _TimecardsPageState extends State<TimecardsPage> {
   late List<_TimecardEntry> _entries;
   String _selectedWeek = 'current';
   String _currentLocation = 'Getting location...';
-  int? _editingEntryId;
+  String? _editingEntryId;
   bool _isClockedIn = false;
   String? _clockInTime;
+  DateTime? _clockInStartedAt;
+  bool _loading = true;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    _entries = _demoEntries();
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (!mounted) return;
-      setState(() => _currentLocation = '40.7128, -74.0060');
-    });
+    _entries = <_TimecardEntry>[];
+    _loadEntries();
+    _refreshLocation();
   }
 
   @override
   void dispose() {
     _approvalNotesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadEntries() async {
+    setState(() => _loading = true);
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        setState(() => _entries = <_TimecardEntry>[]);
+        return;
+      }
+      final role = widget.role;
+      final isOrgScoped = role != UserRole.employee &&
+          role != UserRole.maintenance;
+      final orgId = isOrgScoped ? await _resolveOrgId(user.id) : null;
+      dynamic query = _supabase.from('timecards').select();
+      if (isOrgScoped) {
+        if (orgId != null) {
+          query = query.eq('org_id', orgId);
+        }
+      } else {
+        query = query.eq('user_id', user.id);
+      }
+      query =
+          query.order('date', ascending: false).order('created_at', ascending: false);
+      final res = await query;
+      final rows = (res as List<dynamic>)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .map(_mapEntry)
+          .toList();
+      setState(() => _entries = rows);
+    } catch (_) {
+      setState(() => _entries = <_TimecardEntry>[]);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _refreshLocation() async {
+    final location = await _resolveLocation();
+    if (!mounted) return;
+    setState(() => _currentLocation = location);
+  }
+
+  Future<String> _resolveLocation() async {
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return 'Location unavailable';
+      }
+      final position = await Geolocator.getCurrentPosition();
+      return '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+    } catch (_) {
+      return 'Location unavailable';
+    }
   }
 
   double get _totalHours =>
@@ -63,6 +124,11 @@ class _TimecardsPageState extends State<TimecardsPage> {
   }
 
   Scaffold _buildEmployeeView(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     final theme = Theme.of(context);
     final colors = _TimecardColors.fromTheme(Theme.of(context));
     final recentEntries = _entries.reversed.take(5).toList();
@@ -238,6 +304,11 @@ class _TimecardsPageState extends State<TimecardsPage> {
   }
 
   Scaffold _buildSupervisorView(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     final colors = _TimecardColors.fromTheme(Theme.of(context));
     final pending = _entries
         .where((entry) => entry.status == _TimecardStatus.pending)
@@ -301,6 +372,11 @@ class _TimecardsPageState extends State<TimecardsPage> {
   }
 
   Scaffold _buildManagerView(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     final theme = Theme.of(context);
     final colors = _TimecardColors.fromTheme(theme);
     return Scaffold(
@@ -368,23 +444,33 @@ class _TimecardsPageState extends State<TimecardsPage> {
     );
   }
 
-  void _handleClockIn() {
+  Future<void> _handleClockIn() async {
     final now = DateTime.now();
     final time = DateFormat('hh:mm a').format(now);
+    _clockInStartedAt = now;
+    final location = await _resolveLocation();
+    if (!mounted) return;
     setState(() {
       _isClockedIn = true;
       _clockInTime = time;
+      _currentLocation = location;
     });
     _showSnackBar('Clocked in at $time');
   }
 
-  void _handleClockOut() {
-    if (!_isClockedIn) return;
+  Future<void> _handleClockOut() async {
+    if (!_isClockedIn || _clockInStartedAt == null) return;
     final now = DateTime.now();
     final time = DateFormat('hh:mm a').format(now);
-    final hoursWorked = 8.5;
-    final newEntry = _TimecardEntry(
-      id: _entries.length + 1,
+    final duration = now.difference(_clockInStartedAt!);
+    final hoursWorked = duration.inMinutes / 60.0;
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      _showSnackBar('Not signed in.');
+      return;
+    }
+    final entry = _TimecardEntry(
+      id: '',
       date: DateFormat('yyyy-MM-dd').format(now),
       day: DateFormat('EEEE').format(now),
       clockIn: _clockInTime ?? time,
@@ -393,18 +479,53 @@ class _TimecardsPageState extends State<TimecardsPage> {
       project: 'Field Work',
       status: _TimecardStatus.pending,
       approvedBy: null,
-      location: _TimecardLocation(
-        address: '123 Main St, New York, NY',
-        lat: 40.7128,
-        lng: -74.0060,
-      ),
+      location: _currentLocation.isEmpty ||
+              _currentLocation == 'Location unavailable' ||
+              _currentLocation == 'Getting location...'
+          ? null
+          : _TimecardLocation(address: _currentLocation, lat: null, lng: null),
     );
+    final saved = await _insertTimecard(entry, user.id);
+    if (!mounted) return;
     setState(() {
       _isClockedIn = false;
       _clockInTime = null;
-      _entries = [..._entries, newEntry];
+      _clockInStartedAt = null;
+      _entries = [..._entries, saved];
     });
     _showSnackBar('Clocked out at $time');
+  }
+
+  Future<_TimecardEntry> _insertTimecard(
+    _TimecardEntry entry,
+    String userId,
+  ) async {
+    try {
+      final orgId = await _resolveOrgId(userId);
+      final payload = {
+        'user_id': userId,
+        if (orgId != null) 'org_id': orgId,
+        'date': entry.date,
+        'clock_in': entry.clockIn,
+        'clock_out': entry.clockOut,
+        'hours_worked': entry.hoursWorked,
+        'project': entry.project,
+        'status': entry.status.name,
+        'approved_by': entry.approvedBy,
+        'notes': entry.notes,
+        if (entry.location != null) 'location_address': entry.location!.address,
+        if (entry.location != null) 'location_lat': entry.location!.lat,
+        if (entry.location != null) 'location_lng': entry.location!.lng,
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      final res =
+          await _supabase.from('timecards').insert(payload).select().single();
+      final data = Map<String, dynamic>.from(res as Map);
+      return _mapEntry(data);
+    } catch (_) {
+      return entry;
+    }
   }
 
   Future<void> _handleExport() async {
@@ -471,10 +592,29 @@ class _TimecardsPageState extends State<TimecardsPage> {
     return value;
   }
 
-  void _updateEntry(int id, _TimecardEntry entry) {
-    setState(() {
-      _entries = _entries.map((item) => item.id == id ? entry : item).toList();
-    });
+  Future<void> _updateEntry(String id, _TimecardEntry entry) async {
+    try {
+      await _supabase.from('timecards').update({
+        'date': entry.date,
+        'clock_in': entry.clockIn,
+        'clock_out': entry.clockOut,
+        'hours_worked': entry.hoursWorked,
+        'project': entry.project,
+        'status': entry.status.name,
+        'approved_by': entry.approvedBy,
+        'notes': entry.notes,
+        if (entry.location != null) 'location_address': entry.location!.address,
+        if (entry.location != null) 'location_lat': entry.location!.lat,
+        if (entry.location != null) 'location_lng': entry.location!.lng,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', id);
+      setState(() {
+        _entries =
+            _entries.map((item) => item.id == id ? entry : item).toList();
+      });
+    } catch (_) {
+      _showSnackBar('Failed to update timecard.');
+    }
   }
 
   void _confirmDelete(_TimecardEntry entry) {
@@ -489,10 +629,9 @@ class _TimecardsPageState extends State<TimecardsPage> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              setState(() {
-                _entries.removeWhere((item) => item.id == entry.id);
-              });
+            onPressed: () async {
+              await _deleteEntry(entry);
+              if (!mounted) return;
               Navigator.of(context).pop();
             },
             child: const Text('Delete'),
@@ -500,6 +639,16 @@ class _TimecardsPageState extends State<TimecardsPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _deleteEntry(_TimecardEntry entry) async {
+    try {
+      await _supabase.from('timecards').delete().eq('id', entry.id);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _entries.removeWhere((item) => item.id == entry.id);
+    });
   }
 
   void _showApprovalDialog(_TimecardEntry entry) {
@@ -616,15 +765,15 @@ class _TimecardsPageState extends State<TimecardsPage> {
     );
   }
 
-  void _applyApproval(_TimecardEntry entry, _TimecardStatus status) {
+  Future<void> _applyApproval(_TimecardEntry entry, _TimecardStatus status) async {
+    final approver =
+        _supabase.auth.currentUser?.email ?? _supabase.auth.currentUser?.id;
     final updated = entry.copyWith(
       status: status,
-      approvedBy: status == _TimecardStatus.approved
-          ? 'Current Supervisor'
-          : entry.approvedBy,
+      approvedBy: status == _TimecardStatus.approved ? approver : entry.approvedBy,
       notes: _approvalNotesController.text.trim(),
     );
-    _updateEntry(entry.id, updated);
+    await _updateEntry(entry.id, updated);
   }
 
   void _showSnackBar(String message) {
@@ -633,85 +782,77 @@ class _TimecardsPageState extends State<TimecardsPage> {
     );
   }
 
-  List<_TimecardEntry> _demoEntries() {
-    return [
-      _TimecardEntry(
-        id: 1,
-        date: '2024-12-23',
-        day: 'Monday',
-        clockIn: '08:00 AM',
-        clockOut: '05:00 PM',
-        hoursWorked: 8.5,
-        project: 'Building Maintenance',
-        status: _TimecardStatus.approved,
-        approvedBy: 'Sarah Chen',
-        location: _TimecardLocation(
-          lat: 40.7128,
-          lng: -74.0060,
-          address: '123 Main St, New York, NY',
-        ),
-      ),
-      _TimecardEntry(
-        id: 2,
-        date: '2024-12-24',
-        day: 'Tuesday',
-        clockIn: '08:15 AM',
-        clockOut: '04:30 PM',
-        hoursWorked: 8.0,
-        project: 'HVAC Installation',
-        status: _TimecardStatus.approved,
-        approvedBy: 'Sarah Chen',
-        location: _TimecardLocation(
-          lat: 40.7128,
-          lng: -74.0060,
-          address: '123 Main St, New York, NY',
-        ),
-      ),
-      _TimecardEntry(
-        id: 3,
-        date: '2024-12-25',
-        day: 'Wednesday',
-        clockIn: '00:00 AM',
-        clockOut: '00:00 AM',
-        hoursWorked: 0,
-        project: 'Holiday',
-        status: _TimecardStatus.approved,
-        approvedBy: 'System',
-      ),
-      _TimecardEntry(
-        id: 4,
-        date: '2024-12-26',
-        day: 'Thursday',
-        clockIn: '08:00 AM',
-        clockOut: '05:30 PM',
-        hoursWorked: 9.0,
-        project: 'Electrical Repairs',
-        status: _TimecardStatus.pending,
-        approvedBy: null,
-        location: _TimecardLocation(
-          lat: 40.7128,
-          lng: -74.0060,
-          address: '456 Oak Ave, New York, NY',
-        ),
-      ),
-      _TimecardEntry(
-        id: 5,
-        date: '2024-12-27',
-        day: 'Friday',
-        clockIn: '07:45 AM',
-        clockOut: '03:30 PM',
-        hoursWorked: 7.5,
-        project: 'Plumbing Work',
-        status: _TimecardStatus.pending,
-        approvedBy: null,
-        location: _TimecardLocation(
-          lat: 40.7128,
-          lng: -74.0060,
-          address: '789 Park Blvd, New York, NY',
-        ),
-      ),
-    ];
+  _TimecardEntry _mapEntry(Map<String, dynamic> row) {
+    final statusStr = (row['status'] as String?) ?? 'pending';
+    final status = _statusFromString(statusStr);
+    final clockIn = row['clock_in']?.toString() ?? '';
+    final clockOut = row['clock_out']?.toString();
+    final hours = (row['hours_worked'] as num?)?.toDouble() ?? 0.0;
+    final dateStr = row['date']?.toString() ??
+        (row['created_at']?.toString().substring(0, 10) ?? '');
+    final date = dateStr.isNotEmpty ? dateStr : DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final day = DateFormat('EEEE').format(
+      DateTime.tryParse(date) ?? DateTime.now(),
+    );
+    final locationAddress = row['location_address']?.toString();
+    final locLat = (row['location_lat'] as num?)?.toDouble();
+    final locLng = (row['location_lng'] as num?)?.toDouble();
+    return _TimecardEntry(
+      id: row['id']?.toString() ?? '',
+      date: date,
+      day: day,
+      clockIn: clockIn,
+      clockOut: clockOut,
+      hoursWorked: hours,
+      project: row['project']?.toString() ?? 'Unassigned',
+      status: status,
+      approvedBy: row['approved_by']?.toString(),
+      notes: row['notes']?.toString(),
+      location: locationAddress == null
+          ? null
+          : _TimecardLocation(
+              address: locationAddress,
+              lat: locLat,
+              lng: locLng,
+            ),
+    );
   }
+
+  _TimecardStatus _statusFromString(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'approved':
+        return _TimecardStatus.approved;
+      case 'rejected':
+        return _TimecardStatus.rejected;
+      case 'pending':
+      default:
+        return _TimecardStatus.pending;
+    }
+  }
+
+  Future<String?> _resolveOrgId(String userId) async {
+    try {
+      final res = await _supabase
+          .from('org_members')
+          .select('org_id')
+          .eq('user_id', userId)
+          .limit(1)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    try {
+      final res = await _supabase
+          .from('profiles')
+          .select('org_id')
+          .eq('id', userId)
+          .maybeSingle();
+      final orgId = res?['org_id'];
+      if (orgId != null) return orgId.toString();
+    } catch (_) {}
+    return null;
+  }
+
 }
 
 class _SectionHeader extends StatelessWidget {
@@ -1091,11 +1232,11 @@ class _ManagerEntriesTable extends StatelessWidget {
 
   final List<_TimecardEntry> entries;
   final _TimecardColors colors;
-  final int? editingEntryId;
-  final ValueChanged<int> onEdit;
+  final String? editingEntryId;
+  final ValueChanged<String> onEdit;
   final VoidCallback onSave;
   final ValueChanged<_TimecardEntry> onDelete;
-  final void Function(int, _TimecardEntry) onUpdate;
+  final void Function(String, _TimecardEntry) onUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -1457,7 +1598,7 @@ class _TimecardEntry {
     this.location,
   });
 
-  final int id;
+  final String id;
   final String date;
   final String day;
   final String clockIn;
@@ -1496,12 +1637,12 @@ class _TimecardEntry {
 
 class _TimecardLocation {
   const _TimecardLocation({
-    required this.lat,
-    required this.lng,
     required this.address,
+    this.lat,
+    this.lng,
   });
 
-  final double lat;
-  final double lng;
+  final double? lat;
+  final double? lng;
   final String address;
 }

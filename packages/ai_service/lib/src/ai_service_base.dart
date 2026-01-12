@@ -620,6 +620,28 @@ class AIService {
     return _contentToText(content).trim();
   }
 
+  /// Generate a general assistant reply using a system prompt.
+  Future<String> assistantReply({
+    required String prompt,
+    String? systemPrompt,
+    double temperature = 0.2,
+  }) async {
+    final system = systemPrompt?.trim().isNotEmpty == true
+        ? systemPrompt!.trim()
+        : 'You are Form Bridge AI assistant for enterprise operations teams. '
+            'Use only the provided context to answer. If data is missing, say so '
+            'and ask a clarifying question. Provide concise, actionable answers.';
+    final response = await _postChat(
+      messages: [
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': prompt},
+      ],
+      temperature: temperature,
+    );
+    final content = response['choices']?[0]?['message']?['content'];
+    return _contentToText(content).trim();
+  }
+
   /// Translate text to a target language.
   Future<String> translateText({
     required String text,

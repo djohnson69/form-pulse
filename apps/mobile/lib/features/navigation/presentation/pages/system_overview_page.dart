@@ -187,7 +187,17 @@ class _MetricsGrid extends StatelessWidget {
               value: metrics.uptime,
               icon: Icons.dns_outlined,
               accent: const Color(0xFF2563EB),
-              secondaryAccent: const Color(0xFF4F46E5),
+              iconBackground: const Color(0xFF2563EB),
+              gradientLightStart: const Color(0xFFEFF6FF),
+              gradientLightEnd: const Color(0xFFE0E7FF),
+              gradientDarkStart:
+                  const Color(0xFF1E3A8A).withValues(alpha: 0.3),
+              gradientDarkEnd:
+                  const Color(0xFF312E81).withValues(alpha: 0.3),
+              borderLight: const Color(0xFFBFDBFE),
+              borderDark: const Color(0xFF1D4ED8).withValues(alpha: 0.5),
+              labelLight: const Color(0xFF1D4ED8),
+              labelDark: const Color(0xFF93C5FD),
               trailing: const Icon(
                 Icons.check_circle,
                 color: Color(0xFF22C55E),
@@ -199,21 +209,51 @@ class _MetricsGrid extends StatelessWidget {
               value: metrics.activeUsers.toString(),
               icon: Icons.groups_outlined,
               accent: const Color(0xFF7C3AED),
-              secondaryAccent: const Color(0xFFDB2777),
+              iconBackground: const Color(0xFF7C3AED),
+              gradientLightStart: const Color(0xFFF5F3FF),
+              gradientLightEnd: const Color(0xFFFDF2F8),
+              gradientDarkStart:
+                  const Color(0xFF581C87).withValues(alpha: 0.3),
+              gradientDarkEnd:
+                  const Color(0xFF831843).withValues(alpha: 0.3),
+              borderLight: const Color(0xFFE9D5FF),
+              borderDark: const Color(0xFF7E22CE).withValues(alpha: 0.5),
+              labelLight: const Color(0xFF6D28D9),
+              labelDark: const Color(0xFFD8B4FE),
             ),
             _MetricCard(
               label: 'API Calls Today',
               value: metrics.apiCalls,
-              icon: Icons.bolt_outlined,
+              icon: Icons.flash_on,
               accent: const Color(0xFF16A34A),
-              secondaryAccent: const Color(0xFF059669),
+              iconBackground: const Color(0xFF16A34A),
+              gradientLightStart: const Color(0xFFECFDF5),
+              gradientLightEnd: const Color(0xFFD1FAE5),
+              gradientDarkStart:
+                  const Color(0xFF14532D).withValues(alpha: 0.3),
+              gradientDarkEnd:
+                  const Color(0xFF064E3B).withValues(alpha: 0.3),
+              borderLight: const Color(0xFFBBF7D0),
+              borderDark: const Color(0xFF15803D).withValues(alpha: 0.5),
+              labelLight: const Color(0xFF15803D),
+              labelDark: const Color(0xFF86EFAC),
             ),
             _MetricCard(
               label: 'Avg Response Time',
               value: metrics.avgResponseTime,
-              icon: Icons.speed_outlined,
+              icon: Icons.show_chart_outlined,
               accent: const Color(0xFFF97316),
-              secondaryAccent: const Color(0xFFEF4444),
+              iconBackground: const Color(0xFFEA580C),
+              gradientLightStart: const Color(0xFFFFF7ED),
+              gradientLightEnd: const Color(0xFFFEF2F2),
+              gradientDarkStart:
+                  const Color(0xFF7C2D12).withValues(alpha: 0.3),
+              gradientDarkEnd:
+                  const Color(0xFF7F1D1D).withValues(alpha: 0.3),
+              borderLight: const Color(0xFFFED7AA),
+              borderDark: const Color(0xFFC2410C).withValues(alpha: 0.5),
+              labelLight: const Color(0xFFC2410C),
+              labelDark: const Color(0xFFFDBA74),
             ),
           ],
         );
@@ -228,7 +268,15 @@ class _MetricCard extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.accent,
-    this.secondaryAccent,
+    this.gradientLightStart,
+    this.gradientLightEnd,
+    this.gradientDarkStart,
+    this.gradientDarkEnd,
+    this.borderLight,
+    this.borderDark,
+    this.labelLight,
+    this.labelDark,
+    this.iconBackground,
     this.trailing,
   });
 
@@ -236,22 +284,36 @@ class _MetricCard extends StatelessWidget {
   final String value;
   final IconData icon;
   final Color accent;
-  final Color? secondaryAccent;
+  final Color? gradientLightStart;
+  final Color? gradientLightEnd;
+  final Color? gradientDarkStart;
+  final Color? gradientDarkEnd;
+  final Color? borderLight;
+  final Color? borderDark;
+  final Color? labelLight;
+  final Color? labelDark;
+  final Color? iconBackground;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final border = accent.withValues(alpha: isDark ? 0.5 : 0.35);
+    final border = isDark
+        ? (borderDark ?? accent.withValues(alpha: 0.5))
+        : (borderLight ?? accent.withValues(alpha: 0.35));
     final gradient = LinearGradient(
       colors: [
-        accent.withValues(alpha: isDark ? 0.3 : 0.15),
-        (secondaryAccent ?? accent)
-            .withValues(alpha: isDark ? 0.3 : 0.12),
+        (isDark ? gradientDarkStart : gradientLightStart) ??
+            accent.withValues(alpha: isDark ? 0.3 : 0.15),
+        (isDark ? gradientDarkEnd : gradientLightEnd) ??
+            accent.withValues(alpha: isDark ? 0.3 : 0.12),
       ],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
+    final labelColor = isDark
+        ? (labelDark ?? accent.withValues(alpha: 0.8))
+        : (labelLight ?? accent.withValues(alpha: 0.9));
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -270,7 +332,7 @@ class _MetricCard extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: accent,
+                  color: iconBackground ?? accent,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(icon, color: Colors.white, size: 24),
@@ -291,7 +353,7 @@ class _MetricCard extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: accent.withValues(alpha: isDark ? 0.8 : 0.9),
+                  color: labelColor,
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
                 ),
@@ -341,7 +403,7 @@ class _ResourceUsageCard extends StatelessWidget {
           _UsageRow(
             label: 'CPU Usage',
             value: metrics.cpu,
-            icon: Icons.memory_outlined,
+            icon: Icons.memory,
             color: const Color(0xFF3B82F6),
             muted: muted,
           ),
@@ -349,7 +411,7 @@ class _ResourceUsageCard extends StatelessWidget {
           _UsageRow(
             label: 'Memory Usage',
             value: metrics.memory,
-            icon: Icons.storage_outlined,
+            icon: Icons.storage,
             color: const Color(0xFF8B5CF6),
             muted: muted,
           ),
@@ -357,7 +419,7 @@ class _ResourceUsageCard extends StatelessWidget {
           _UsageRow(
             label: 'Disk Usage',
             value: metrics.disk,
-            icon: Icons.sd_storage_outlined,
+            icon: Icons.sd_storage,
             color: const Color(0xFFF97316),
             muted: muted,
           ),
@@ -393,6 +455,8 @@ class _UsageRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final labelColor =
+        isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -407,7 +471,7 @@ class _UsageRow extends StatelessWidget {
                   label,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: muted,
+                        color: labelColor,
                         fontSize: 14,
                       ),
                 ),
@@ -501,8 +565,30 @@ class _ServiceStatusTile extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isHealthy = service.status == _ServiceHealth.healthy;
     final accent = isHealthy ? const Color(0xFF22C55E) : const Color(0xFFF59E0B);
-    final background = accent.withValues(alpha: isDark ? 0.18 : 0.12);
-    final border = accent.withValues(alpha: isDark ? 0.5 : 0.35);
+    final background = isHealthy
+        ? (isDark
+            ? const Color(0xFF14532D).withValues(alpha: 0.2)
+            : const Color(0xFFF0FDF4))
+        : (isDark
+            ? const Color(0xFF78350F).withValues(alpha: 0.2)
+            : const Color(0xFFFFFBEB));
+    final border = isHealthy
+        ? (isDark
+            ? const Color(0xFF15803D).withValues(alpha: 0.5)
+            : const Color(0xFFBBF7D0))
+        : (isDark
+            ? const Color(0xFFB45309).withValues(alpha: 0.5)
+            : const Color(0xFFFEF3C7));
+    final pillBackground = isHealthy
+        ? (isDark
+            ? const Color(0xFF14532D).withValues(alpha: 0.5)
+            : const Color(0xFFDCFCE7))
+        : (isDark
+            ? const Color(0xFF78350F).withValues(alpha: 0.5)
+            : const Color(0xFFFEF3C7));
+    final pillText = isHealthy
+        ? (isDark ? const Color(0xFF4ADE80) : const Color(0xFF15803D))
+        : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309));
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -537,14 +623,14 @@ class _ServiceStatusTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: accent.withValues(alpha: isDark ? 0.25 : 0.15),
+                  color: pillBackground,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   isHealthy ? 'healthy' : 'warning',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: accent,
+                        color: pillText,
                         fontSize: 12,
                       ),
                 ),
@@ -636,8 +722,20 @@ class _AlertTile extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isWarning = alert.level == _AlertLevel.warning;
     final accent = isWarning ? const Color(0xFFF59E0B) : const Color(0xFF3B82F6);
-    final background = accent.withValues(alpha: isDark ? 0.18 : 0.12);
-    final border = accent.withValues(alpha: isDark ? 0.45 : 0.3);
+    final background = isWarning
+        ? (isDark
+            ? const Color(0xFF78350F).withValues(alpha: 0.2)
+            : const Color(0xFFFFFBEB))
+        : (isDark
+            ? const Color(0xFF1E3A8A).withValues(alpha: 0.2)
+            : const Color(0xFFEFF6FF));
+    final border = isWarning
+        ? (isDark
+            ? const Color(0xFFB45309).withValues(alpha: 0.5)
+            : const Color(0xFFFEF3C7))
+        : (isDark
+            ? const Color(0xFF1D4ED8).withValues(alpha: 0.5)
+            : const Color(0xFFBFDBFE));
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

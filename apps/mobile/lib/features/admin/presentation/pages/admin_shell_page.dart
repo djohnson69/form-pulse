@@ -18,6 +18,7 @@ import '../../../navigation/presentation/pages/photos_page.dart';
 import '../../../navigation/presentation/pages/qr_scanner_page.dart';
 import '../../../navigation/presentation/pages/roles_page.dart';
 import '../../../navigation/presentation/pages/roles_permissions_page.dart';
+import '../../../navigation/presentation/pages/role_customization_page.dart';
 import '../../../navigation/presentation/pages/support_tickets_page.dart';
 import '../../../navigation/presentation/pages/system_overview_page.dart';
 import '../../../navigation/presentation/pages/system_logs_page.dart';
@@ -96,6 +97,7 @@ Widget _adminPageForRoute(UserRole role, SideMenuRoute route) {
     SideMenuRoute.rolesPermissions => role == UserRole.admin
         ? const RolesPage()
         : const RolesPermissionsPage(),
+    SideMenuRoute.roleCustomization => const RoleCustomizationPage(),
     SideMenuRoute.systemOverview => const SystemOverviewPage(),
     SideMenuRoute.supportTickets => const SupportTicketsPage(),
     SideMenuRoute.knowledgeBase => const SopLibraryPage(),

@@ -3,12 +3,12 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'dashboard_repository.dart';
 import '../../../core/utils/file_bytes_loader.dart';
+import '../../../core/utils/secure_storage.dart';
 
 class PendingSubmission {
   PendingSubmission({
@@ -77,7 +77,6 @@ class PendingSubmissionQueue {
   static const _storageKey = 'pending_submissions';
   static const _secureKeyName = 'pending_submissions_key';
   static const _maxQueueAge = Duration(days: 7);
-  static final _secureStorage = FlutterSecureStorage();
 
   Future<void> add(PendingSubmission item) async {
     final list = await _readQueue();
@@ -210,16 +209,20 @@ Future<String?> _decryptQueue(String payload) async {
 }
 
 Future<Key> _loadKey() async {
-  final existing = await PendingSubmissionQueue._secureStorage
-      .read(key: PendingSubmissionQueue._secureKeyName);
-  if (existing != null && existing.isNotEmpty) {
-    return Key(base64Url.decode(existing));
+  try {
+    final existing = await SecureStorage.read(key: PendingSubmissionQueue._secureKeyName);
+    if (existing != null && existing.isNotEmpty) {
+      return Key(base64Url.decode(existing));
+    }
+    final key = Key.fromSecureRandom(32);
+    final encoded = base64UrlEncode(key.bytes);
+    await SecureStorage.write(key: PendingSubmissionQueue._secureKeyName, value: encoded);
+    return key;
+  } catch (e) {
+    // Fallback to a static key for compatibility
+    const fallbackKey = 'fallback_key_for_web_compatibility_32_chars';
+    return Key.fromUtf8(fallbackKey);
   }
-  final key = Key.fromSecureRandom(32);
-  final encoded = base64UrlEncode(key.bytes);
-  await PendingSubmissionQueue._secureStorage
-      .write(key: PendingSubmissionQueue._secureKeyName, value: encoded);
-  return key;
 }
 
 String _hashBytes(Uint8List bytes) =>

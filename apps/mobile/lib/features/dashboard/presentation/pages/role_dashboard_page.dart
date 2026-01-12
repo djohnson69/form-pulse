@@ -26,6 +26,7 @@ import '../../../navigation/presentation/pages/photos_page.dart';
 import '../../../navigation/presentation/pages/qr_scanner_page.dart';
 import '../../../navigation/presentation/pages/roles_page.dart';
 import '../../../navigation/presentation/pages/roles_permissions_page.dart';
+import '../../../navigation/presentation/pages/role_customization_page.dart';
 import '../../../navigation/presentation/pages/support_tickets_page.dart';
 import '../../../navigation/presentation/pages/system_overview_page.dart';
 import '../../../navigation/presentation/pages/system_logs_page.dart';
@@ -61,6 +62,8 @@ class RoleDashboardPage extends ConsumerWidget {
     final override = ref.watch(roleOverrideProvider);
     final activeRole = override ?? role;
     switch (activeRole) {
+      case UserRole.developer:
+        return const SuperAdminDashboardPage(role: UserRole.developer);
       case UserRole.superAdmin:
         return const SuperAdminDashboardPage();
       case UserRole.admin:
@@ -148,6 +151,7 @@ Widget _pageForRoute(UserRole role, SideMenuRoute route) {
     SideMenuRoute.rolesPermissions => role == UserRole.admin
         ? const RolesPage()
         : const RolesPermissionsPage(),
+    SideMenuRoute.roleCustomization => const RoleCustomizationPage(),
     SideMenuRoute.systemOverview => const SystemOverviewPage(),
     SideMenuRoute.supportTickets => const SupportTicketsPage(),
     SideMenuRoute.knowledgeBase => const SopLibraryPage(),
@@ -169,6 +173,7 @@ Widget _roleDashboardBody(UserRole role) {
       return const MaintenanceDashboardPage(embedInShell: false);
     case UserRole.techSupport:
       return const TechSupportDashboardPage(embedInShell: false);
+    case UserRole.developer:
     case UserRole.admin:
     case UserRole.superAdmin:
     case UserRole.client:
@@ -2195,6 +2200,7 @@ void _navigateFromSideMenu(
     SideMenuRoute.rolesPermissions => role == UserRole.admin
         ? const RolesPage()
         : const RolesPermissionsPage(),
+    SideMenuRoute.roleCustomization => const RoleCustomizationPage(),
     SideMenuRoute.systemOverview => const SystemOverviewPage(),
     SideMenuRoute.supportTickets => const SupportTicketsPage(),
     SideMenuRoute.knowledgeBase => const SopLibraryPage(),

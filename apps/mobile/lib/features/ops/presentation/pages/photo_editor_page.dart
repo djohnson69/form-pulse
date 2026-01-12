@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -123,26 +124,28 @@ class _PhotoEditorPageState extends ConsumerState<PhotoEditorPage> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                OutlinedButton.icon(
-                  onPressed: () => _pickPhoto(ImageSource.camera),
-                  icon: const Icon(Icons.photo_camera),
-                  label: const Text('Photo'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => _pickVideo(ImageSource.camera),
-                  icon: const Icon(Icons.videocam),
-                  label: const Text('Video'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _pickDualVideo,
-                  icon: const Icon(Icons.switch_video),
-                  label: const Text('Dual video'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _toggleRecording,
-                  icon: Icon(_recording ? Icons.stop : Icons.mic),
-                  label: Text(_recording ? 'Stop audio' : 'Voice note'),
-                ),
+                if (!kIsWeb) ...[
+                  OutlinedButton.icon(
+                    onPressed: () => _pickPhoto(ImageSource.camera),
+                    icon: const Icon(Icons.photo_camera),
+                    label: const Text('Photo'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _pickVideo(ImageSource.camera),
+                    icon: const Icon(Icons.videocam),
+                    label: const Text('Video'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _pickDualVideo,
+                    icon: const Icon(Icons.switch_video),
+                    label: const Text('Dual video'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _toggleRecording,
+                    icon: Icon(_recording ? Icons.stop : Icons.mic),
+                    label: Text(_recording ? 'Stop audio' : 'Voice note'),
+                  ),
+                ],
                 OutlinedButton.icon(
                   onPressed: _pickFile,
                   icon: const Icon(Icons.attach_file),

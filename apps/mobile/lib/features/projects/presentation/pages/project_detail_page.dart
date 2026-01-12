@@ -69,12 +69,10 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
         title: Text(_project.name),
         actions: [
           IconButton(
-            tooltip: 'Share gallery',
             icon: const Icon(Icons.share),
             onPressed: _shareProject,
           ),
           IconButton(
-            tooltip: 'Show QR code',
             icon: const Icon(Icons.qr_code_2),
             onPressed: _showShareQr,
           ),

@@ -1691,13 +1691,11 @@ class _AssetGridCard extends StatelessWidget {
               const SizedBox(width: 8),
               _IconActionButton(
                 icon: Icons.visibility_outlined,
-                tooltip: 'View',
                 onPressed: onOpen,
               ),
               const SizedBox(width: 8),
               _IconActionButton(
                 icon: Icons.edit_outlined,
-                tooltip: 'Edit',
                 onPressed: onEdit,
               ),
             ],
@@ -2057,26 +2055,21 @@ class _MetaRow extends StatelessWidget {
 class _IconActionButton extends StatelessWidget {
   const _IconActionButton({
     required this.icon,
-    required this.tooltip,
     required this.onPressed,
   });
 
   final IconData icon;
-  final String tooltip;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          minimumSize: const Size(0, 40),
-        ),
-        child: Icon(icon, size: 18),
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        minimumSize: const Size(0, 40),
       ),
+      child: Icon(icon, size: 18),
     );
   }
 }

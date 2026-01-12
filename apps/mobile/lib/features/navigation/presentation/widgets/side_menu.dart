@@ -33,6 +33,7 @@ enum SideMenuRoute {
   payroll,
   auditLogs,
   rolesPermissions,
+  roleCustomization,
   systemOverview,
   supportTickets,
   knowledgeBase,
@@ -77,6 +78,8 @@ List<SideMenuItem> sideMenuItemsForRole(UserRole role) {
   ];
 
   switch (role) {
+    case UserRole.developer:
+      return sideMenuItemsForRole(UserRole.superAdmin);
     case UserRole.employee:
       return [
         ...common,
@@ -402,6 +405,11 @@ List<SideMenuItem> sideMenuItemsForRole(UserRole role) {
           icon: Icons.security_outlined,
         ),
         const SideMenuItem(
+          route: SideMenuRoute.roleCustomization,
+          label: 'Role Customization',
+          icon: Icons.edit_outlined,
+        ),
+        const SideMenuItem(
           route: SideMenuRoute.tasks,
           label: 'Tasks',
           icon: Icons.checklist_outlined,
@@ -553,6 +561,11 @@ List<SideMenuItem> sideMenuItemsForRole(UserRole role) {
           route: SideMenuRoute.rolesPermissions,
           label: 'Roles & Permissions',
           icon: Icons.security_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.roleCustomization,
+          label: 'Role Customization',
+          icon: Icons.edit_outlined,
         ),
         const SideMenuItem(
           route: SideMenuRoute.projects,
@@ -965,7 +978,6 @@ class _MobileHeader extends StatelessWidget {
             IconButton(
               onPressed: onClose,
               icon: const Icon(Icons.close),
-              tooltip: 'Close menu',
             ),
           ],
         ),

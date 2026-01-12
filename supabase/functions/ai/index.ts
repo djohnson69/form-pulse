@@ -231,6 +231,15 @@ function buildMessages({
         },
         { role: "user", content: inputText },
       ];
+    case "assistant":
+      return [
+        {
+          role: "system",
+          content:
+            "You are Form Bridge AI assistant for enterprise operations teams. Use only the provided context to answer. If data is missing, say so and ask a clarifying question. Provide concise, actionable answers. When listing records, include name, status, and due date if available. Keep responses under 10 bullets.",
+        },
+        { role: "user", content: inputText },
+      ];
     case "summary":
     default:
       return [

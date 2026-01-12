@@ -545,6 +545,7 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
           icon: Icons.report,
         );
         break;
+      case UserRole.developer:
       case UserRole.superAdmin:
         add(
           id: 'sa-1',
@@ -676,7 +677,7 @@ class _NotificationsHeader extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: colors.primaryContainer,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: colors.primary.withValues(alpha: 0.2),
                 ),
@@ -727,10 +728,10 @@ class _PriorityFilterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
       ),
       child: Column(
@@ -769,9 +770,9 @@ class _PriorityFilterCard extends StatelessWidget {
                   backgroundColor: background,
                   foregroundColor: foreground,
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
                 child: Row(
@@ -830,11 +831,11 @@ class _NotificationCard extends StatelessWidget {
     final dismissForeground =
         isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
     final card = ClipRRect(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         decoration: BoxDecoration(
           color: style.background,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: style.border),
         ),
         child: Stack(
@@ -842,19 +843,19 @@ class _NotificationCard extends StatelessWidget {
             Positioned.fill(
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Container(
+              child: Container(
                   width: 4,
                   decoration: BoxDecoration(
                     color: style.accent,
                     borderRadius: const BorderRadius.horizontal(
-                      left: Radius.circular(16),
+                      left: Radius.circular(12),
                     ),
                   ),
                 ),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -862,7 +863,7 @@ class _NotificationCard extends StatelessWidget {
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: style.iconBackground,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child:
                         Icon(notification.icon, color: style.iconColor, size: 20),
@@ -928,11 +929,11 @@ class _NotificationCard extends StatelessWidget {
                               style: TextButton.styleFrom(
                                 backgroundColor: dismissBackground,
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
+                                  horizontal: 12,
                                   vertical: 6,
                                 ),
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(8),
                                   side: BorderSide(color: dismissBorder),
                                 ),
                               ),
@@ -977,7 +978,7 @@ class _PriorityChip extends StatelessWidget {
         label.label.toUpperCase(),
         style: TextStyle(
           color: style.chipText,
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -1000,21 +1001,22 @@ class _EmptyState extends StatelessWidget {
         ? "You're all caught up!"
         : 'No ${filter.label.toLowerCase()} priority notifications';
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(48),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
       ),
       child: Column(
         children: [
-          Icon(Icons.notifications_none, size: 48, color: colors.muted),
+          Icon(Icons.notifications_none, size: 64, color: colors.muted),
           const SizedBox(height: 12),
           Text(
             'No notifications',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: colors.title,
+                  fontSize: 20,
                 ),
           ),
           const SizedBox(height: 6),
@@ -1338,6 +1340,8 @@ String _roleDisplayName(UserRole role) {
       return 'Maintenance';
     case UserRole.admin:
       return 'Admin';
+    case UserRole.developer:
+      return 'Developer';
     case UserRole.superAdmin:
       return 'Super Admin';
     case UserRole.techSupport:

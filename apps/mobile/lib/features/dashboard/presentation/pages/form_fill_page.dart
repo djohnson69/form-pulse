@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -463,7 +464,6 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
               : null,
           suffixIcon: enableAi
               ? IconButton(
-                  tooltip: 'AI assist',
                   icon: const Icon(Icons.auto_awesome),
                   onPressed: () => _openAiAssistForField(field),
                 )
@@ -680,12 +680,10 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.camera_alt_outlined),
-                  tooltip: 'Capture photo',
                   onPressed: () => _addPhoto(fromCamera: true),
                 ),
                 IconButton(
                   icon: const Icon(Icons.image_outlined),
-                  tooltip: 'Pick from gallery',
                   onPressed: () => _addPhoto(fromCamera: false),
                 ),
               ],
@@ -898,12 +896,10 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
                         children: [
                           if (att.type == 'photo')
                             IconButton(
-                              tooltip: 'Annotate',
                               icon: const Icon(Icons.edit),
                               onPressed: () => _annotatePhoto(att),
                             ),
                           IconButton(
-                            tooltip: 'Remove',
                             icon: const Icon(Icons.close),
                             onPressed: () {
                               setState(() => _attachments.remove(att));
@@ -919,24 +915,26 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
             Wrap(
               spacing: 12,
               children: [
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.camera_alt_outlined),
-                  label: const Text('Camera'),
-                  onPressed: () => _addPhoto(fromCamera: true),
-                ),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.image_outlined),
-                  label: const Text('Gallery'),
-                  onPressed: () => _addPhoto(fromCamera: false),
-                ),
-                OutlinedButton.icon(
-                  icon: Icon(
-                    _isRecordingAudio ? Icons.stop_circle : Icons.mic,
+                if (!kIsWeb) ...[
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.camera_alt_outlined),
+                    label: const Text('Camera'),
+                    onPressed: () => _addPhoto(fromCamera: true),
                   ),
-                  label: Text(_isRecordingAudio ? 'Stop' : 'Audio'),
-                  onPressed:
-                      _submitting ? null : () => _toggleAudioRecording(),
-                ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text('Gallery'),
+                    onPressed: () => _addPhoto(fromCamera: false),
+                  ),
+                  OutlinedButton.icon(
+                    icon: Icon(
+                      _isRecordingAudio ? Icons.stop_circle : Icons.mic,
+                    ),
+                    label: Text(_isRecordingAudio ? 'Stop' : 'Audio'),
+                    onPressed:
+                        _submitting ? null : () => _toggleAudioRecording(),
+                  ),
+                ],
                 OutlinedButton.icon(
                   icon: const Icon(Icons.upload_file),
                   label: const Text('Upload'),
@@ -1030,7 +1028,6 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.add),
-                  tooltip: 'Add row',
                   onPressed: () {
                     setState(() {
                       items.add({});
@@ -1107,7 +1104,6 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.add),
-                  tooltip: 'Add row',
                   onPressed: () {
                     setState(() {
                       rows.add({});

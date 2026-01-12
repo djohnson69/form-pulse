@@ -24,10 +24,16 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB);
+    final headerIconColor =
+        isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
     return Scaffold(
+      backgroundColor: background,
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final paddingValue = constraints.maxWidth >= 768 ? 24.0 : 16.0;
+          final isWide = constraints.maxWidth >= 768;
+          final paddingValue = isWide ? 24.0 : 16.0;
           final maxWidth =
               constraints.maxWidth > 1280 ? 1280.0 : constraints.maxWidth;
           return Align(
@@ -39,13 +45,14 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.shield, size: 32, color: scheme.primary),
+                      Icon(Icons.shield, size: 32, color: headerIconColor),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           'Roles & Permissions',
                           style: textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.w700,
+                            fontSize: isWide ? 30 : 24,
                           ),
                         ),
                       ),
@@ -55,8 +62,9 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
                   Text(
                     'Manage user roles and configure granular permissions for your organization.',
                     style: textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
+                      color: scheme.onSurfaceVariant,
+                      fontSize: isWide ? 16 : 14,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   _buildRolesGrid(context),
@@ -139,14 +147,18 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final matrixBackground =
+        isDark ? const Color(0xFF1F2937) : Colors.white;
     final expandedBackground =
-        isDark ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB);
+        isDark ? const Color(0xFF2A3444) : const Color(0xFFF9FAFB);
+    final hoverBackground = expandedBackground;
     return Container(
       decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: matrixBackground,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -154,8 +166,9 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
             child: Text(
               'Permission Matrix',
-              style: theme.textTheme.titleLarge?.copyWith(
+              style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: 20,
               ),
             ),
           ),
@@ -165,6 +178,7 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
               'Configure granular permissions for each role.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
+                fontSize: 14,
               ),
             ),
           ),
@@ -185,6 +199,9 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
                       }
                     });
                   },
+                  hoverColor: hoverBackground,
+                  splashColor: Colors.transparent,
+                  highlightColor: Colors.transparent,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,
@@ -200,10 +217,11 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
                                 ? const Color(0xFF1E3A8A)
                                     .withValues(alpha: 0.3)
                                 : const Color(0xFFDBEAFE),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                           child: Icon(
                             category.icon,
+                            size: 20,
                             color: isDark
                                 ? const Color(0xFF60A5FA)
                                 : const Color(0xFF2563EB),
@@ -218,6 +236,7 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
                                 category.name,
                                 style: theme.textTheme.titleSmall?.copyWith(
                                   fontWeight: FontWeight.w600,
+                                  color: scheme.onSurface,
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -242,6 +261,7 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
                           isExpanded
                               ? Icons.expand_more
                               : Icons.chevron_right,
+                          size: 20,
                           color: scheme.onSurfaceVariant,
                         ),
                       ],
@@ -901,14 +921,52 @@ class _RoleCard extends StatelessWidget {
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final tone = _RoleTone.fromColor(role.color, isDark);
+    final cardBorder =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final cardBackground =
+        isDark ? const Color(0xFF1F2937) : Colors.white;
+    final actionHover =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+    final actionIcon =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563);
+    final saveIcon =
+        isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
+    final deleteIcon =
+        isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    final disabledIcon =
+        isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF);
+    final inputDecoration = InputDecoration(
+      isDense: true,
+      filled: true,
+      fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: BorderSide(color: cardBorder),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF2563EB) : const Color(0xFF3B82F6),
+        ),
+      ),
+    );
     final customBadge = _BadgeTone(
       background: isDark
           ? const Color(0xFF1E3A8A).withValues(alpha: 0.35)
           : const Color(0xFFDBEAFE),
       text: isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8),
     );
-    Widget buildContent() {
-      return Padding(
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: cardBackground,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: cardBorder),
+      ),
+      child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -918,14 +976,14 @@ class _RoleCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 52,
-                  height: 52,
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     color: tone.background,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: tone.border),
                   ),
-                  child: Icon(Icons.shield, color: tone.text),
+                  child: Icon(Icons.shield, size: 24, color: tone.text),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -936,13 +994,19 @@ class _RoleCard extends StatelessWidget {
                         TextFormField(
                           initialValue: role.name,
                           onChanged: onUpdateName,
-                          decoration: const InputDecoration(isDense: true),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                          decoration: inputDecoration,
                         )
                       else
                         Text(
                           role.name,
-                          style: theme.textTheme.titleMedium?.copyWith(
+                          style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w600,
+                            color: scheme.onSurface,
+                            fontSize: 16,
                           ),
                         ),
                       const SizedBox(height: 4),
@@ -952,18 +1016,23 @@ class _RoleCard extends StatelessWidget {
                           minLines: 2,
                           maxLines: 3,
                           onChanged: onUpdateDescription,
-                          decoration: const InputDecoration(isDense: true),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 13,
+                          ),
+                          decoration: inputDecoration,
                         )
                       else
                         Text(
                           role.description,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
+                            fontSize: 13,
                           ),
                         ),
                       const SizedBox(height: 10),
                       Wrap(
-                        spacing: 8,
+                        spacing: 12,
                         runSpacing: 4,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
@@ -1006,8 +1075,12 @@ class _RoleCard extends StatelessWidget {
                         width: 32,
                         height: 32,
                       ),
-                      tooltip: isEditing ? 'Save' : 'Edit',
-                      icon: Icon(isEditing ? Icons.save : Icons.edit),
+                      icon: Icon(
+                        isEditing ? Icons.save : Icons.edit,
+                        size: 16,
+                      ),
+                      color: isEditing ? saveIcon : actionIcon,
+                      hoverColor: actionHover,
                       onPressed: isEditing ? onSave : onEdit,
                     ),
                     IconButton(
@@ -1016,8 +1089,9 @@ class _RoleCard extends StatelessWidget {
                         width: 32,
                         height: 32,
                       ),
-                      tooltip: 'Duplicate',
-                      icon: const Icon(Icons.copy_rounded),
+                      icon: const Icon(Icons.copy_rounded, size: 16),
+                      color: actionIcon,
+                      hoverColor: actionHover,
                       onPressed: onDuplicate,
                     ),
                     if (role.isCustom)
@@ -1027,21 +1101,25 @@ class _RoleCard extends StatelessWidget {
                           width: 32,
                           height: 32,
                         ),
-                        tooltip: 'Delete',
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: onDelete,
+                        icon: const Icon(Icons.delete_outline, size: 16),
+                        color: deleteIcon,
+                        hoverColor: actionHover,
+                        disabledColor: disabledIcon,
+                        onPressed: role.userCount > 0 ? null : onDelete,
                       ),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            Divider(color: scheme.outlineVariant),
+            Divider(color: cardBorder),
             const SizedBox(height: 12),
             Text(
               'Permissions (${role.permissions.length})',
               style: theme.textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant,
+                fontSize: 13,
               ),
             ),
             const SizedBox(height: 10),
@@ -1070,19 +1148,6 @@ class _RoleCard extends StatelessWidget {
             }),
           ],
         ),
-      );
-    }
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final content = buildContent();
-          if (!constraints.hasBoundedHeight) {
-            return content;
-          }
-          return SingleChildScrollView(child: content);
-        },
       ),
     );
   }
@@ -1207,11 +1272,11 @@ class _CreateRoleCardState extends State<_CreateRoleCard> {
       onExit: (_) => setState(() => _isHovered = false),
       child: _DashedBorder(
         color: borderColor,
-        radius: 16,
+        radius: 12,
         child: Material(
           color: backgroundColor,
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             onTap: widget.onTap,
             hoverColor: Colors.transparent,
             splashColor: Colors.transparent,
@@ -1223,8 +1288,8 @@ class _CreateRoleCardState extends State<_CreateRoleCard> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Container(
-                      width: 52,
-                      height: 52,
+                      width: 48,
+                      height: 48,
                       decoration: BoxDecoration(
                         color: isDark
                             ? const Color(0xFF1F2937)
@@ -1233,6 +1298,7 @@ class _CreateRoleCardState extends State<_CreateRoleCard> {
                       ),
                       child: Icon(
                         Icons.add,
+                        size: 24,
                         color: isDark
                             ? const Color(0xFF9CA3AF)
                             : const Color(0xFF4B5563),
@@ -1349,7 +1415,7 @@ class _PermissionMatrixTable extends StatelessWidget {
     final bodyText =
         isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
     const roleColumnWidth = 96.0;
-    const permissionMinWidth = 260.0;
+    const permissionMinWidth = 240.0;
     final minWidth = roles.length * roleColumnWidth + permissionMinWidth;
     final safeViewportWidth = viewportWidth.isFinite ? viewportWidth : minWidth;
     final tableWidth =
@@ -1370,6 +1436,7 @@ class _PermissionMatrixTable extends StatelessWidget {
                     'Permission',
                     style: theme.textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w600,
+                      fontSize: 14,
                       color: headerText,
                     ),
                   ),
@@ -1390,6 +1457,7 @@ class _PermissionMatrixTable extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall?.copyWith(
                           fontWeight: FontWeight.w600,
+                          fontSize: 12,
                           color: headerText,
                         ),
                       ),
@@ -1411,6 +1479,7 @@ class _PermissionMatrixTable extends StatelessWidget {
                     child: Text(
                       permission.label,
                       style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: 14,
                         color: bodyText,
                       ),
                     ),
@@ -1523,7 +1592,7 @@ class _PermissionToggle extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(6),
-        hoverColor: hoverOverlay.withValues(alpha: 0.2),
+        hoverColor: hoverOverlay.withOpacity(0.2),
         child: Container(
           width: 24,
           height: 24,

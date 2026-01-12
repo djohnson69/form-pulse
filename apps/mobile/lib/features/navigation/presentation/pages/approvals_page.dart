@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class ApprovalsPage extends StatefulWidget {
+import '../../data/approvals_provider.dart';
+import '../../../dashboard/data/active_role_provider.dart';
+
+class ApprovalsPage extends ConsumerStatefulWidget {
   const ApprovalsPage({super.key});
 
   @override
-  State<ApprovalsPage> createState() => _ApprovalsPageState();
+  ConsumerState<ApprovalsPage> createState() => _ApprovalsPageState();
 }
 
-class _ApprovalsPageState extends State<ApprovalsPage> {
+class _ApprovalsPageState extends ConsumerState<ApprovalsPage> {
   final TextEditingController _commentController = TextEditingController();
   _ApprovalStatusFilter _filter = _ApprovalStatusFilter.pending;
   _ApprovalItem? _selectedItem;
@@ -21,13 +28,17 @@ class _ApprovalsPageState extends State<ApprovalsPage> {
   @override
   Widget build(BuildContext context) {
     final colors = _ApprovalColors.fromTheme(Theme.of(context));
-    final items = _demoApprovalItems;
-    final filteredItems = items
-        .where(
-          (item) => _filter == _ApprovalStatusFilter.all ||
-              _filter.name == item.status.name,
-        )
+    final approvalsAsync = ref.watch(approvalsProvider);
+    final role = ref.watch(activeRoleProvider);
+    final items = approvalsAsync.maybeWhen(
+      data: (data) => data,
+      orElse: () => const <ApprovalItem>[],
+    );
+    final viewItems = items.map(_toViewModel).toList();
+    final filteredItems = viewItems
+        .where((item) => _matchesFilter(item.status, _filter))
         .toList();
+    final selectedView = _resolveSelection(filteredItems);
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -41,23 +52,34 @@ class _ApprovalsPageState extends State<ApprovalsPage> {
             colors: colors,
             onChanged: (value) => setState(() => _filter = value),
           ),
+          if (approvalsAsync.isLoading) const LinearProgressIndicator(),
+          if (approvalsAsync.hasError)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Failed to load approvals',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           const SizedBox(height: 16),
           LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 900;
               final list = _ApprovalList(
                 items: filteredItems,
-                selectedItem: _selectedItem,
+                selectedItem: selectedView,
                 colors: colors,
                 onSelect: (item) => setState(() => _selectedItem = item),
               );
               final details = _ApprovalDetail(
-                item: _selectedItem,
+                item: selectedView,
                 colors: colors,
                 commentController: _commentController,
-                onApprove: _handleApprove,
-                onReject: _handleReject,
-                onRequestRevision: _handleRequestRevision,
+                onApprove: () => _handleStatusChange(selectedView, 'approved'),
+                onReject: () => _handleStatusChange(selectedView, 'rejected'),
+                onRequestRevision: () =>
+                    _handleStatusChange(selectedView, 'revision'),
+                role: role,
               );
               if (isWide) {
                 return Row(
@@ -84,30 +106,49 @@ class _ApprovalsPageState extends State<ApprovalsPage> {
     );
   }
 
-  void _handleApprove() {
-    if (_selectedItem == null) return;
-    _showSnackBar('Approved: ${_selectedItem!.title}');
-    _commentController.clear();
+  _ApprovalItem? _resolveSelection(List<_ApprovalItem> items) {
+    if (items.isEmpty) return null;
+    if (_selectedItem != null) {
+      final match = items.firstWhere(
+        (item) => item.id == _selectedItem!.id,
+        orElse: () => items.first,
+      );
+      return match;
+    }
+    return items.first;
   }
 
-  void _handleReject() {
-    if (_selectedItem == null) return;
-    if (_commentController.text.trim().isEmpty) {
-      _showSnackBar('Please provide a reason for rejection');
+  Future<void> _handleStatusChange(
+    _ApprovalItem? selected,
+    String status,
+  ) async {
+    final item = selected ?? _selectedItem;
+    if (item == null) return;
+    if ((status == 'rejected' || status == 'revision') &&
+        _commentController.text.trim().isEmpty) {
+      _showSnackBar('Please add notes before ${status == 'rejected' ? 'rejecting' : 'requesting revision'}');
       return;
     }
-    _showSnackBar('Rejected: ${_selectedItem!.title}');
-    _commentController.clear();
-  }
-
-  void _handleRequestRevision() {
-    if (_selectedItem == null) return;
-    if (_commentController.text.trim().isEmpty) {
-      _showSnackBar('Please provide revision instructions');
-      return;
+    final repo = ref.read(approvalsRepositoryProvider);
+    try {
+      final updated = await repo.updateStatus(
+        id: item.id,
+        status: status,
+        notes: _commentController.text.trim().isEmpty
+            ? null
+            : _commentController.text.trim(),
+      );
+      setState(() {
+        _selectedItem = _toViewModel(updated);
+      });
+      ref.invalidate(approvalsProvider);
+      _commentController.clear();
+      _showSnackBar('${status[0].toUpperCase()}${status.substring(1)}: ${item.title}');
+    } on PostgrestException catch (e) {
+      _showSnackBar('Update failed: ${e.message}');
+    } catch (e) {
+      _showSnackBar('Update failed: $e');
     }
-    _showSnackBar('Revision requested: ${_selectedItem!.title}');
-    _commentController.clear();
   }
 
   void _showSnackBar(String message) {
@@ -205,6 +246,31 @@ class _ApprovalList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.inbox_outlined, color: colors.muted),
+            const SizedBox(width: 8),
+            Text(
+              'No approvals to review',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -218,10 +284,10 @@ class _ApprovalList extends StatelessWidget {
         const SizedBox(height: 12),
         ...items.map((item) {
           final selected = selectedItem?.id == item.id;
-          final cardColor = selected
-              ? colors.selectedSurface
-              : colors.surface;
+          final cardColor =
+              selected ? colors.selectedSurface : colors.surface;
           final borderColor = selected ? colors.primary : colors.border;
+          final statusStyle = _statusStyleFor(colors, item.status);
           return GestureDetector(
             onTap: () => onSelect(item),
             child: Container(
@@ -238,8 +304,7 @@ class _ApprovalList extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.description_outlined,
-                          size: 18, color: _urgencyColor(item.urgency)),
+                      Icon(_typeIcon(item.type), size: 18, color: colors.muted),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
@@ -272,14 +337,13 @@ class _ApprovalList extends StatelessWidget {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: colors.statusStyles[item.status]!.background,
+                          color: statusStyle.background,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
-                          item.status.label,
+                          item.statusLabel,
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color:
-                                    colors.statusStyles[item.status]!.foreground,
+                                color: statusStyle.foreground,
                                 fontWeight: FontWeight.w600,
                               ),
                         ),
@@ -291,31 +355,29 @@ class _ApprovalList extends StatelessWidget {
                     children: [
                       _MetaPill(
                         icon: Icons.person_outline,
-                        label: item.submittedBy,
+                        label: item.requestedBy,
                         colors: colors,
                       ),
                       const SizedBox(width: 8),
                       _MetaPill(
                         icon: Icons.schedule_outlined,
-                        label: item.submittedDate,
+                        label: item.requestedDate,
                         colors: colors,
                       ),
                       const SizedBox(width: 8),
                       _MetaPill(
-                        icon: Icons.attach_file_outlined,
-                        label: '${item.attachments} files',
+                        icon: Icons.category_outlined,
+                        label: item.typeLabel,
                         colors: colors,
                       ),
                     ],
                   ),
-                  if (item.status == _ApprovalStatus.pending) ...[
+                  if (item.notes?.isNotEmpty == true) ...[
                     const SizedBox(height: 8),
-                    Divider(height: 1, color: colors.border),
-                    const SizedBox(height: 6),
                     Text(
-                      'Current Approver: ${item.currentApprover}',
+                      'Requester notes: ${item.notes}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.muted,
+                            color: colors.body,
                           ),
                     ),
                   ],
@@ -337,6 +399,7 @@ class _ApprovalDetail extends StatelessWidget {
     required this.onApprove,
     required this.onReject,
     required this.onRequestRevision,
+    required this.role,
   });
 
   final _ApprovalItem? item;
@@ -345,9 +408,13 @@ class _ApprovalDetail extends StatelessWidget {
   final VoidCallback onApprove;
   final VoidCallback onReject;
   final VoidCallback onRequestRevision;
+  final UserRole role;
 
   @override
   Widget build(BuildContext context) {
+    final canAct = _canAct(role);
+    final canChangeStatus = item != null && _canChangeStatus(item!.status);
+    final showActions = canAct && canChangeStatus;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -361,32 +428,72 @@ class _ApprovalDetail extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Review & Approve',
+                  item!.title,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                         color: colors.title,
                       ),
                 ),
                 const SizedBox(height: 12),
-                _DetailRow(label: 'Document Type', value: item!.type.label, colors: colors),
-                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _DetailRow(
+                      label: 'Type',
+                      value: item!.typeLabel,
+                      colors: colors,
+                    ),
+                    _DetailRow(
+                      label: 'Requested by',
+                      value: item!.requestedBy,
+                      colors: colors,
+                    ),
+                    _DetailRow(
+                      label: 'Requested at',
+                      value: item!.requestedDate,
+                      colors: colors,
+                    ),
+                    _DetailRow(
+                      label: 'Status',
+                      value: item!.statusLabel,
+                      colors: colors,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
                 Text(
-                  'Approval Chain',
+                  'Description',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: colors.muted,
                         fontWeight: FontWeight.w600,
                       ),
                 ),
-                const SizedBox(height: 8),
-                ...item!.approvers.asMap().entries.map(
-                      (entry) => _ApproverRow(
-                        index: entry.key,
-                        approver: entry.value,
-                        currentApprover: item!.currentApprover,
-                        colors: colors,
+                const SizedBox(height: 6),
+                Text(
+                  item!.description,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.body,
                       ),
-                    ),
-                if (item!.status == _ApprovalStatus.pending) ...[
+                ),
+                if (item!.notes?.isNotEmpty == true) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Requester notes',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.muted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    item!.notes!,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.body,
+                        ),
+                  ),
+                ],
+                if (showActions) ...[
                   const SizedBox(height: 16),
                   Text(
                     'Comments / Instructions',
@@ -434,6 +541,17 @@ class _ApprovalDetail extends StatelessWidget {
                 ] else ...[
                   const SizedBox(height: 16),
                   _StatusNotice(status: item!.status, colors: colors),
+                  if (!canAct)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'You do not have permission to change this approval with the current role.',
+                        style:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: colors.muted,
+                                ),
+                      ),
+                    ),
                 ],
               ],
             ),
@@ -494,57 +612,6 @@ class _DetailRow extends StatelessWidget {
               ),
         ),
       ],
-    );
-  }
-}
-
-class _ApproverRow extends StatelessWidget {
-  const _ApproverRow({
-    required this.index,
-    required this.approver,
-    required this.currentApprover,
-    required this.colors,
-  });
-
-  final int index;
-  final String approver;
-  final String currentApprover;
-  final _ApprovalColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    final isCurrent = approver == currentApprover;
-    final circleColor = isCurrent ? colors.primary : colors.subtleSurface;
-    final textColor = isCurrent ? colors.primary : colors.muted;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: circleColor,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Center(
-              child: Text(
-                '${index + 1}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: isCurrent ? Colors.white : colors.muted,
-                    ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            approver,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: textColor,
-                ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -614,18 +681,12 @@ class _ActionButton extends StatelessWidget {
 class _StatusNotice extends StatelessWidget {
   const _StatusNotice({required this.status, required this.colors});
 
-  final _ApprovalStatus status;
+  final String status;
   final _ApprovalColors colors;
 
   @override
   Widget build(BuildContext context) {
-    final style = colors.statusStyles[status]!;
-    final message = switch (status) {
-      _ApprovalStatus.approved => 'This item has been approved',
-      _ApprovalStatus.rejected => 'This item has been rejected',
-      _ApprovalStatus.needsRevision => 'Revisions requested',
-      _ => 'Pending approval',
-    };
+    final style = _statusStyleFor(colors, status);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -635,18 +696,14 @@ class _StatusNotice extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            status == _ApprovalStatus.approved
-                ? Icons.check_circle
-                : status == _ApprovalStatus.rejected
-                    ? Icons.cancel
-                    : Icons.warning_amber,
+            _statusIcon(status),
             color: style.foreground,
             size: 18,
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              message,
+              _statusMessage(status),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: style.foreground,
                     fontWeight: FontWeight.w600,
@@ -659,7 +716,7 @@ class _StatusNotice extends StatelessWidget {
   }
 }
 
-enum _ApprovalStatusFilter { all, pending, approved, rejected }
+enum _ApprovalStatusFilter { all, pending, approved, rejected, revision }
 
 String _filterLabel(_ApprovalStatusFilter filter) {
   switch (filter) {
@@ -669,25 +726,10 @@ String _filterLabel(_ApprovalStatusFilter filter) {
       return 'Approved';
     case _ApprovalStatusFilter.rejected:
       return 'Rejected';
+    case _ApprovalStatusFilter.revision:
+      return 'Needs revision';
     default:
       return 'All';
-  }
-}
-
-enum _ApprovalStatus { pending, approved, rejected, needsRevision }
-
-extension on _ApprovalStatus {
-  String get label {
-    switch (this) {
-      case _ApprovalStatus.pending:
-        return 'pending';
-      case _ApprovalStatus.approved:
-        return 'approved';
-      case _ApprovalStatus.rejected:
-        return 'rejected';
-      case _ApprovalStatus.needsRevision:
-        return 'needs revision';
-    }
   }
 }
 
@@ -734,7 +776,7 @@ class _ApprovalColors {
   final Color success;
   final Color warning;
   final Color danger;
-  final Map<_ApprovalStatus, _ApprovalStatusStyle> statusStyles;
+  final Map<String, _ApprovalStatusStyle> statusStyles;
 
   factory _ApprovalColors.fromTheme(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
@@ -760,22 +802,27 @@ class _ApprovalColors {
       warning: warning,
       danger: danger,
       statusStyles: {
-        _ApprovalStatus.approved: _ApprovalStatusStyle(
+        'approved': _ApprovalStatusStyle(
           label: 'approved',
           background: success.withValues(alpha: isDark ? 0.2 : 0.15),
           foreground: isDark ? const Color(0xFF4ADE80) : success,
         ),
-        _ApprovalStatus.rejected: _ApprovalStatusStyle(
+        'rejected': _ApprovalStatusStyle(
           label: 'rejected',
           background: danger.withValues(alpha: isDark ? 0.2 : 0.15),
           foreground: isDark ? const Color(0xFFFCA5A5) : danger,
         ),
-        _ApprovalStatus.needsRevision: _ApprovalStatusStyle(
+        'revision': _ApprovalStatusStyle(
           label: 'needs revision',
           background: warning.withValues(alpha: isDark ? 0.2 : 0.15),
           foreground: isDark ? const Color(0xFFFCD34D) : warning,
         ),
-        _ApprovalStatus.pending: _ApprovalStatusStyle(
+        'needs_revision': _ApprovalStatusStyle(
+          label: 'needs revision',
+          background: warning.withValues(alpha: isDark ? 0.2 : 0.15),
+          foreground: isDark ? const Color(0xFFFCD34D) : warning,
+        ),
+        'pending': _ApprovalStatusStyle(
           label: 'pending',
           background: primary.withValues(alpha: isDark ? 0.2 : 0.15),
           foreground: isDark ? const Color(0xFF93C5FD) : primary,
@@ -788,115 +835,159 @@ class _ApprovalColors {
 class _ApprovalItem {
   const _ApprovalItem({
     required this.id,
-    required this.type,
     required this.title,
-    required this.submittedBy,
-    required this.submittedDate,
-    required this.status,
     required this.description,
-    required this.attachments,
-    required this.urgency,
-    required this.approvers,
-    required this.currentApprover,
+    required this.requestedBy,
+    required this.requestedDate,
+    required this.status,
+    required this.statusLabel,
+    required this.type,
+    required this.typeLabel,
+    this.notes,
   });
 
   final String id;
-  final _ApprovalType type;
   final String title;
-  final String submittedBy;
-  final String submittedDate;
-  final _ApprovalStatus status;
   final String description;
-  final int attachments;
-  final _ApprovalUrgency urgency;
-  final List<String> approvers;
-  final String currentApprover;
+  final String requestedBy;
+  final String requestedDate;
+  final String status;
+  final String statusLabel;
+  final String type;
+  final String typeLabel;
+  final String? notes;
 }
 
-enum _ApprovalType { report, form, document, incident }
+_ApprovalItem _toViewModel(ApprovalItem item) {
+  final statusKey = _normalizeStatus(item.status);
+  final requestedBy = _formatRequestedBy(item.requestedBy);
+  return _ApprovalItem(
+    id: item.id,
+    title: item.title.trim().isEmpty ? 'Approval' : item.title.trim(),
+    description: item.description.trim().isEmpty
+        ? 'No description provided'
+        : item.description.trim(),
+    requestedBy: requestedBy,
+    requestedDate: _formatRequestedAt(item.requestedAt),
+    status: statusKey,
+    statusLabel: _statusLabel(statusKey),
+    type: item.type,
+    typeLabel: _typeLabel(item.type),
+    notes: item.notes?.trim().isEmpty == true ? null : item.notes?.trim(),
+  );
+}
 
-extension on _ApprovalType {
-  String get label {
-    switch (this) {
-      case _ApprovalType.report:
-        return 'Report';
-      case _ApprovalType.form:
-        return 'Form';
-      case _ApprovalType.document:
-        return 'Document';
-      case _ApprovalType.incident:
-        return 'Incident';
-    }
+bool _matchesFilter(String status, _ApprovalStatusFilter filter) {
+  final normalized = _normalizeStatus(status);
+  switch (filter) {
+    case _ApprovalStatusFilter.all:
+      return true;
+    case _ApprovalStatusFilter.pending:
+      return normalized == 'pending';
+    case _ApprovalStatusFilter.approved:
+      return normalized == 'approved';
+    case _ApprovalStatusFilter.rejected:
+      return normalized == 'rejected';
+    case _ApprovalStatusFilter.revision:
+      return normalized == 'revision' || normalized == 'needs_revision';
   }
 }
 
-enum _ApprovalUrgency { low, medium, high }
+String _normalizeStatus(String status) =>
+    status.trim().toLowerCase().replaceAll(' ', '_').replaceAll('-', '_');
 
-Color _urgencyColor(_ApprovalUrgency urgency) {
-  switch (urgency) {
-    case _ApprovalUrgency.high:
-      return const Color(0xFFEF4444);
-    case _ApprovalUrgency.medium:
-      return const Color(0xFFF59E0B);
+String _statusLabel(String status) {
+  final normalized = _normalizeStatus(status);
+  switch (normalized) {
+    case 'approved':
+      return 'Approved';
+    case 'rejected':
+      return 'Rejected';
+    case 'revision':
+    case 'needs_revision':
+      return 'Needs revision';
     default:
-      return const Color(0xFF6B7280);
+      return 'Pending';
   }
 }
 
-const _demoApprovalItems = [
-  _ApprovalItem(
-    id: '1',
-    type: _ApprovalType.report,
-    title: 'Weekly Safety Inspection Report - Building A',
-    submittedBy: 'John Smith',
-    submittedDate: '12/23/2025',
-    status: _ApprovalStatus.pending,
-    description:
-        'Comprehensive safety inspection covering all zones with photos and recommendations',
-    attachments: 12,
-    urgency: _ApprovalUrgency.high,
-    approvers: ['Safety Manager', 'Site Supervisor', 'Project Manager'],
-    currentApprover: 'Safety Manager',
-  ),
-  _ApprovalItem(
-    id: '2',
-    type: _ApprovalType.form,
-    title: 'Equipment Maintenance Request - Excavator #245',
-    submittedBy: 'Mike Johnson',
-    submittedDate: '12/22/2025',
-    status: _ApprovalStatus.pending,
-    description:
-        'Hydraulic system showing signs of wear, requesting immediate maintenance',
-    attachments: 5,
-    urgency: _ApprovalUrgency.high,
-    approvers: ['Maintenance Lead', 'Operations Manager'],
-    currentApprover: 'Maintenance Lead',
-  ),
-  _ApprovalItem(
-    id: '3',
-    type: _ApprovalType.incident,
-    title: 'Near Miss Report - Falling Tools',
-    submittedBy: 'Sarah Williams',
-    submittedDate: '12/21/2025',
-    status: _ApprovalStatus.approved,
-    description:
-        'Tools fell from scaffolding, no injuries. Immediate safety measures implemented.',
-    attachments: 8,
-    urgency: _ApprovalUrgency.medium,
-    approvers: ['Safety Manager', 'Site Supervisor'],
-    currentApprover: '',
-  ),
-  _ApprovalItem(
-    id: '4',
-    type: _ApprovalType.document,
-    title: 'Material Purchase Order - Concrete Supplies',
-    submittedBy: 'Tom Brown',
-    submittedDate: '12/20/2025',
-    status: _ApprovalStatus.needsRevision,
-    description: 'Purchase order for next phase concrete delivery',
-    attachments: 3,
-    urgency: _ApprovalUrgency.low,
-    approvers: ['Purchasing Manager', 'Project Manager', 'Finance Director'],
-    currentApprover: 'Purchasing Manager',
-  ),
-];
+_ApprovalStatusStyle _statusStyleFor(
+  _ApprovalColors colors,
+  String status,
+) {
+  final normalized = _normalizeStatus(status);
+  return colors.statusStyles[normalized] ??
+      colors.statusStyles['pending']!;
+}
+
+String _statusMessage(String status) {
+  final normalized = _normalizeStatus(status);
+  switch (normalized) {
+    case 'approved':
+      return 'This item has been approved';
+    case 'rejected':
+      return 'This item has been rejected';
+    case 'revision':
+    case 'needs_revision':
+      return 'Revisions requested';
+    default:
+      return 'Pending approval';
+  }
+}
+
+IconData _statusIcon(String status) {
+  final normalized = _normalizeStatus(status);
+  switch (normalized) {
+    case 'approved':
+      return Icons.check_circle;
+    case 'rejected':
+      return Icons.cancel;
+    case 'revision':
+    case 'needs_revision':
+      return Icons.warning_amber;
+    default:
+      return Icons.hourglass_bottom;
+  }
+}
+
+bool _canAct(UserRole role) {
+  return role == UserRole.superAdmin ||
+      role == UserRole.admin ||
+      role == UserRole.manager ||
+      role == UserRole.supervisor ||
+      role == UserRole.techSupport;
+}
+
+bool _canChangeStatus(String status) {
+  final normalized = _normalizeStatus(status);
+  return normalized == 'pending' ||
+      normalized == 'revision' ||
+      normalized == 'needs_revision';
+}
+
+String _formatRequestedAt(DateTime dateTime) {
+  final date = DateFormat.yMMMd().format(dateTime);
+  final time = DateFormat.jm().format(dateTime);
+  return '$date · $time';
+}
+
+String _formatRequestedBy(String? value) {
+  if (value == null || value.trim().isEmpty) return 'Unknown requester';
+  return value.trim();
+}
+
+String _typeLabel(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty) return 'General';
+  return value[0].toUpperCase() + value.substring(1);
+}
+
+IconData _typeIcon(String raw) {
+  final value = raw.toLowerCase();
+  if (value.contains('form')) return Icons.description_outlined;
+  if (value.contains('document')) return Icons.insert_drive_file_outlined;
+  if (value.contains('sop')) return Icons.rule_folder_outlined;
+  if (value.contains('incident')) return Icons.report_gmailerrorred_outlined;
+  if (value.contains('report')) return Icons.analytics_outlined;
+  return Icons.assignment_outlined;
+}

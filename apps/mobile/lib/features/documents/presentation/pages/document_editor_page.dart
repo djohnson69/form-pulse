@@ -19,12 +19,18 @@ class DocumentEditorPage extends ConsumerStatefulWidget {
     this.document,
     this.projectId,
     this.mode = DocumentEditorMode.create,
+    this.initialBytes,
+    this.initialFilename,
+    this.initialMimeType,
     super.key,
   });
 
   final Document? document;
   final String? projectId;
   final DocumentEditorMode mode;
+  final Uint8List? initialBytes;
+  final String? initialFilename;
+  final String? initialMimeType;
 
   @override
   ConsumerState<DocumentEditorPage> createState() => _DocumentEditorPageState();
@@ -65,6 +71,12 @@ class _DocumentEditorPageState extends ConsumerState<DocumentEditorPage> {
     _isPublished = doc?.isPublished ?? true;
     _metadata = {...?doc?.metadata};
     _versionController.text = _initialVersion(doc);
+    if (widget.initialBytes != null) {
+      _fileBytes = widget.initialBytes;
+      _fileSize = widget.initialBytes!.lengthInBytes;
+      _filename = widget.initialFilename;
+      _mimeType = widget.initialMimeType;
+    }
   }
 
   @override
@@ -250,12 +262,10 @@ class _DocumentEditorPageState extends ConsumerState<DocumentEditorPage> {
                 children: [
                   if (_isImage())
                     IconButton(
-                      tooltip: 'Annotate',
                       icon: const Icon(Icons.edit),
                       onPressed: _annotateImage,
                     ),
                   IconButton(
-                    tooltip: 'Remove',
                     icon: const Icon(Icons.delete),
                     onPressed: _clearFile,
                   ),

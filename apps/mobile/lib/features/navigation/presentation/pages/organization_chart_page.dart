@@ -274,8 +274,8 @@ class _OrganizationChartPageState
               : const Color(0xFFBFDBFE),
         ),
       ),
-      child: RichText(
-        text: TextSpan(
+      child: Text.rich(
+        TextSpan(
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color:
                     isDark ? const Color(0xFFBFDBFE) : const Color(0xFF1D4ED8),
@@ -328,7 +328,7 @@ class _OrganizationChartPageState
             _StatCard(
               title: 'Total Employees',
               value: employeeCount.toString(),
-              icon: Icons.people_outline,
+              icon: Icons.groups_outlined,
               iconColor: const Color(0xFF16A34A),
               borderColor: borderColor,
               cardShadow: cardShadow,
@@ -336,7 +336,7 @@ class _OrganizationChartPageState
             _StatCard(
               title: 'Departments',
               value: '3',
-              icon: Icons.account_tree_outlined,
+              icon: Icons.groups_outlined,
               iconColor: const Color(0xFF7C3AED),
               borderColor: borderColor,
               cardShadow: cardShadow,
@@ -364,6 +364,7 @@ class _OrganizationChartPageState
         border: Border.all(color: borderColor),
         boxShadow: cardShadow,
       ),
+      clipBehavior: Clip.hardEdge,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -576,9 +577,18 @@ class _SupervisorCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: const Color(0xFF3B82F6),
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  alignment: Alignment.center,
                   child: Text(
                     supervisor.avatar,
                     style: const TextStyle(
@@ -728,14 +738,22 @@ class _SupervisorCard extends StatelessWidget {
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
                       color: isDark
-                          ? const Color(0xFF1F2937)
-                          : const Color(0xFFF3F4F6),
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFF9FAFB),
                       borderRadius: const BorderRadius.vertical(
                         bottom: Radius.circular(0),
                       ),
                       border: Border(
-                        top: BorderSide(color: borderColor),
-                        bottom: BorderSide(color: borderColor),
+                        top: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF4B5563)
+                              : const Color(0xFFE5E7EB),
+                        ),
+                        bottom: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF4B5563)
+                              : const Color(0xFFE5E7EB),
+                        ),
                       ),
                     ),
                     child: Text(
@@ -881,100 +899,112 @@ class _EmployeeRow extends StatelessWidget {
     final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final statusColor = _statusColor(employee.status);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(64, 16, 16, 16),
-      decoration: BoxDecoration(
-        border: showDivider ? Border(bottom: BorderSide(color: borderColor)) : null,
-      ),
-      child: Row(
-        children: [
-          Stack(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF9CA3AF),
-                      Color(0xFF4B5563),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
+    final hoverColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF9FAFB);
+    final content = Row(
+      children: [
+        Stack(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xFF9CA3AF),
+                    Color(0xFF4B5563),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                alignment: Alignment.center,
-                child: Text(
-                  employee.avatar,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                employee.avatar,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF1F2937) : Colors.white,
+                    width: 2,
                   ),
                 ),
               ),
-              Positioned(
-                bottom: 0,
-                right: 0,
-                child: Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: statusColor,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: isDark ? const Color(0xFF1F2937) : Colors.white,
-                      width: 2,
+            ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                employee.name,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 16,
                     ),
-                  ),
-                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                employee.role,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      fontSize: 14,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                employee.email,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.grey[500],
+                      fontSize: 12,
+                    ),
               ),
             ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  employee.name,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                        fontSize: 16,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  employee.role,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: isDark ? Colors.grey[400] : Colors.grey[600],
-                        fontSize: 14,
-                      ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  employee.email,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Colors.grey[500],
-                        fontSize: 12,
-                      ),
-                ),
-              ],
+        ),
+        if (canEdit)
+          IconButton(
+            onPressed: () {},
+            icon: Icon(
+              Icons.more_vert,
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
+            iconSize: 16,
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
           ),
-          if (canEdit)
-            IconButton(
-              onPressed: () {},
-              icon: Icon(
-                Icons.more_vert,
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-              ),
-              iconSize: 16,
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            ),
-        ],
+      ],
+    );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {},
+        hoverColor: hoverColor,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(64, 16, 16, 16),
+          decoration: BoxDecoration(
+            border:
+                showDivider ? Border(bottom: BorderSide(color: borderColor)) : null,
+          ),
+          child: content,
+        ),
       ),
     );
   }

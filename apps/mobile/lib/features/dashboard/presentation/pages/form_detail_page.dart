@@ -18,7 +18,6 @@ class FormDetailPage extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.playlist_add_check),
             onPressed: () => _startForm(context),
-            tooltip: 'Start submission',
           ),
         ],
       ),

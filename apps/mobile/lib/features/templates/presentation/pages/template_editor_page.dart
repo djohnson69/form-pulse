@@ -552,7 +552,9 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
           .toList();
       final payload = _buildPayload();
 
-      if (widget.template == null) {
+      final template = widget.template;
+      final isCreating = template == null || template.id.isEmpty;
+      if (isCreating) {
         await repo.createTemplate(
           type: _type,
           name: _nameController.text.trim(),
@@ -566,7 +568,7 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
         );
       } else {
         await repo.updateTemplate(
-          template: widget.template!,
+          template: template,
           name: _nameController.text.trim(),
           description: _descriptionController.text.trim().isEmpty
               ? null

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 
 import '../../data/active_role_provider.dart';
+import '../../../../core/widgets/ai_assistant_overlay.dart';
 import '../../../navigation/presentation/widgets/side_menu.dart';
 import 'right_sidebar.dart';
 import 'top_bar.dart';
@@ -34,7 +35,7 @@ class DashboardShell extends StatelessWidget {
         final showRightPanel =
             showRightSidebar && constraints.maxWidth >= 1400;
         return Scaffold(
-          backgroundColor: Theme.of(context).colorScheme.background,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           drawer: showSidebar
               ? null
               : Drawer(
@@ -46,51 +47,57 @@ class DashboardShell extends StatelessWidget {
                     onClose: () => Navigator.of(context).pop(),
                   ),
                 ),
-          body: Column(
+          body: Stack(
             children: [
-              Builder(
-                builder: (context) => TopBar(
-                  role: role,
-                  isMobile: !showSidebar,
-                  onMenuPressed: showSidebar
-                      ? null
-                      : () => Scaffold.of(context).openDrawer(),
-                ),
-              ),
-              Expanded(
-                child: Row(
-                  children: [
-                    if (showSidebar)
-                      SideMenu(
-                        role: role,
-                        activeRoute: activeRoute,
-                        onNavigate: onNavigate,
-                      ),
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: maxContentWidth,
+              Column(
+                children: [
+                  Builder(
+                    builder: (context) => TopBar(
+                      role: role,
+                      isMobile: !showSidebar,
+                      onMenuPressed: showSidebar
+                          ? null
+                          : () => Scaffold.of(context).openDrawer(),
+                    ),
+                  ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (showSidebar)
+                          SideMenu(
+                            role: role,
+                            activeRoute: activeRoute,
+                            onNavigate: onNavigate,
                           ),
-                          child: ProviderScope(
-                            overrides: [
-                              dashboardRoleProvider.overrideWithValue(role),
-                            ],
-                            child: Navigator(
-                              key: ValueKey(activeRoute),
-                              onGenerateRoute: (_) => MaterialPageRoute(
-                                builder: (_) => child,
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: maxContentWidth,
+                              ),
+                              child: ProviderScope(
+                                overrides: [
+                                  dashboardRoleProvider
+                                      .overrideWithValue(role),
+                                ],
+                                child: Navigator(
+                                  key: ValueKey(activeRoute),
+                                  onGenerateRoute: (_) => MaterialPageRoute(
+                                    builder: (_) => child,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
+                        if (showRightPanel) const RightSidebar(),
+                      ],
                     ),
-                    if (showRightPanel) const RightSidebar(),
-                  ],
-                ),
+                  ),
+                ],
               ),
+              const AiAssistantOverlay(),
             ],
           ),
         );

@@ -30,8 +30,7 @@ class _SupportTicketsPageState extends ConsumerState<SupportTicketsPage> {
     final colors = _TicketColors.fromTheme(Theme.of(context));
     final tasksAsync = ref.watch(tasksProvider);
     final tasks = tasksAsync.asData?.value ?? const <Task>[];
-    final taskTickets = _ticketsFromTasks(tasks);
-    final tickets = taskTickets.isEmpty ? _demoTickets : taskTickets;
+    final tickets = _ticketsFromTasks(tasks);
     final filteredTickets = tickets.where((ticket) {
       final matchesSearch = ticket.title
               .toLowerCase()
@@ -1001,70 +1000,4 @@ String _relativeTime(DateTime date) {
   return DateFormat('MMM d').format(date);
 }
 
-const List<_TicketItem> _demoTickets = [
-  _TicketItem(
-    id: '#TKT-1234',
-    title: 'Cannot access training module',
-    description: 'User is unable to log into the training portal',
-    user: 'Sarah Johnson',
-    userAvatar: 'SJ',
-    status: 'open',
-    priority: 'high',
-    category: 'Training',
-    created: '2 hours ago',
-    updated: '30 min ago',
-    messages: 3,
-  ),
-  _TicketItem(
-    id: '#TKT-1233',
-    title: 'Form submission error',
-    description: 'Error message when submitting inspection form',
-    user: 'Mike Chen',
-    userAvatar: 'MC',
-    status: 'in-progress',
-    priority: 'urgent',
-    category: 'Forms',
-    created: '5 hours ago',
-    updated: '1 hour ago',
-    messages: 7,
-  ),
-  _TicketItem(
-    id: '#TKT-1232',
-    title: 'Password reset request',
-    description: 'User forgot password and needs reset',
-    user: 'Emily Davis',
-    userAvatar: 'ED',
-    status: 'resolved',
-    priority: 'low',
-    category: 'Account',
-    created: '1 day ago',
-    updated: '6 hours ago',
-    messages: 2,
-  ),
-  _TicketItem(
-    id: '#TKT-1231',
-    title: 'Asset QR code not scanning',
-    description: 'QR scanner fails to read asset codes',
-    user: 'Tom Brown',
-    userAvatar: 'TB',
-    status: 'open',
-    priority: 'medium',
-    category: 'Assets',
-    created: '1 day ago',
-    updated: '1 day ago',
-    messages: 1,
-  ),
-  _TicketItem(
-    id: '#TKT-1230',
-    title: 'Mobile app crashes on startup',
-    description: 'App closes immediately after opening',
-    user: 'Lisa White',
-    userAvatar: 'LW',
-    status: 'in-progress',
-    priority: 'urgent',
-    category: 'Mobile',
-    created: '2 days ago',
-    updated: '3 hours ago',
-    messages: 12,
-  ),
-];
+

@@ -987,7 +987,6 @@ class _ActionButtons extends StatelessWidget {
           iconSize: 18,
           constraints: const BoxConstraints.tightFor(width: 32, height: 32),
           padding: EdgeInsets.zero,
-          tooltip: 'Edit',
         ),
         IconButton(
           onPressed: () {},
@@ -995,7 +994,6 @@ class _ActionButtons extends StatelessWidget {
           iconSize: 18,
           constraints: const BoxConstraints.tightFor(width: 32, height: 32),
           padding: EdgeInsets.zero,
-          tooltip: 'More',
         ),
       ],
     );
@@ -1798,6 +1796,8 @@ String _roleLabel(UserRole role) {
       return 'Super Admin';
     case UserRole.admin:
       return 'Admin';
+    case UserRole.developer:
+      return 'Developer';
     case UserRole.manager:
       return 'Manager';
     case UserRole.supervisor:
@@ -1825,6 +1825,8 @@ String _departmentForRole(String role) {
       return 'Administration';
     case 'Manager':
       return 'Operations';
+    case 'Developer':
+      return 'Engineering';
     case 'Supervisor':
       return 'Field Services';
     case 'Tech Support':

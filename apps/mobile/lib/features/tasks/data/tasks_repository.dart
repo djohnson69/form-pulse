@@ -9,17 +9,21 @@ class TaskAssignee {
   final String name;
   final String? email;
   final String? role;
+  final bool isActive;
+  final DateTime? createdAt;
 
   TaskAssignee({
     required this.id,
     required this.name,
     this.email,
     this.role,
+    this.isActive = true,
+    this.createdAt,
   });
 }
 
 abstract class TasksRepositoryBase {
-  Future<List<Task>> fetchTasks();
+  Future<List<Task>> fetchTasks({UserRole? role});
   Future<List<TaskAssignee>> fetchAssignees();
   Future<Task> createTask({
     required String title,
@@ -55,16 +59,21 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
   final SupabaseClient _client;
 
   @override
-  Future<List<Task>> fetchTasks() async {
+  Future<List<Task>> fetchTasks({UserRole? role}) async {
+    // Only tech support can see across orgs; all other roles (including superAdmin)
+    // are scoped to their organization.
+    final isGlobalView = role == UserRole.techSupport;
     final orgId = await _getOrgId();
-    if (orgId == null) return const [];
+    if (!isGlobalView && orgId == null) return const [];
     try {
-      final res = await _client
-          .from('tasks')
-          .select()
-          .eq('org_id', orgId)
+      dynamic query = _client.from('tasks').select();
+      if (!isGlobalView && orgId != null) {
+        query = query.eq('org_id', orgId);
+      }
+      query = query
           .order('due_date', ascending: true)
           .order('updated_at', ascending: false);
+      final res = await query;
       return (res as List<dynamic>)
           .map((row) => _mapTask(Map<String, dynamic>.from(row as Map)))
           .toList();
@@ -85,7 +94,7 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
     try {
       final res = await _client
           .from('profiles')
-          .select('id, first_name, last_name, email, role, is_active')
+          .select('id, first_name, last_name, email, role, is_active, created_at')
           .eq('org_id', orgId)
           .eq('is_active', true)
           .order('last_name', ascending: true);
@@ -100,6 +109,8 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
           name: name.isNotEmpty ? name : (email ?? 'User'),
           email: email,
           role: data['role'] as String?,
+          isActive: data['is_active'] == true,
+          createdAt: DateTime.tryParse(data['created_at']?.toString() ?? ''),
         );
       }).toList();
     } on PostgrestException catch (e, st) {
@@ -111,7 +122,7 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
         );
         final res = await _client
             .from('profiles')
-            .select('id, first_name, last_name, email, role')
+            .select('id, first_name, last_name, email, role, created_at')
             .eq('org_id', orgId)
             .order('last_name', ascending: true);
         return (res as List<dynamic>).map((row) {
@@ -125,6 +136,8 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
             name: name.isNotEmpty ? name : (email ?? 'User'),
             email: email,
             role: data['role'] as String?,
+            isActive: true,
+            createdAt: DateTime.tryParse(data['created_at']?.toString() ?? ''),
           );
         }).toList();
       }
@@ -455,16 +468,14 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
     final metadata = rawMetadata is String
         ? jsonDecode(rawMetadata)
         : rawMetadata as Map<String, dynamic>?;
+    final status = _parseStatus(row['status']);
     return Task(
       id: row['id'].toString(),
       orgId: row['org_id']?.toString(),
       title: row['title'] as String? ?? 'Untitled task',
       description: row['description'] as String?,
       instructions: row['instructions'] as String?,
-      status: TaskStatus.values.firstWhere(
-        (e) => e.name == (row['status'] as String? ?? TaskStatus.todo.name),
-        orElse: () => TaskStatus.todo,
-      ),
+      status: status,
       progress: _parseInt(row['progress']) ?? 0,
       dueDate: _parseNullableDate(row['due_date']),
       priority: row['priority'] as String?,
@@ -477,6 +488,37 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
       completedAt: _parseNullableDate(row['completed_at']),
       metadata: metadata,
     );
+  }
+
+  TaskStatus _parseStatus(dynamic raw) {
+    final value = raw?.toString().toLowerCase().trim() ?? '';
+    switch (value) {
+      case 'completed':
+      case 'complete':
+      case 'done':
+      case 'resolved':
+      case 'closed':
+        return TaskStatus.completed;
+      case 'in-progress':
+      case 'in_progress':
+      case 'progress':
+      case 'active':
+      case 'working':
+      case 'ongoing':
+        return TaskStatus.inProgress;
+      case 'blocked':
+      case 'on_hold':
+      case 'on-hold':
+      case 'paused':
+      case 'waiting':
+        return TaskStatus.blocked;
+      case 'todo':
+      case 'to-do':
+      case 'pending':
+      case 'open':
+      default:
+        return TaskStatus.todo;
+    }
   }
 
   int? _parseInt(dynamic value) {

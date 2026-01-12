@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 
 import '../../../../core/theme/theme_mode_provider.dart';
+import '../../../../features/dashboard/data/role_override_provider.dart';
 import '../../../settings/presentation/pages/settings_page.dart';
-import '../../data/role_override_provider.dart';
 
 class TopBar extends ConsumerWidget {
   const TopBar({
@@ -26,7 +26,8 @@ class TopBar extends ConsumerWidget {
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final iconColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF4B5563);
     final themeMode = ref.watch(themeModeProvider);
-    final override = ref.watch(roleOverrideProvider);
+    final override =
+        role == UserRole.developer ? ref.watch(roleOverrideProvider) : null;
     final activeRole = override ?? role;
     final horizontalPadding = isMobile ? 12.0 : 24.0;
     final verticalPadding = 12.0;
@@ -70,6 +71,16 @@ class TopBar extends ConsumerWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                if (role == UserRole.developer) ...[
+                  _RoleDropdown(
+                    role: activeRole,
+                    isMobile: isMobile,
+                    onChanged: (next) {
+                      ref.read(roleOverrideProvider.notifier).state = next;
+                    },
+                  ),
+                  const SizedBox(width: 10),
+                ],
                 IconButton(
                   onPressed: () {
                     final next = themeMode == ThemeMode.dark
@@ -86,13 +97,6 @@ class TopBar extends ConsumerWidget {
                   splashRadius: 20,
                 ),
                 const SizedBox(width: 10),
-                _RoleDropdown(
-                  role: activeRole,
-                  isMobile: isMobile,
-                  onChanged: (next) {
-                    ref.read(roleOverrideProvider.notifier).state = next;
-                  },
-                ),
                 if (!isMobile) ...[
                   const SizedBox(width: 10),
                   IconButton(
@@ -159,7 +163,9 @@ class _RoleDropdown extends StatelessWidget {
                     isMobile
                         ? value.displayName.substring(
                             0,
-                            value.displayName.length > 3 ? 3 : value.displayName.length,
+                            value.displayName.length > 3
+                                ? 3
+                                : value.displayName.length,
                           )
                         : value.displayName,
                   ),

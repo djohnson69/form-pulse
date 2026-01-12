@@ -288,7 +288,6 @@ class _Composer extends StatelessWidget {
             IconButton(
               onPressed: sending ? null : onAiAssist,
               icon: const Icon(Icons.auto_awesome),
-              tooltip: 'AI assist',
             ),
             IconButton(
               onPressed: sending ? null : onSend,

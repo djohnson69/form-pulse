@@ -294,7 +294,7 @@ class _AdminDashboardPageState extends ConsumerState<AdminDashboardPage> {
         }
 
         return Scaffold(
-          backgroundColor: Theme.of(context).colorScheme.background,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           drawer: showSidebar
               ? null
               : Drawer(
@@ -4188,6 +4188,8 @@ String _labelForAiType(String type) {
 
 List<UserRole> _assignableRoles(UserRole actor) {
   switch (actor) {
+    case UserRole.developer:
+      return UserRole.values;
     case UserRole.superAdmin:
       return UserRole.values;
     case UserRole.admin:
