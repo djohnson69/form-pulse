@@ -297,78 +297,41 @@ class AdminRepository {
     String? search,
     UserRole? role,
   }) async {
-    try {
-      var query = _client.from('profiles').select(
-            'id,org_id,email,first_name,last_name,role,is_active,created_at,updated_at',
-          );
+    var query = _client.from('profiles').select();
 
-      if (orgId != null && orgId.isNotEmpty) {
-        query = query.eq('org_id', orgId);
-      }
-      if (role != null) {
-        query = query.eq('role', role.name);
-      }
-      if (search != null && search.trim().isNotEmpty) {
-        final term = search.trim();
-        query = query.or(
-          'email.ilike.%$term%,first_name.ilike.%$term%,last_name.ilike.%$term%',
-        );
-      }
-
-      final res = await query.order('created_at', ascending: false).limit(250);
-      return res.map<AdminUserSummary>((row) {
-        final roleName = row['role']?.toString();
-        return AdminUserSummary(
-          id: row['id'].toString(),
-          orgId: row['org_id']?.toString() ?? '',
-          email: row['email']?.toString() ?? 'unknown',
-          firstName: row['first_name']?.toString() ?? '',
-          lastName: row['last_name']?.toString() ?? '',
-          role: UserRole.fromRaw(roleName),
-          isActive: row['is_active'] as bool? ?? true,
-          createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
-              DateTime.now(),
-          updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
-              DateTime.now(),
-        );
-      }).toList();
-    } on PostgrestException catch (e) {
-      if (e.message.contains('is_active') || e.code == '42703') {
-        var query = _client.from('profiles').select(
-              'id,org_id,email,first_name,last_name,role,created_at,updated_at',
-            );
-        if (orgId != null && orgId.isNotEmpty) {
-          query = query.eq('org_id', orgId);
-        }
-        if (role != null) {
-          query = query.eq('role', role.name);
-        }
-        if (search != null && search.trim().isNotEmpty) {
-          final term = search.trim();
-          query = query.or(
-            'email.ilike.%$term%,first_name.ilike.%$term%,last_name.ilike.%$term%',
-          );
-        }
-        final res = await query.order('created_at', ascending: false).limit(250);
-        return res.map<AdminUserSummary>((row) {
-          final roleName = row['role']?.toString();
-          return AdminUserSummary(
-            id: row['id'].toString(),
-            orgId: row['org_id']?.toString() ?? '',
-            email: row['email']?.toString() ?? 'unknown',
-            firstName: row['first_name']?.toString() ?? '',
-            lastName: row['last_name']?.toString() ?? '',
-            role: UserRole.fromRaw(roleName),
-            isActive: true,
-            createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
-                DateTime.now(),
-            updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
-                DateTime.now(),
-          );
-        }).toList();
-      }
-      rethrow;
+    if (orgId != null && orgId.isNotEmpty) {
+      query = query.eq('org_id', orgId);
     }
+    if (role != null) {
+      query = query.eq('role', role.name);
+    }
+    if (search != null && search.trim().isNotEmpty) {
+      final term = search.trim();
+      query = query.or(
+        'email.ilike.%$term%,first_name.ilike.%$term%,last_name.ilike.%$term%',
+      );
+    }
+
+    final res = await query.limit(250);
+    final users = res.map<AdminUserSummary>((row) {
+      final roleName = row['role']?.toString();
+      return AdminUserSummary(
+        id: row['id'].toString(),
+        orgId: row['org_id']?.toString() ?? '',
+        email: row['email']?.toString() ?? 'unknown',
+        firstName: row['first_name']?.toString() ?? '',
+        lastName: row['last_name']?.toString() ?? '',
+        role: UserRole.fromRaw(roleName),
+        isActive: row['is_active'] as bool? ?? true,
+        createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+            DateTime.now(),
+        updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
+            DateTime.now(),
+      );
+    }).toList();
+
+    users.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return users;
   }
 
   Future<void> updateUserRole({

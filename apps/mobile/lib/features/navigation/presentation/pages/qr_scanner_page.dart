@@ -1,19 +1,28 @@
+import 'dart:convert';
+
 import 'package:barcode_scan2/barcode_scan2.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:shared/shared.dart';
 
-class QrScannerPage extends StatefulWidget {
+import '../../../assets/data/assets_provider.dart';
+import '../../../assets/presentation/pages/asset_detail_page.dart';
+import '../../../assets/presentation/pages/asset_editor_page.dart';
+
+class QrScannerPage extends ConsumerStatefulWidget {
   const QrScannerPage({super.key});
 
   @override
-  State<QrScannerPage> createState() => _QrScannerPageState();
+  ConsumerState<QrScannerPage> createState() => _QrScannerPageState();
 }
 
-class _QrScannerPageState extends State<QrScannerPage>
+class _QrScannerPageState extends ConsumerState<QrScannerPage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _scanController;
   bool _isScanning = false;
   _ScannedAsset? _scannedItem;
-  List<_RecentScan> _recentScans = List.from(_demoRecentScans);
+  List<_RecentScan> _recentScans = [];
 
   @override
   void initState() {
@@ -34,12 +43,12 @@ class _QrScannerPageState extends State<QrScannerPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final equipmentAsync = ref.watch(equipmentProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('QR Code Scanner')),
       body: LayoutBuilder(
         builder: (context, constraints) {
           final maxWidth =
-              constraints.maxWidth > 1200 ? 1200.0 : constraints.maxWidth;
+              constraints.maxWidth > 1152 ? 1152.0 : constraints.maxWidth;
           return Align(
             alignment: Alignment.topCenter,
             child: SizedBox(
@@ -48,6 +57,12 @@ class _QrScannerPageState extends State<QrScannerPage>
                 padding: const EdgeInsets.all(16),
                 children: [
                   _buildHeader(context, isDark),
+                  if (equipmentAsync.isLoading) const LinearProgressIndicator(),
+                  if (equipmentAsync.hasError)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _InlineError(message: equipmentAsync.error.toString()),
+                    ),
                   const SizedBox(height: 16),
                   _buildScanGrid(context, isDark),
                   const SizedBox(height: 16),
@@ -112,6 +127,10 @@ class _QrScannerPageState extends State<QrScannerPage>
 
   Widget _buildScannerCard(BuildContext context, bool isDark) {
     final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final disabledBackground =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final disabledForeground =
+        isDark ? Colors.grey[500] : Colors.grey[600];
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -144,12 +163,14 @@ class _QrScannerPageState extends State<QrScannerPage>
           const SizedBox(height: 12),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: _isScanning
-                  ? (isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB))
-                  : const Color(0xFF2563EB),
-              foregroundColor: _isScanning
-                  ? (isDark ? Colors.grey[400] : Colors.grey[600])
-                  : Colors.white,
+              backgroundColor: const Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: disabledBackground,
+              disabledForegroundColor: disabledForeground,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             onPressed: _isScanning ? null : _startScan,
             icon: const Icon(Icons.camera_alt_outlined),
@@ -187,6 +208,8 @@ class _QrScannerPageState extends State<QrScannerPage>
             _ResultsDetails(
               asset: _scannedItem!,
               onClear: () => setState(() => _scannedItem = null),
+              onViewDetails: () => _openAssetDetails(context, _scannedItem!.equipment),
+              onUpdateStatus: () => _openAssetEditor(context, _scannedItem!.equipment),
             ),
         ],
       ),
@@ -212,12 +235,20 @@ class _QrScannerPageState extends State<QrScannerPage>
                 ),
           ),
           const SizedBox(height: 12),
-          ..._recentScans.map((scan) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _RecentScanTile(scan: scan),
-            );
-          }),
+          if (_recentScans.isEmpty)
+            Text(
+              'No recent scans yet.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  ),
+            )
+          else
+            ..._recentScans.map((scan) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _RecentScanTile(scan: scan),
+              );
+            }),
         ],
       ),
     );
@@ -235,12 +266,25 @@ class _QrScannerPageState extends State<QrScannerPage>
         );
         return;
       }
-      final scannedId = result.rawContent.trim();
-      final asset = _demoAsset.copyWith(
-        id: scannedId.isEmpty ? _demoAsset.id : scannedId,
-      );
-      setState(() => _scannedItem = asset);
-      _recordScan(asset);
+      final scannedValue = result.rawContent.trim();
+      if (scannedValue.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data detected in QR code.')),
+        );
+        return;
+      }
+      final token = _extractToken(scannedValue);
+      final equipmentList = await ref.read(equipmentProvider.future);
+      final match = _matchEquipment(token, equipmentList);
+      if (match == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No asset found for code: $token')),
+        );
+        return;
+      }
+      final scanned = _ScannedAsset.fromEquipment(match);
+      setState(() => _scannedItem = scanned);
+      _recordScan(scanned);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -252,6 +296,33 @@ class _QrScannerPageState extends State<QrScannerPage>
         setState(() => _isScanning = false);
       }
     }
+  }
+
+  String _extractToken(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        final data = jsonDecode(trimmed) as Map<String, dynamic>;
+        return data['equipmentId']?.toString() ??
+            data['id']?.toString() ??
+            data['rfidTag']?.toString() ??
+            data['serialNumber']?.toString() ??
+            trimmed;
+      } catch (_) {}
+    }
+    return trimmed;
+  }
+
+  Equipment? _matchEquipment(String token, List<Equipment> equipment) {
+    for (final item in equipment) {
+      if (item.id == token ||
+          (item.rfidTag ?? '') == token ||
+          (item.serialNumber ?? '') == token ||
+          (item.metadata?['qrCode']?.toString() ?? '') == token) {
+        return item;
+      }
+    }
+    return null;
   }
 
   void _recordScan(_ScannedAsset asset) {
@@ -268,6 +339,24 @@ class _QrScannerPageState extends State<QrScannerPage>
       ].take(5).toList();
     });
   }
+
+  Future<void> _openAssetDetails(BuildContext context, Equipment asset) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AssetDetailPage(asset: asset)),
+    );
+    if (!mounted) return;
+    ref.invalidate(equipmentProvider);
+  }
+
+  Future<void> _openAssetEditor(BuildContext context, Equipment asset) async {
+    final result = await Navigator.of(context).push<Equipment?>(
+      MaterialPageRoute(builder: (_) => AssetEditorPage(existing: asset)),
+    );
+    if (!mounted) return;
+    if (result != null) {
+      ref.invalidate(equipmentProvider);
+    }
+  }
 }
 
 class _ScanningOverlay extends StatelessWidget {
@@ -279,7 +368,7 @@ class _ScanningOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final frameSize = constraints.maxWidth * 0.7;
+        final frameSize = (constraints.maxWidth * 0.72).clamp(0.0, 256.0);
         return Center(
           child: AnimatedBuilder(
             animation: controller,
@@ -293,7 +382,7 @@ class _ScanningOverlay extends StatelessWidget {
                       decoration: BoxDecoration(
                         border: Border.all(
                           color: const Color(0xFF2563EB),
-                          width: 3,
+                          width: 4,
                         ),
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -303,7 +392,7 @@ class _ScanningOverlay extends StatelessWidget {
                       left: 0,
                       right: 0,
                       child: Container(
-                        height: 2,
+                        height: 4,
                         color: const Color(0xFF3B82F6),
                       ),
                     ),
@@ -331,7 +420,7 @@ class _IdleScannerOverlay extends StatelessWidget {
         children: [
           Icon(
             Icons.qr_code_2,
-            size: 64,
+            size: 96,
             color: isDark ? Colors.grey[700] : Colors.grey[600],
           ),
           const SizedBox(height: 12),
@@ -354,6 +443,7 @@ class _TipsBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tipColor = isDark ? const Color(0xFF93C5FD) : const Color(0xFF2563EB);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -371,8 +461,8 @@ class _TipsBanner extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            Icons.qr_code_scanner_outlined,
-            color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF2563EB),
+            Icons.center_focus_strong,
+            color: tipColor,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -383,19 +473,37 @@ class _TipsBanner extends StatelessWidget {
                   'Quick Scan Tips:',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: isDark
-                            ? const Color(0xFFBFDBFE)
-                            : const Color(0xFF1D4ED8),
+                        color: tipColor,
                       ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  '- Ensure good lighting\n- Hold camera steady\n- Position code within frame',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: isDark
-                            ? const Color(0xFFBFDBFE)
-                            : const Color(0xFF1D4ED8),
-                      ),
+                ...[
+                  'Ensure good lighting',
+                  'Hold camera steady',
+                  'Position code within frame',
+                ].map(
+                  (tip) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.circle,
+                          size: 6,
+                          color: tipColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            tip,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: tipColor,
+                                    ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -407,10 +515,17 @@ class _TipsBanner extends StatelessWidget {
 }
 
 class _ResultsDetails extends StatelessWidget {
-  const _ResultsDetails({required this.asset, required this.onClear});
+  const _ResultsDetails({
+    required this.asset,
+    required this.onClear,
+    required this.onViewDetails,
+    required this.onUpdateStatus,
+  });
 
   final _ScannedAsset asset;
   final VoidCallback onClear;
+  final VoidCallback onViewDetails;
+  final VoidCallback onUpdateStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -511,24 +626,43 @@ class _ResultsDetails extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF2563EB),
                   foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                onPressed: () {},
+                onPressed: onViewDetails,
                 child: const Text('View Full Details'),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: OutlinedButton(
-                onPressed: () {},
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: onUpdateStatus,
                 child: const Text('Update Status'),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        TextButton(
-          onPressed: onClear,
-          child: const Text('Scan Another Code'),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: onClear,
+            child: const Text('Scan Another Code'),
+          ),
         ),
       ],
     );
@@ -747,7 +881,7 @@ class _RecentScanTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${scan.id} - ${scan.location}',
+                  '${scan.id} • ${scan.location}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: isDark ? Colors.grey[400] : Colors.grey[600],
                       ),
@@ -769,6 +903,7 @@ class _RecentScanTile extends StatelessWidget {
 
 class _ScannedAsset {
   const _ScannedAsset({
+    required this.equipment,
     required this.id,
     required this.name,
     required this.category,
@@ -781,6 +916,7 @@ class _ScannedAsset {
     required this.notes,
   });
 
+  final Equipment equipment;
   final String id;
   final String name;
   final String category;
@@ -792,20 +928,26 @@ class _ScannedAsset {
   final String condition;
   final String notes;
 
-  _ScannedAsset copyWith({
-    String? id,
-  }) {
+  factory _ScannedAsset.fromEquipment(Equipment equipment) {
+    String formatDate(DateTime? date) {
+      if (date == null) return '—';
+      return DateFormat('MMM d, yyyy').format(date);
+    }
+
+    final metadata = equipment.metadata ?? const <String, dynamic>{};
+    final status = equipment.isActive ? 'Active' : 'Inactive';
     return _ScannedAsset(
-      id: id ?? this.id,
-      name: name,
-      category: category,
+      equipment: equipment,
+      id: equipment.id,
+      name: equipment.name,
+      category: equipment.category ?? 'Uncategorized',
       status: status,
-      location: location,
-      assignedTo: assignedTo,
-      lastInspection: lastInspection,
-      nextInspection: nextInspection,
-      condition: condition,
-      notes: notes,
+      location: equipment.currentLocation ?? 'Unknown',
+      assignedTo: equipment.assignedTo ?? 'Unassigned',
+      lastInspection: formatDate(equipment.lastInspectionAt),
+      nextInspection: formatDate(equipment.nextInspectionAt),
+      condition: metadata['condition']?.toString() ?? 'Unknown',
+      notes: metadata['notes']?.toString() ?? '—',
     );
   }
 }
@@ -824,36 +966,34 @@ class _RecentScan {
   final String location;
 }
 
-const _ScannedAsset _demoAsset = _ScannedAsset(
-  id: 'AST-2024-1234',
-  name: 'Hydraulic Excavator CAT 320',
-  category: 'Heavy Equipment',
-  status: 'In Use',
-  location: 'Building A - Main Site',
-  assignedTo: 'John Smith',
-  lastInspection: 'Dec 20, 2025',
-  nextInspection: 'Jan 3, 2026',
-  condition: 'Good',
-  notes: 'Regular maintenance completed. All systems operational.',
-);
+class _InlineError extends StatelessWidget {
+  const _InlineError({required this.message});
 
-const List<_RecentScan> _demoRecentScans = [
-  _RecentScan(
-    id: 'AST-2024-1234',
-    name: 'Hydraulic Excavator CAT 320',
-    timeLabel: '2 hours ago',
-    location: 'Building A',
-  ),
-  _RecentScan(
-    id: 'AST-2024-0987',
-    name: 'Concrete Mixer',
-    timeLabel: '5 hours ago',
-    location: 'Site B',
-  ),
-  _RecentScan(
-    id: 'AST-2024-0654',
-    name: 'Safety Harness Set',
-    timeLabel: '1 day ago',
-    location: 'Warehouse',
-  ),
-];
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFECACA)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Color(0xFFDC2626)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF991B1B),
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

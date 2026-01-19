@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 
 import '../../../dashboard/data/role_override_provider.dart';
+import '../../../training/data/training_provider.dart';
 
 class OrganizationChartPage extends ConsumerStatefulWidget {
   const OrganizationChartPage({super.key, this.role});
@@ -17,8 +18,9 @@ class OrganizationChartPage extends ConsumerStatefulWidget {
 class _OrganizationChartPageState
     extends ConsumerState<OrganizationChartPage> {
   final TextEditingController _searchController = TextEditingController();
-  final Set<int> _expandedSupervisors = {1};
+  final Set<String> _expandedSupervisors = {};
   String _searchTerm = '';
+  bool _initializedExpansion = false;
 
   @override
   void dispose() {
@@ -28,19 +30,33 @@ class _OrganizationChartPageState
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final override = ref.watch(roleOverrideProvider);
     final role = override ?? widget.role ?? UserRole.employee;
     final canEdit = role == UserRole.manager ||
         role == UserRole.admin ||
         role == UserRole.superAdmin;
-    final data = _organizationData;
+    final employeesAsync = ref.watch(employeesProvider);
+    final employees = employeesAsync.asData?.value ?? const <Employee>[];
+    final data = _buildOrganizationData(employees);
     final totalEmployees =
         data.fold<int>(0, (sum, supervisor) => sum + supervisor.teamSize);
     final totalProjects =
         data.fold<int>(0, (sum, supervisor) => sum + supervisor.projects);
+    final departments = data.map((supervisor) => supervisor.department).toSet().length;
     final filteredData = _applySearch(data, _searchTerm);
 
+    if (!_initializedExpansion && data.isNotEmpty) {
+      _initializedExpansion = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _expandedSupervisors.add(data.first.id));
+      });
+    }
+
     return Scaffold(
+      backgroundColor:
+          isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
       body: LayoutBuilder(
         builder: (context, constraints) {
           final maxWidth =
@@ -62,6 +78,11 @@ class _OrganizationChartPageState
                     totalProjects,
                     canEdit,
                   ),
+                  if (employeesAsync.isLoading) const LinearProgressIndicator(),
+                  if (employeesAsync.hasError) ...[
+                    SizedBox(height: sectionSpacing),
+                    _ErrorBanner(message: employeesAsync.error.toString()),
+                  ],
                   SizedBox(height: sectionSpacing),
                   _buildSearchBar(context),
                   if (!canEdit) ...[
@@ -69,7 +90,7 @@ class _OrganizationChartPageState
                     _buildAccessBanner(context),
                   ],
                   SizedBox(height: sectionSpacing),
-                  _buildStatsGrid(context, data.length, totalEmployees),
+                  _buildStatsGrid(context, data.length, totalEmployees, departments),
                   SizedBox(height: sectionSpacing),
                   _buildStructureSection(context, filteredData, canEdit),
                   const SizedBox(height: 80),
@@ -282,6 +303,7 @@ class _OrganizationChartPageState
                 fontSize: 14,
               ),
           children: const [
+            TextSpan(text: '📋 '),
             TextSpan(
               text: 'View-Only Access:',
               style: TextStyle(fontWeight: FontWeight.w600),
@@ -300,6 +322,7 @@ class _OrganizationChartPageState
     BuildContext context,
     int supervisorCount,
     int employeeCount,
+    int departmentCount,
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -335,7 +358,7 @@ class _OrganizationChartPageState
             ),
             _StatCard(
               title: 'Departments',
-              value: '3',
+              value: departmentCount.toString(),
               icon: Icons.groups_outlined,
               iconColor: const Color(0xFF7C3AED),
               borderColor: borderColor,
@@ -387,7 +410,9 @@ class _OrganizationChartPageState
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 36),
                       child: Text(
-                        'No results found for "$_searchTerm"',
+                        _searchTerm.isEmpty
+                            ? 'No organization data available yet.'
+                            : 'No results found for "$_searchTerm"',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: isDark ? Colors.grey[400] : Colors.grey[600],
                           fontSize: 16,
@@ -441,6 +466,485 @@ class _OrganizationChartPageState
       );
       return supervisorMatches || employeeMatches;
     }).toList();
+  }
+
+  List<_Supervisor> _buildOrganizationData(List<Employee> employees) {
+    if (employees.isEmpty) return [];
+
+    final employeesById = <String, Employee>{
+      for (final employee in employees) employee.id: employee,
+    };
+    final employeesByUserId = <String, Employee>{};
+    final employeesByEmail = <String, Employee>{};
+    final employeesByName = <String, Employee>{};
+    final employeesByEmployeeNumber = <String, Employee>{};
+
+    for (final employee in employees) {
+      if (employee.userId.isNotEmpty) {
+        employeesByUserId[employee.userId] = employee;
+      }
+      if (employee.email.isNotEmpty) {
+        employeesByEmail[employee.email.toLowerCase()] = employee;
+      }
+      final nameKey = employee.fullName.trim().toLowerCase();
+      if (nameKey.isNotEmpty) {
+        employeesByName[nameKey] = employee;
+      }
+      final number = employee.employeeNumber?.trim();
+      if (number != null && number.isNotEmpty) {
+        employeesByEmployeeNumber[number] = employee;
+      }
+    }
+
+    Employee? resolveSupervisor(Employee employee) {
+      final metadata = employee.metadata ?? const <String, dynamic>{};
+      final candidates = [
+        metadata['supervisorId'],
+        metadata['supervisor_id'],
+        metadata['managerId'],
+        metadata['manager_id'],
+        metadata['leadId'],
+        metadata['lead_id'],
+        metadata['teamLeadId'],
+        metadata['team_lead_id'],
+        metadata['reportsTo'],
+        metadata['reports_to'],
+        metadata['supervisor'],
+        metadata['manager'],
+        metadata['lead'],
+        metadata['teamLead'],
+        metadata['supervisorEmail'],
+        metadata['managerEmail'],
+        metadata['leadEmail'],
+        metadata['reportsToEmail'],
+        metadata['supervisorName'],
+        metadata['managerName'],
+        metadata['reportsToName'],
+        metadata['leadName'],
+      ];
+
+      for (final raw in candidates) {
+        final ref = _extractReference(raw);
+        if (ref == null || ref.isEmpty) continue;
+        final match = _matchEmployee(
+          ref,
+          byId: employeesById,
+          byUserId: employeesByUserId,
+          byEmail: employeesByEmail,
+          byName: employeesByName,
+          byEmployeeNumber: employeesByEmployeeNumber,
+        );
+        if (match != null && match.id != employee.id) {
+          return match;
+        }
+      }
+      return null;
+    }
+
+    final reportsBySupervisor = <String, List<Employee>>{};
+    final assigned = <String, String>{};
+
+    void assign(Employee employee, Employee supervisor) {
+      if (employee.id == supervisor.id) return;
+      assigned[employee.id] = supervisor.id;
+      reportsBySupervisor.putIfAbsent(supervisor.id, () => []).add(employee);
+    }
+
+    for (final employee in employees) {
+      final supervisor = resolveSupervisor(employee);
+      if (supervisor != null) {
+        assign(employee, supervisor);
+      }
+    }
+
+    final supervisorCandidates = <String, Employee>{};
+    for (final supervisorId in reportsBySupervisor.keys) {
+      final supervisor = employeesById[supervisorId];
+      if (supervisor != null) {
+        supervisorCandidates[supervisor.id] = supervisor;
+      }
+    }
+    for (final employee in employees) {
+      if (_isSupervisor(employee)) {
+        supervisorCandidates[employee.id] = employee;
+      }
+    }
+
+    if (supervisorCandidates.isEmpty) {
+      return _buildDepartmentFallback(employees);
+    }
+
+    // Keep a single-level chart by removing supervisors from report lists.
+    for (final supervisorId in supervisorCandidates.keys) {
+      final managerId = assigned.remove(supervisorId);
+      if (managerId != null) {
+        reportsBySupervisor[managerId]
+            ?.removeWhere((employee) => employee.id == supervisorId);
+      }
+    }
+
+    final unassigned = <Employee>[];
+    for (final employee in employees) {
+      if (assigned.containsKey(employee.id)) continue;
+      if (supervisorCandidates.containsKey(employee.id)) continue;
+      unassigned.add(employee);
+    }
+
+    if (unassigned.isNotEmpty) {
+      final unassignedByDept = <String, List<Employee>>{};
+      for (final employee in unassigned) {
+        final dept = _departmentLabel(employee);
+        unassignedByDept.putIfAbsent(dept, () => []).add(employee);
+      }
+
+      for (final entry in unassignedByDept.entries) {
+        final deptSupervisors = supervisorCandidates.values
+            .where((candidate) =>
+                _departmentLabel(candidate).toLowerCase() ==
+                entry.key.toLowerCase())
+            .toList()
+          ..sort((a, b) => a.fullName.compareTo(b.fullName));
+
+        if (deptSupervisors.isNotEmpty) {
+          final supervisor = deptSupervisors.first;
+          for (final employee in entry.value) {
+            assign(employee, supervisor);
+          }
+        } else {
+          final leader = _selectDepartmentLeader(entry.value);
+          supervisorCandidates[leader.id] = leader;
+          for (final employee in entry.value) {
+            if (employee.id == leader.id) continue;
+            assign(employee, leader);
+          }
+        }
+      }
+    }
+
+    final supervisors = supervisorCandidates.values
+        .map((supervisor) => _mapSupervisor(
+              supervisor,
+              reportsBySupervisor[supervisor.id] ?? const [],
+            ))
+        .toList();
+
+    supervisors.sort((a, b) {
+      final dept = a.department.compareTo(b.department);
+      if (dept != 0) return dept;
+      return a.name.compareTo(b.name);
+    });
+
+    return supervisors;
+  }
+
+  List<_Supervisor> _buildDepartmentFallback(List<Employee> employees) {
+    final groups = <String, List<Employee>>{};
+    for (final employee in employees) {
+      final dept = _departmentLabel(employee);
+      groups.putIfAbsent(dept, () => []).add(employee);
+    }
+
+    final supervisors = <_Supervisor>[];
+    for (final group in groups.values) {
+      final leader = _selectDepartmentLeader(group);
+      final reports = group.where((member) => member.id != leader.id).toList();
+      supervisors.add(_mapSupervisor(leader, reports));
+    }
+    supervisors.sort((a, b) {
+      final dept = a.department.compareTo(b.department);
+      if (dept != 0) return dept;
+      return a.name.compareTo(b.name);
+    });
+    return supervisors;
+  }
+
+  Employee _selectDepartmentLeader(List<Employee> employees) {
+    if (employees.isEmpty) {
+      throw ArgumentError('Department group must have at least one employee.');
+    }
+    return employees.firstWhere(
+      _isSupervisor,
+      orElse: () {
+        final sorted = [...employees];
+        sorted.sort((a, b) {
+          final hire = a.hireDate.compareTo(b.hireDate);
+          if (hire != 0) return hire;
+          return a.fullName.compareTo(b.fullName);
+        });
+        return sorted.first;
+      },
+    );
+  }
+
+  bool _isSupervisor(Employee employee) {
+    final metadata = employee.metadata ?? const <String, dynamic>{};
+    if (metadata['isSupervisor'] == true ||
+        metadata['isManager'] == true ||
+        metadata['isLead'] == true ||
+        metadata['isTeamLead'] == true ||
+        metadata['isForeman'] == true) {
+      return true;
+    }
+    final title = _roleLabel(employee).toLowerCase();
+    return title.contains('supervisor') ||
+        title.contains('manager') ||
+        title.contains('lead') ||
+        title.contains('foreman') ||
+        title.contains('director') ||
+        title.contains('chief') ||
+        title.contains('owner');
+  }
+
+  String _departmentLabel(Employee employee) {
+    final metadata = employee.metadata ?? const <String, dynamic>{};
+    final value = employee.department ??
+        _readStringFromMetadata(metadata, [
+          'department',
+          'dept',
+          'team',
+          'division',
+          'group',
+        ]);
+    if (value == null || value.trim().isEmpty) return 'General';
+    return value.trim();
+  }
+
+  String _roleLabel(Employee employee) {
+    final metadata = employee.metadata ?? const <String, dynamic>{};
+    final value = employee.position ??
+        _readStringFromMetadata(metadata, [
+          'role',
+          'jobTitle',
+          'job_title',
+          'title',
+          'position',
+        ]);
+    if (value == null || value.trim().isEmpty) return 'Employee';
+    return value.trim();
+  }
+
+  String _displayName(Employee employee) {
+    final name = employee.fullName.trim();
+    if (name.isNotEmpty) return name;
+    if (employee.email.isNotEmpty) return employee.email;
+    return 'Employee ${employee.id}';
+  }
+
+  String _initialsFor(Employee employee) {
+    final initials = employee.initials.trim();
+    if (initials.isNotEmpty) return initials;
+    final name = employee.fullName.trim();
+    if (name.isNotEmpty) {
+      final parts =
+          name.split(RegExp(r'\\s+')).where((part) => part.isNotEmpty).toList();
+      if (parts.isNotEmpty) {
+        return parts.take(2).map((part) => part[0]).join().toUpperCase();
+      }
+    }
+    if (employee.email.isNotEmpty) {
+      return employee.email.trim()[0].toUpperCase();
+    }
+    return '??';
+  }
+
+  _Supervisor _mapSupervisor(Employee supervisor, List<Employee> reports) {
+    final employees = reports.map(_mapEmployee).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    final performance = _supervisorPerformance(supervisor, reports);
+    return _Supervisor(
+      id: supervisor.id,
+      name: _displayName(supervisor),
+      role: _roleLabel(supervisor),
+      avatar: _initialsFor(supervisor),
+      email: supervisor.email.isEmpty ? null : supervisor.email,
+      phone: supervisor.phoneNumber,
+      teamSize: employees.length,
+      projects: _projectsForSupervisor(supervisor, reports),
+      performance: performance,
+      department: _departmentLabel(supervisor),
+      employees: employees,
+    );
+  }
+
+  _Employee _mapEmployee(Employee employee) {
+    return _Employee(
+      id: employee.id,
+      name: _displayName(employee),
+      role: _roleLabel(employee),
+      status: _statusFromEmployee(employee),
+      performance: _performanceFromMetadata(employee.metadata),
+      email: employee.email,
+      avatar: _initialsFor(employee),
+    );
+  }
+
+  _EmployeeStatus _statusFromEmployee(Employee employee) {
+    if (!employee.isActive || employee.terminationDate != null) {
+      return _EmployeeStatus.onLeave;
+    }
+    final metadata = employee.metadata ?? const <String, dynamic>{};
+    if (metadata['isAway'] == true) return _EmployeeStatus.away;
+    if (metadata['isOnLeave'] == true) return _EmployeeStatus.onLeave;
+    final statusRaw = _readStringFromMetadata(metadata, [
+      'status',
+      'availability',
+      'state',
+    ]);
+    final normalized = statusRaw?.toLowerCase() ?? '';
+    if (normalized.contains('leave') || normalized.contains('inactive')) {
+      return _EmployeeStatus.onLeave;
+    }
+    if (normalized.contains('away') ||
+        normalized.contains('out') ||
+        normalized.contains('offline')) {
+      return _EmployeeStatus.away;
+    }
+    return _EmployeeStatus.active;
+  }
+
+  int _projectsForSupervisor(Employee supervisor, List<Employee> reports) {
+    final metadata = supervisor.metadata ?? const <String, dynamic>{};
+    final direct = _readIntFromMetadata(metadata, [
+      'projects',
+      'projectCount',
+      'project_count',
+      'activeProjects',
+      'active_projects',
+    ]);
+    if (direct != null) return direct;
+
+    final sites = <String>{};
+    void addSite(Employee employee) {
+      final meta = employee.metadata ?? const <String, dynamic>{};
+      final site = employee.jobSiteName ??
+          _readStringFromMetadata(meta, [
+            'jobSiteName',
+            'job_site_name',
+            'site',
+            'location',
+          ]);
+      if (site == null || site.trim().isEmpty) return;
+      sites.add(site.trim());
+    }
+
+    addSite(supervisor);
+    for (final employee in reports) {
+      addSite(employee);
+    }
+    return sites.length;
+  }
+
+  int? _supervisorPerformance(Employee supervisor, List<Employee> reports) {
+    final direct = _performanceFromMetadata(supervisor.metadata);
+    if (direct != null) return direct;
+    final scores = reports
+        .map((employee) => _performanceFromMetadata(employee.metadata))
+        .whereType<int>()
+        .toList();
+    if (scores.isEmpty) return null;
+    final total = scores.reduce((a, b) => a + b);
+    return (total / scores.length).round();
+  }
+
+  int? _performanceFromMetadata(Map<String, dynamic>? metadata) {
+    if (metadata == null) return null;
+    return _readIntFromMetadata(metadata, [
+      'performance',
+      'performanceScore',
+      'performance_score',
+      'performancePercent',
+      'performance_percent',
+      'score',
+      'rating',
+      'ratingPercent',
+      'rating_percent',
+    ]);
+  }
+
+  String? _extractReference(dynamic value) {
+    if (value == null) return null;
+    if (value is String) return value.trim();
+    if (value is int) return value.toString();
+    if (value is Map) {
+      final id = value['id'] ??
+          value['userId'] ??
+          value['user_id'] ??
+          value['email'] ??
+          value['name'] ??
+          value['fullName'] ??
+          value['full_name'] ??
+          value['employeeNumber'] ??
+          value['employee_number'];
+      if (id != null) {
+        final ref = id.toString().trim();
+        return ref.isEmpty ? null : ref;
+      }
+    }
+    final ref = value.toString().trim();
+    return ref.isEmpty ? null : ref;
+  }
+
+  Employee? _matchEmployee(
+    String reference, {
+    required Map<String, Employee> byId,
+    required Map<String, Employee> byUserId,
+    required Map<String, Employee> byEmail,
+    required Map<String, Employee> byName,
+    required Map<String, Employee> byEmployeeNumber,
+  }) {
+    final trimmed = reference.trim();
+    if (trimmed.isEmpty) return null;
+    final byDirectId = byId[trimmed];
+    if (byDirectId != null) return byDirectId;
+    final byUser = byUserId[trimmed];
+    if (byUser != null) return byUser;
+    final byNumber = byEmployeeNumber[trimmed];
+    if (byNumber != null) return byNumber;
+    final normalized = trimmed.toLowerCase();
+    return byEmail[normalized] ?? byName[normalized];
+  }
+
+  String? _readStringFromMetadata(
+    Map<String, dynamic> metadata,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = metadata[key];
+      if (value == null) continue;
+      final text = value.toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    return null;
+  }
+
+  int? _readIntFromMetadata(
+    Map<String, dynamic> metadata,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = metadata[key];
+      final parsed = _parseInt(value);
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+
+  int? _parseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is double) {
+      if (value <= 1) return (value * 100).round();
+      return value.round();
+    }
+    final text = value.toString().trim();
+    if (text.isEmpty) return null;
+    final cleaned = text.replaceAll('%', '');
+    final asInt = int.tryParse(cleaned);
+    if (asInt != null) return asInt;
+    final asDouble = double.tryParse(cleaned);
+    if (asDouble == null) return null;
+    if (asDouble <= 1) return (asDouble * 100).round();
+    return asDouble.round();
   }
 }
 
@@ -529,7 +1033,10 @@ class _SupervisorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    final performanceColor = _performanceColor(supervisor.performance);
+    final performanceValue = supervisor.performance;
+    final performanceColor = performanceValue == null
+        ? (isDark ? Colors.grey[400] : Colors.grey[500])
+        : _performanceColor(performanceValue);
     final headerGradient = LinearGradient(
       colors: isDark
           ? [
@@ -638,14 +1145,16 @@ class _SupervisorCard extends StatelessWidget {
                                   spacing: 8,
                                   runSpacing: 6,
                                   children: [
-                                    _InlineIconText(
-                                      icon: Icons.email_outlined,
-                                      label: supervisor.email,
-                                    ),
-                                    _InlineIconText(
-                                      icon: Icons.phone_outlined,
-                                      label: supervisor.phone,
-                                    ),
+                                    if ((supervisor.email ?? '').isNotEmpty)
+                                      _InlineIconText(
+                                        icon: Icons.email_outlined,
+                                        label: supervisor.email!,
+                                      ),
+                                    if ((supervisor.phone ?? '').isNotEmpty)
+                                      _InlineIconText(
+                                        icon: Icons.phone_outlined,
+                                        label: supervisor.phone!,
+                                      ),
                                   ],
                                 ),
                               ],
@@ -710,7 +1219,9 @@ class _SupervisorCard extends StatelessWidget {
                           ),
                           _StatMini(
                             label: 'Performance',
-                            value: '${supervisor.performance}%',
+                            value: performanceValue != null
+                                ? '$performanceValue%'
+                                : '--',
                             valueColor: performanceColor,
                           ),
                         ],
@@ -967,14 +1478,16 @@ class _EmployeeRow extends StatelessWidget {
                       fontSize: 14,
                     ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                employee.email,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Colors.grey[500],
-                      fontSize: 12,
-                    ),
-              ),
+              if (employee.email.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  employee.email,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.grey[500],
+                        fontSize: 12,
+                      ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1005,6 +1518,38 @@ class _EmployeeRow extends StatelessWidget {
           ),
           child: content,
         ),
+      ),
+    );
+  }
+}
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFECACA)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Color(0xFFDC2626)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF991B1B),
+                  ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1056,15 +1601,15 @@ class _Supervisor {
     required this.employees,
   });
 
-  final int id;
+  final String id;
   final String name;
   final String role;
   final String avatar;
-  final String email;
-  final String phone;
+  final String? email;
+  final String? phone;
   final int teamSize;
   final int projects;
-  final int performance;
+  final int? performance;
   final String department;
   final List<_Employee> employees;
 }
@@ -1080,229 +1625,13 @@ class _Employee {
     required this.avatar,
   });
 
-  final int id;
+  final String id;
   final String name;
   final String role;
   final _EmployeeStatus status;
-  final int performance;
+  final int? performance;
   final String email;
   final String avatar;
 }
 
 enum _EmployeeStatus { active, away, onLeave }
-
-const List<_Supervisor> _organizationData = [
-  _Supervisor(
-    id: 1,
-    name: 'John Smith',
-    role: 'Site Supervisor',
-    avatar: 'JS',
-    email: 'john.smith@company.com',
-    phone: '(555) 123-4567',
-    teamSize: 8,
-    projects: 3,
-    performance: 94,
-    department: 'Construction',
-    employees: [
-      _Employee(
-        id: 1,
-        name: 'Mike Johnson',
-        role: 'Electrician',
-        status: _EmployeeStatus.active,
-        performance: 92,
-        email: 'mike.j@company.com',
-        avatar: 'MJ',
-      ),
-      _Employee(
-        id: 2,
-        name: 'Sarah Davis',
-        role: 'Plumber',
-        status: _EmployeeStatus.active,
-        performance: 88,
-        email: 'sarah.d@company.com',
-        avatar: 'SD',
-      ),
-      _Employee(
-        id: 3,
-        name: 'Tom Wilson',
-        role: 'Carpenter',
-        status: _EmployeeStatus.onLeave,
-        performance: 90,
-        email: 'tom.w@company.com',
-        avatar: 'TW',
-      ),
-      _Employee(
-        id: 4,
-        name: 'Emma Brown',
-        role: 'HVAC Tech',
-        status: _EmployeeStatus.active,
-        performance: 95,
-        email: 'emma.b@company.com',
-        avatar: 'EB',
-      ),
-      _Employee(
-        id: 5,
-        name: 'James Lee',
-        role: 'General Labor',
-        status: _EmployeeStatus.active,
-        performance: 87,
-        email: 'james.l@company.com',
-        avatar: 'JL',
-      ),
-      _Employee(
-        id: 6,
-        name: 'Lisa Chen',
-        role: 'Painter',
-        status: _EmployeeStatus.active,
-        performance: 91,
-        email: 'lisa.c@company.com',
-        avatar: 'LC',
-      ),
-      _Employee(
-        id: 7,
-        name: 'David Kim',
-        role: 'Mason',
-        status: _EmployeeStatus.active,
-        performance: 89,
-        email: 'david.k@company.com',
-        avatar: 'DK',
-      ),
-      _Employee(
-        id: 8,
-        name: 'Anna Martinez',
-        role: 'Welder',
-        status: _EmployeeStatus.active,
-        performance: 93,
-        email: 'anna.m@company.com',
-        avatar: 'AM',
-      ),
-    ],
-  ),
-  _Supervisor(
-    id: 2,
-    name: 'Sarah Johnson',
-    role: 'Operations Supervisor',
-    avatar: 'SJ',
-    email: 'sarah.johnson@company.com',
-    phone: '(555) 234-5678',
-    teamSize: 6,
-    projects: 2,
-    performance: 96,
-    department: 'Operations',
-    employees: [
-      _Employee(
-        id: 9,
-        name: 'Robert Taylor',
-        role: 'Foreman',
-        status: _EmployeeStatus.active,
-        performance: 94,
-        email: 'robert.t@company.com',
-        avatar: 'RT',
-      ),
-      _Employee(
-        id: 10,
-        name: 'Jennifer White',
-        role: 'Equipment Operator',
-        status: _EmployeeStatus.active,
-        performance: 90,
-        email: 'jennifer.w@company.com',
-        avatar: 'JW',
-      ),
-      _Employee(
-        id: 11,
-        name: 'Michael Garcia',
-        role: 'Safety Inspector',
-        status: _EmployeeStatus.active,
-        performance: 97,
-        email: 'michael.g@company.com',
-        avatar: 'MG',
-      ),
-      _Employee(
-        id: 12,
-        name: 'Amanda Clark',
-        role: 'Quality Control',
-        status: _EmployeeStatus.active,
-        performance: 91,
-        email: 'amanda.c@company.com',
-        avatar: 'AC',
-      ),
-      _Employee(
-        id: 13,
-        name: 'Chris Anderson',
-        role: 'Site Engineer',
-        status: _EmployeeStatus.onLeave,
-        performance: 88,
-        email: 'chris.a@company.com',
-        avatar: 'CA',
-      ),
-      _Employee(
-        id: 14,
-        name: 'Rachel Moore',
-        role: 'Technician',
-        status: _EmployeeStatus.active,
-        performance: 92,
-        email: 'rachel.m@company.com',
-        avatar: 'RM',
-      ),
-    ],
-  ),
-  _Supervisor(
-    id: 3,
-    name: 'Mike Chen',
-    role: 'Maintenance Supervisor',
-    avatar: 'MC',
-    email: 'mike.chen@company.com',
-    phone: '(555) 345-6789',
-    teamSize: 5,
-    projects: 4,
-    performance: 91,
-    department: 'Maintenance',
-    employees: [
-      _Employee(
-        id: 15,
-        name: 'Kevin Harris',
-        role: 'Maintenance Tech',
-        status: _EmployeeStatus.active,
-        performance: 89,
-        email: 'kevin.h@company.com',
-        avatar: 'KH',
-      ),
-      _Employee(
-        id: 16,
-        name: 'Laura Thompson',
-        role: 'Facilities Manager',
-        status: _EmployeeStatus.active,
-        performance: 93,
-        email: 'laura.t@company.com',
-        avatar: 'LT',
-      ),
-      _Employee(
-        id: 17,
-        name: 'Steven Jackson',
-        role: 'Custodian',
-        status: _EmployeeStatus.active,
-        performance: 86,
-        email: 'steven.j@company.com',
-        avatar: 'SJ',
-      ),
-      _Employee(
-        id: 18,
-        name: 'Michelle Lewis',
-        role: 'Equipment Tech',
-        status: _EmployeeStatus.active,
-        performance: 90,
-        email: 'michelle.l@company.com',
-        avatar: 'ML',
-      ),
-      _Employee(
-        id: 19,
-        name: 'Brian Walker',
-        role: 'HVAC Specialist',
-        status: _EmployeeStatus.active,
-        performance: 92,
-        email: 'brian.w@company.com',
-        avatar: 'BW',
-      ),
-    ],
-  ),
-];

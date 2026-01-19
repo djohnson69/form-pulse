@@ -51,6 +51,10 @@ abstract class AssetsRepositoryBase {
     LocationData? location,
     List<AttachmentDraft> attachments = const [],
   });
+  Future<IncidentReport> updateIncidentStatus({
+    required String incidentId,
+    required String status,
+  });
 }
 
 class SupabaseAssetsRepository implements AssetsRepositoryBase {
@@ -290,6 +294,30 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
     } on PostgrestException catch (e, st) {
       developer.log(
         'Supabase createIncident failed: ${e.message} (code: ${e.code})',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
+  }
+
+  @override
+  Future<IncidentReport> updateIncidentStatus({
+    required String incidentId,
+    required String status,
+  }) async {
+    try {
+      final res = await _client
+          .from('incident_reports')
+          .update({'status': status})
+          .eq('id', incidentId)
+          .select()
+          .single();
+      final report = _mapIncident(Map<String, dynamic>.from(res as Map));
+      return _signIncidentAttachments(report);
+    } on PostgrestException catch (e, st) {
+      developer.log(
+        'Supabase updateIncidentStatus failed: ${e.message} (code: ${e.code})',
         error: e,
         stackTrace: st,
       );

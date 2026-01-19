@@ -231,7 +231,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       // Get assets count
       try {
         final assetsRes = await client
-            .from('assets')
+            .from('equipment')
             .select('id')
             .eq('assigned_to', user.id);
         final count = (assetsRes as List<dynamic>).length;

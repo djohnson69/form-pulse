@@ -5,6 +5,7 @@ import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../dashboard/data/role_override_provider.dart';
+
 class TaskDetailPage extends ConsumerStatefulWidget {
   const TaskDetailPage({required this.task, super.key});
 
@@ -36,66 +37,80 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
           future: roleFuture,
           builder: (context, snapshot) {
             final role = snapshot.data ?? UserRole.viewer;
-            final canManage = role.canManage || role.canSupervise;
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                TextButton.icon(
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Back to Tasks'),
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.centerLeft,
-                  ),
+            final canManage = role == UserRole.maintenance ||
+                role == UserRole.supervisor ||
+                role.canManage;
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final isWideLayout =
+                MediaQuery.of(context).size.width >= 768;
+            return Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1024),
+                child: ListView(
+                  padding: EdgeInsets.all(isWideLayout ? 24 : 16),
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(Icons.arrow_back, size: 20),
+                      label: const Text('Back to Tasks'),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.centerLeft,
+                        foregroundColor: isDark
+                            ? const Color(0xFF9CA3AF)
+                            : const Color(0xFF4B5563),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildHeader(context, canManage),
+                    const SizedBox(height: 20),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isWide = constraints.maxWidth >= 1024;
+                        final main = Column(
+                          children: [
+                            _DetailsCard(task: _task),
+                            const SizedBox(height: 16),
+                            _NotesCard(task: _task),
+                            const SizedBox(height: 16),
+                            const _CommentsCard(),
+                          ],
+                        );
+                        final sidebar = Column(
+                          children: [
+                            _QuickActionsCard(
+                              onMarkComplete: _noopAction,
+                              onAddComment: _noopAction,
+                              onAttachFile: _noopAction,
+                            ),
+                            const SizedBox(height: 16),
+                            _PriorityCard(priority: _task.priority),
+                          ],
+                        );
+                        if (isWide) {
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 2, child: main),
+                              const SizedBox(width: 16),
+                              Expanded(child: sidebar),
+                            ],
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            main,
+                            const SizedBox(height: 16),
+                            sidebar,
+                          ],
+                        );
+                      },
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                _buildHeader(context, canManage),
-                const SizedBox(height: 20),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isWide = constraints.maxWidth >= 1000;
-                    final main = Column(
-                      children: [
-                        _DetailsCard(task: _task),
-                        const SizedBox(height: 16),
-                        _NotesCard(task: _task),
-                        const SizedBox(height: 16),
-                        const _CommentsCard(),
-                      ],
-                    );
-                    final sidebar = Column(
-                      children: [
-                        _QuickActionsCard(
-                          onMarkComplete: _noopAction,
-                          onAddComment: _noopAction,
-                          onAttachFile: _noopAction,
-                        ),
-                        const SizedBox(height: 16),
-                        _PriorityCard(priority: _task.priority),
-                      ],
-                    );
-                    if (isWide) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(flex: 2, child: main),
-                          const SizedBox(width: 16),
-                          Expanded(child: sidebar),
-                        ],
-                      );
-                    }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        main,
-                        const SizedBox(height: 16),
-                        sidebar,
-                      ],
-                    );
-                  },
-                ),
-              ],
+              ),
             );
           },
         ),
@@ -106,7 +121,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
   Widget _buildHeader(BuildContext context, bool canManage) {
     final theme = Theme.of(context);
     final statusLabel = _statusLabel(_task.status);
-    final statusColor = _statusColor(_task.status, theme.brightness);
+    final statusColors = _statusPillColors(_task.status);
     final description = _task.description?.trim() ?? '';
 
     final titleBlock = Column(
@@ -123,7 +138,11 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            _Pill(label: statusLabel, color: statusColor),
+            _Pill(
+              label: statusLabel,
+              backgroundColor: statusColors.background,
+              textColor: statusColors.text,
+            ),
           ],
         ),
         if (description.isNotEmpty) ...[
@@ -149,6 +168,15 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
         FilledButton.icon(
           onPressed: _noopAction,
           icon: const Icon(Icons.edit_outlined, size: 18),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF2563EB),
+            foregroundColor: Colors.white,
+            elevation: 2,
+            shadowColor: const Color(0x332563EB),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
           label: const Text('Edit'),
         ),
         FilledButton.icon(
@@ -156,6 +184,11 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFFDC2626),
             foregroundColor: Colors.white,
+            elevation: 2,
+            shadowColor: const Color(0x33DC2626),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
           icon: const Icon(Icons.delete_outline, size: 18),
           label: const Text('Delete'),
@@ -165,7 +198,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 900;
+        final isWide = constraints.maxWidth >= 768;
         if (isWide) {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,7 +245,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
       case TaskStatus.todo:
         return 'pending';
       case TaskStatus.inProgress:
-        return 'in progress';
+        return 'in-progress';
       case TaskStatus.completed:
         return 'completed';
       case TaskStatus.blocked:
@@ -220,18 +253,28 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
     }
   }
 
-  Color _statusColor(TaskStatus status, Brightness brightness) {
+  _PillPalette _statusPillColors(TaskStatus status) {
     switch (status) {
       case TaskStatus.todo:
-        return brightness == Brightness.dark
-            ? const Color(0xFFB45309)
-            : const Color(0xFFF59E0B);
+        return const _PillPalette(
+          background: Color(0xFFFEF3C7),
+          text: Color(0xFFB45309),
+        );
       case TaskStatus.inProgress:
-        return const Color(0xFF2563EB);
+        return const _PillPalette(
+          background: Color(0xFFDBEAFE),
+          text: Color(0xFF1D4ED8),
+        );
       case TaskStatus.completed:
-        return const Color(0xFF16A34A);
+        return const _PillPalette(
+          background: Color(0xFFD1FAE5),
+          text: Color(0xFF047857),
+        );
       case TaskStatus.blocked:
-        return const Color(0xFFDC2626);
+        return const _PillPalette(
+          background: Color(0xFFFEE2E2),
+          text: Color(0xFFB91C1C),
+        );
     }
   }
 }
@@ -255,23 +298,22 @@ class _DetailsCard extends StatelessWidget {
     );
     final dueDateLabel = task.dueDate == null
         ? 'No due date'
-        : DateFormat.yMMMd().format(task.dueDate!.toLocal());
+        : DateFormat('M/d/y').format(task.dueDate!.toLocal());
     final createdLabel =
-        DateFormat.yMMMd().format(task.createdAt.toLocal());
-    final assignee =
-        task.assignedToName ?? task.assignedTeam ?? 'Unassigned';
+        DateFormat('M/d/y').format(task.createdAt.toLocal());
+    final assignee = _readString(task.assignedToName, 'Unassigned');
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -384,13 +426,13 @@ class _NotesCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -433,13 +475,13 @@ class _CommentsCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -463,7 +505,7 @@ class _CommentsCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'No comments yet.',
+            'No comments yet',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -488,6 +530,7 @@ class _QuickActionsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final border = theme.brightness == Brightness.dark
         ? const Color(0xFF374151)
         : const Color(0xFFE5E7EB);
@@ -495,13 +538,13 @@ class _QuickActionsCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -517,17 +560,55 @@ class _QuickActionsCard extends StatelessWidget {
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: onMarkComplete,
-            icon: const Icon(Icons.check_circle_outline),
+            icon: const Icon(Icons.check_circle),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF16A34A),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              elevation: 2,
+              shadowColor: const Color(0x3316A34A),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
             label: const Text('Mark Complete'),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
             onPressed: onAddComment,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: isDark
+                  ? const Color(0xFFD1D5DB)
+                  : const Color(0xFF374151),
+              side: BorderSide(
+                color: isDark
+                    ? const Color(0xFF374151)
+                    : const Color(0xFFD1D5DB),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
             child: const Text('Add Comment'),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
             onPressed: onAttachFile,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: isDark
+                  ? const Color(0xFFD1D5DB)
+                  : const Color(0xFF374151),
+              side: BorderSide(
+                color: isDark
+                    ? const Color(0xFF374151)
+                    : const Color(0xFFD1D5DB),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
             child: const Text('Attach File'),
           ),
         ],
@@ -547,19 +628,20 @@ class _PriorityCard extends StatelessWidget {
     final border = theme.brightness == Brightness.dark
         ? const Color(0xFF374151)
         : const Color(0xFFE5E7EB);
-    final resolved = (priority ?? 'normal').toLowerCase();
-    final color = _priorityColor(resolved);
+    final resolved = _normalizePriority((priority ?? 'normal').toLowerCase());
+    final colors = _priorityPillColors(resolved);
+    final label = _capitalize(resolved);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -573,47 +655,93 @@ class _PriorityCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          _Pill(label: resolved, color: color),
+          _Pill(
+            label: label,
+            backgroundColor: colors.background,
+            textColor: colors.text,
+          ),
         ],
       ),
     );
   }
 
-  Color _priorityColor(String priority) {
+  String _normalizePriority(String priority) {
+    if (priority == 'normal') return 'medium';
+    if (priority == 'urgent') return 'high';
+    return priority;
+  }
+
+  _PillPalette _priorityPillColors(String priority) {
     switch (priority) {
       case 'high':
-        return const Color(0xFFDC2626);
+        return const _PillPalette(
+          background: Color(0xFFFEE2E2),
+          text: Color(0xFFB91C1C),
+        );
       case 'medium':
-        return const Color(0xFFF59E0B);
+        return const _PillPalette(
+          background: Color(0xFFFEF3C7),
+          text: Color(0xFFB45309),
+        );
       case 'low':
-        return const Color(0xFF16A34A);
+        return const _PillPalette(
+          background: Color(0xFFD1FAE5),
+          text: Color(0xFF047857),
+        );
       default:
-        return const Color(0xFF6B7280);
+        return const _PillPalette(
+          background: Color(0xFFF3F4F6),
+          text: Color(0xFF374151),
+        );
     }
+  }
+
+  String _capitalize(String value) {
+    if (value.isEmpty) return value;
+    return value[0].toUpperCase() + value.substring(1);
   }
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.color});
+  const _Pill({
+    required this.label,
+    this.color,
+    this.backgroundColor,
+    this.textColor,
+  }) : assert(
+          color != null || (backgroundColor != null && textColor != null),
+        );
 
   final String label;
-  final Color color;
+  final Color? color;
+  final Color? backgroundColor;
+  final Color? textColor;
 
   @override
   Widget build(BuildContext context) {
+    final resolvedBackground =
+        backgroundColor ?? color!.withValues(alpha: 0.15);
+    final resolvedText = textColor ?? color!;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
+        color: resolvedBackground,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: color,
+              color: resolvedText,
               fontWeight: FontWeight.w600,
             ),
       ),
     );
   }
+}
+
+class _PillPalette {
+  const _PillPalette({required this.background, required this.text});
+
+  final Color background;
+  final Color text;
 }

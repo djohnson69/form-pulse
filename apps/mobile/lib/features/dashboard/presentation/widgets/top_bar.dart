@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
@@ -26,8 +27,9 @@ class TopBar extends ConsumerWidget {
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final iconColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF4B5563);
     final themeMode = ref.watch(themeModeProvider);
+    final allowRoleOverride = role == UserRole.developer || !kReleaseMode;
     final override =
-        role == UserRole.developer ? ref.watch(roleOverrideProvider) : null;
+        allowRoleOverride ? ref.watch(roleOverrideProvider) : null;
     final activeRole = override ?? role;
     final horizontalPadding = isMobile ? 12.0 : 24.0;
     final verticalPadding = 12.0;
@@ -71,16 +73,6 @@ class TopBar extends ConsumerWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (role == UserRole.developer) ...[
-                  _RoleDropdown(
-                    role: activeRole,
-                    isMobile: isMobile,
-                    onChanged: (next) {
-                      ref.read(roleOverrideProvider.notifier).state = next;
-                    },
-                  ),
-                  const SizedBox(width: 10),
-                ],
                 IconButton(
                   onPressed: () {
                     final next = themeMode == ThemeMode.dark
@@ -97,6 +89,16 @@ class TopBar extends ConsumerWidget {
                   splashRadius: 20,
                 ),
                 const SizedBox(width: 10),
+                if (allowRoleOverride) ...[
+                  _RoleDropdown(
+                    role: activeRole,
+                    isMobile: isMobile,
+                    onChanged: (next) {
+                      ref.read(roleOverrideProvider.notifier).state = next;
+                    },
+                  ),
+                  const SizedBox(width: 10),
+                ],
                 if (!isMobile) ...[
                   const SizedBox(width: 10),
                   IconButton(

@@ -18,6 +18,7 @@ class _ApprovalsPageState extends ConsumerState<ApprovalsPage> {
   final TextEditingController _commentController = TextEditingController();
   _ApprovalStatusFilter _filter = _ApprovalStatusFilter.pending;
   _ApprovalItem? _selectedItem;
+  String _searchQuery = '';
 
   @override
   void dispose() {
@@ -35,10 +36,16 @@ class _ApprovalsPageState extends ConsumerState<ApprovalsPage> {
       orElse: () => const <ApprovalItem>[],
     );
     final viewItems = items.map(_toViewModel).toList();
-    final filteredItems = viewItems
-        .where((item) => _matchesFilter(item.status, _filter))
-        .toList();
+    final filteredItems = viewItems.where((item) {
+      final matchesFilter = _matchesFilter(item.status, _filter);
+      final matchesSearch = _searchQuery.isEmpty ||
+          item.title.toLowerCase().contains(_searchQuery) ||
+          item.typeLabel.toLowerCase().contains(_searchQuery) ||
+          item.requestedBy.toLowerCase().contains(_searchQuery);
+      return matchesFilter && matchesSearch;
+    }).toList();
     final selectedView = _resolveSelection(filteredItems);
+    final stats = _ApprovalStats.fromItems(viewItems);
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -47,10 +54,15 @@ class _ApprovalsPageState extends ConsumerState<ApprovalsPage> {
         children: [
           _Header(muted: colors.muted),
           const SizedBox(height: 16),
+          _ApprovalStatsGrid(colors: colors, stats: stats),
+          const SizedBox(height: 12),
           _FilterBar(
             filter: _filter,
             colors: colors,
             onChanged: (value) => setState(() => _filter = value),
+            searchQuery: _searchQuery,
+            onSearchChanged: (value) =>
+                setState(() => _searchQuery = value.toLowerCase()),
           ),
           if (approvalsAsync.isLoading) const LinearProgressIndicator(),
           if (approvalsAsync.hasError)
@@ -193,11 +205,15 @@ class _FilterBar extends StatelessWidget {
     required this.filter,
     required this.colors,
     required this.onChanged,
+    required this.searchQuery,
+    required this.onSearchChanged,
   });
 
   final _ApprovalStatusFilter filter;
   final _ApprovalColors colors;
   final ValueChanged<_ApprovalStatusFilter> onChanged;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -208,24 +224,83 @@ class _FilterBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: colors.border),
       ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: _ApprovalStatusFilter.values.map((value) {
-          final selected = filter == value;
-          return TextButton(
-            onPressed: () => onChanged(value),
-            style: TextButton.styleFrom(
-              backgroundColor: selected ? colors.primary : colors.filterSurface,
-              foregroundColor: selected ? Colors.white : colors.muted,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 720;
+          final buttons = Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _ApprovalStatusFilter.values.map((value) {
+              final selected = filter == value;
+              return TextButton(
+                onPressed: () => onChanged(value),
+                style: TextButton.styleFrom(
+                  backgroundColor:
+                      selected ? colors.primary : colors.filterSurface,
+                  foregroundColor: selected ? Colors.white : colors.muted,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Text(_filterLabel(value)),
+              );
+            }).toList(),
+          );
+          final searchField = SizedBox(
+            width: isWide ? 280 : double.infinity,
+            child: TextField(
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Search approvals...',
+                filled: true,
+                fillColor: colors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: colors.primary),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              onChanged: onSearchChanged,
+              controller: TextEditingController.fromValue(
+                TextEditingValue(
+                  text: searchQuery,
+                  selection:
+                      TextSelection.collapsed(offset: searchQuery.length),
+                ),
               ),
             ),
-            child: Text(_filterLabel(value)),
           );
-        }).toList(),
+
+          if (isWide) {
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(child: buttons),
+                const SizedBox(width: 12),
+                searchField,
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              buttons,
+              const SizedBox(height: 12),
+              searchField,
+            ],
+          );
+        },
       ),
     );
   }
@@ -459,6 +534,18 @@ class _ApprovalDetail extends StatelessWidget {
                       value: item!.statusLabel,
                       colors: colors,
                     ),
+                    _DetailRow(
+                      label: 'Attachments',
+                      value:
+                          '${item!.attachments} file${item!.attachments == 1 ? '' : 's'}',
+                      colors: colors,
+                    ),
+                    if (item!.approvers.isNotEmpty)
+                      _DetailRow(
+                        label: 'Approvers',
+                        value: item!.approvers.join(', '),
+                        colors: colors,
+                      ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -733,6 +820,166 @@ String _filterLabel(_ApprovalStatusFilter filter) {
   }
 }
 
+class _ApprovalStats {
+  const _ApprovalStats({
+    required this.total,
+    required this.pending,
+    required this.approved,
+    required this.rejected,
+    required this.revision,
+  });
+
+  final int total;
+  final int pending;
+  final int approved;
+  final int rejected;
+  final int revision;
+
+  factory _ApprovalStats.fromItems(List<_ApprovalItem> items) {
+    int pending = 0;
+    int approved = 0;
+    int rejected = 0;
+    int revision = 0;
+    for (final item in items) {
+      switch (_normalizeStatus(item.status)) {
+        case 'approved':
+          approved++;
+          break;
+        case 'rejected':
+          rejected++;
+          break;
+        case 'pending':
+          pending++;
+          break;
+        case 'revision':
+        case 'needs_revision':
+          revision++;
+          break;
+        default:
+          break;
+      }
+    }
+    return _ApprovalStats(
+      total: items.length,
+      pending: pending,
+      approved: approved,
+      rejected: rejected,
+      revision: revision,
+    );
+  }
+}
+
+class _ApprovalStatsGrid extends StatelessWidget {
+  const _ApprovalStatsGrid({required this.colors, required this.stats});
+
+  final _ApprovalColors colors;
+  final _ApprovalStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final isWide = MediaQuery.sizeOf(context).width >= 900;
+    final cards = [
+      _StatCard(
+        label: 'Total',
+        value: stats.total.toString(),
+        color: colors.primary,
+        note: 'All items',
+      ),
+      _StatCard(
+        label: 'Pending',
+        value: stats.pending.toString(),
+        color: colors.primary,
+        note: 'Awaiting review',
+      ),
+      _StatCard(
+        label: 'Approved',
+        value: stats.approved.toString(),
+        color: colors.success,
+        note: 'Completed',
+      ),
+      _StatCard(
+        label: 'Rejected',
+        value: stats.rejected.toString(),
+        color: colors.danger,
+        note: 'Declined',
+      ),
+      _StatCard(
+        label: 'Needs Revision',
+        value: stats.revision.toString(),
+        color: colors.warning,
+        note: 'Pending updates',
+      ),
+    ];
+    final crossAxisCount = isWide ? 5 : 2;
+    return GridView.count(
+      crossAxisCount: crossAxisCount,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: crossAxisCount > 2 ? 1.5 : 1.2,
+      children: cards,
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.note,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final String note;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final border = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    final background = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final noteColor = isDark ? color.withValues(alpha: 0.8) : color;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            note,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: noteColor,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ApprovalStatusStyle {
   const _ApprovalStatusStyle({
     required this.label,
@@ -843,6 +1090,8 @@ class _ApprovalItem {
     required this.statusLabel,
     required this.type,
     required this.typeLabel,
+    required this.attachments,
+    required this.approvers,
     this.notes,
   });
 
@@ -855,6 +1104,8 @@ class _ApprovalItem {
   final String statusLabel;
   final String type;
   final String typeLabel;
+  final int attachments;
+  final List<String> approvers;
   final String? notes;
 }
 
@@ -873,6 +1124,8 @@ _ApprovalItem _toViewModel(ApprovalItem item) {
     statusLabel: _statusLabel(statusKey),
     type: item.type,
     typeLabel: _typeLabel(item.type),
+    attachments: 0,
+    approvers: const [],
     notes: item.notes?.trim().isEmpty == true ? null : item.notes?.trim(),
   );
 }

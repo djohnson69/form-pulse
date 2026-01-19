@@ -41,13 +41,17 @@ import '../../../projects/presentation/pages/projects_page.dart';
 import '../../../settings/presentation/pages/settings_page.dart';
 import '../../../sop/presentation/pages/sop_library_page.dart';
 import '../../../tasks/presentation/pages/tasks_page.dart';
+import '../../../tasks/presentation/pages/task_detail_page.dart';
 import '../../../teams/presentation/pages/teams_page.dart';
 import '../../../templates/presentation/pages/templates_page.dart';
+import '../../../training/data/training_provider.dart';
 import '../../../training/presentation/pages/training_hub_page.dart';
 import '../../../navigation/presentation/widgets/side_menu.dart';
 import '../widgets/dashboard_shell.dart';
+import '../../data/user_profile_provider.dart';
 import '../../data/role_override_provider.dart';
 import '../../data/dashboard_provider.dart';
+import '../../data/dashboard_layout_provider.dart';
 import '../../../tasks/data/tasks_provider.dart';
 import '../widgets/notification_panel.dart';
 import 'dashboard_page.dart';
@@ -103,6 +107,7 @@ class _RoleShellPageState extends ConsumerState<RoleShellPage> {
     return DashboardShell(
       role: widget.role,
       activeRoute: _activeRoute,
+      showRightSidebar: false,
       onNavigate: (route) => setState(() => _activeRoute = route),
       child: _pageForRoute(widget.role, _activeRoute),
     );
@@ -197,6 +202,7 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
   bool _clockedIn = false;
   String? _clockInTime;
   String _locationLabel = 'Getting location...';
+  final Set<String> _dismissedNotificationIds = <String>{};
 
   @override
   void initState() {
@@ -231,42 +237,96 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
     final time = DateFormat('h:mm a').format(DateTime.now());
     final location = await _resolveLocation();
     if (!mounted) return;
+    if (location == 'Location unavailable') {
+      setState(() => _locationLabel = location);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Unable to get location. Please enable location services.'),
+        ),
+      );
+      return;
+    }
     setState(() {
       _clockedIn = true;
       _clockInTime = time;
       _locationLabel = location;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Clocked in at $time')),
+      SnackBar(content: Text('Clocked in at $time\nLocation: $location')),
     );
   }
 
   void _clockOut() {
     final time = DateFormat('h:mm a').format(DateTime.now());
+    final startTime = _clockInTime;
     setState(() {
       _clockedIn = false;
       _clockInTime = null;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Clocked out at $time')),
+      SnackBar(
+        content: Text(
+          startTime == null
+              ? 'Clocked out at $time'
+              : 'Clocked out at $time\nStarted at $startTime',
+        ),
+      ),
     );
+  }
+
+  Future<void> _dismissNotification(NotificationItem item) async {
+    if (_dismissedNotificationIds.contains(item.id)) return;
+    setState(() => _dismissedNotificationIds.add(item.id));
+    try {
+      final repo = ref.read(dashboardRepositoryProvider);
+      await repo.markNotificationRead(item.id);
+      if (!mounted) return;
+      ref.invalidate(dashboardDataProvider);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _dismissedNotificationIds.remove(item.id));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to dismiss notification.')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final isWide = MediaQuery.of(context).size.width >= 768;
+    final pagePadding = EdgeInsets.all(isWide ? 24 : 16);
+    final double sectionSpacing = isWide ? 24.0 : 20.0;
+    final double cardSpacing = isWide ? 24.0 : 20.0;
+    final sectionTitleStyle = theme.textTheme.titleMedium?.copyWith(
+      fontSize: 18,
+      fontWeight: FontWeight.w600,
+      color: isDark ? Colors.white : const Color(0xFF111827),
+    );
     final tasksAsync = ref.watch(tasksProvider);
     final dashboardAsync = ref.watch(dashboardDataProvider);
-    final userName = Supabase.instance.client.auth.currentUser?.email
-            ?.split('@')
-            .first ??
-        'there';
+    final profileAsync = ref.watch(userProfileProvider);
+    final profile = profileAsync.asData?.value;
+    final fallbackName = profile?.email ??
+        Supabase.instance.client.auth.currentUser?.email;
+    final userName = (profile?.firstName?.trim().isNotEmpty == true)
+        ? profile!.firstName!.trim()
+        : (fallbackName?.split('@').first ?? 'there');
 
+    final layout = ref.watch(dashboardLayoutProvider)[UserRole.employee] ??
+        DashboardLayoutConfig.defaultsFor(UserRole.employee);
     final tasks = tasksAsync.asData?.value ?? const <Task>[];
     final taskCount = tasks.length;
-    final openTasks = tasks.where((task) => !task.isComplete).length;
     final completedTasks = tasks.where((task) => task.isComplete).length;
     final documentsAsync = ref.watch(documentsProvider(null));
     final documentsCount = documentsAsync.asData?.value.length ?? 0;
+    final employeeIdAsync = ref.watch(currentEmployeeIdProvider);
+    final employeeId = employeeIdAsync.asData?.value;
+    final trainingRecordsAsync = employeeId == null
+        ? const AsyncValue.data(<Training>[])
+        : ref.watch(trainingRecordsProvider(employeeId));
     final dashboardData = dashboardAsync.asData?.value;
     final photoCount = dashboardData == null
         ? 0
@@ -275,287 +335,585 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
             (sum, submission) =>
                 sum + (submission.attachments?.length ?? 0),
           );
-    final displayOpenTasks = openTasks == 0 ? 5 : openTasks;
-    final displayTasks = taskCount == 0 ? 12 : taskCount;
-    final displayCompleted = completedTasks == 0 ? 8 : completedTasks;
-    final displayDocuments = documentsCount == 0 ? 24 : documentsCount;
-    final displayPhotos = photoCount == 0 ? 156 : photoCount;
-    final employeeTasks = [
-      const _EmployeeTask(
-        title: 'Safety Inspection - Building A',
-        location: 'Main Construction Site',
-        priority: 'high',
-        dueTime: '10:00 AM',
-      ),
-      const _EmployeeTask(
-        title: 'Equipment Maintenance Log',
-        location: 'Warehouse',
-        priority: 'medium',
-        dueTime: '2:00 PM',
-      ),
-      const _EmployeeTask(
-        title: 'Daily Progress Report',
-        location: 'Office',
-        priority: 'low',
-        dueTime: '5:00 PM',
-      ),
-    ];
+    final openTaskList = tasks
+        .where((task) => !task.isComplete)
+        .toList()
+      ..sort((a, b) {
+        final aDue = a.dueDate;
+        final bDue = b.dueDate;
+        if (aDue == null && bDue == null) return 0;
+        if (aDue == null) return 1;
+        if (bDue == null) return -1;
+        return aDue.compareTo(bDue);
+      });
+    final dueTodayTasks = openTaskList
+        .where((task) => _isSameDay(task.dueDate, DateTime.now()))
+        .toList();
+    final dueTodayCount = dueTodayTasks.length;
+    final tasksForToday = dueTodayTasks.take(3).toList();
+    final employeeNotifications = _buildEmployeeNotifications(
+      dashboardAsync.asData?.value.notifications ?? const [],
+      dismissedIds: _dismissedNotificationIds,
+    );
+    final showNotifications =
+        layout.showNotifications && employeeNotifications.isNotEmpty;
+    final trainingRecords = trainingRecordsAsync.asData?.value ?? const <Training>[];
+    final trainingItems = _buildTrainingItems(trainingRecords);
+    final upcomingEvents = _buildUpcomingEvents(openTaskList, trainingRecords);
+    final completionPercent =
+        taskCount == 0 ? 0 : ((completedTasks / taskCount) * 100).round();
+    final qualityPercent = taskCount == 0
+        ? 0
+        : (tasks.fold<int>(0, (sum, task) => sum + task.progress) /
+                taskCount)
+            .round();
+    final responsePercent = _onTimeCompletionPercent(tasks);
     final performanceMetrics = [
-      const _ProgressMetric(
+      _ProgressMetric(
         label: 'Task Completion',
-        value: 92,
-        color: Colors.green,
+        value: completionPercent,
+        color: const Color(0xFF22C55E),
+        textColor: isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A),
       ),
-      const _ProgressMetric(
+      _ProgressMetric(
         label: 'Quality Score',
-        value: 88,
-        color: Colors.blue,
+        value: qualityPercent,
+        color: const Color(0xFF3B82F6),
+        textColor: isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
       ),
-      const _ProgressMetric(
+      _ProgressMetric(
         label: 'Response Time',
-        value: 95,
-        color: Colors.purple,
+        value: responsePercent,
+        color: const Color(0xFFA855F7),
+        textColor: isDark ? const Color(0xFFC084FC) : const Color(0xFF7C3AED),
       ),
     ];
-    final trainingItems = [
-      const _TrainingItem(label: 'Safety Cert', value: 85, color: Colors.green),
-      const _TrainingItem(label: 'Equipment', value: 60, color: Colors.blue),
-      const _TrainingItem(
-        label: 'First Aid',
-        value: 100,
-        color: Colors.purple,
-        badge: 'Certificate earned!',
+    final quickActions = [
+      _QuickActionTile(
+        icon: Icons.description_outlined,
+        label: 'Submit Form',
+        color: const Color(0xFF2563EB),
+        lightBackground: const Color(0xFFEFF6FF),
+        darkBackground: const Color(0xFF3B82F6).withValues(alpha: 0.1),
+        lightHoverBackground: const Color(0xFFDBEAFE),
+        darkHoverBackground: const Color(0xFF3B82F6).withValues(alpha: 0.2),
+        lightBorder: const Color(0xFFDBEAFE),
+        darkBorder: const Color(0xFF3B82F6).withValues(alpha: 0.2),
+        lightIcon: const Color(0xFF2563EB),
+        darkIcon: const Color(0xFF60A5FA),
+        lightText: const Color(0xFF1D4ED8),
+        darkText: const Color(0xFF93C5FD),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const FormsPage()),
+        ),
       ),
-    ];
-    final upcomingEvents = [
-      const _UpcomingEvent(
-        title: 'Team Meeting',
-        time: 'Tomorrow, 9:00 AM',
-        type: 'meeting',
+      _QuickActionTile(
+        icon: Icons.warning_amber_outlined,
+        label: 'Report Issue',
+        color: const Color(0xFFDC2626),
+        lightBackground: const Color(0xFFFEF2F2),
+        darkBackground: const Color(0xFFEF4444).withValues(alpha: 0.1),
+        lightHoverBackground: const Color(0xFFFEE2E2),
+        darkHoverBackground: const Color(0xFFEF4444).withValues(alpha: 0.2),
+        lightBorder: const Color(0xFFFEE2E2),
+        darkBorder: const Color(0xFFEF4444).withValues(alpha: 0.2),
+        lightIcon: const Color(0xFFDC2626),
+        darkIcon: const Color(0xFFF87171),
+        lightText: const Color(0xFFB91C1C),
+        darkText: const Color(0xFFFCA5A5),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const IncidentsPage()),
+        ),
       ),
-      const _UpcomingEvent(
-        title: 'Safety Training',
-        time: 'Dec 25, 2:00 PM',
-        type: 'training',
+      _QuickActionTile(
+        icon: Icons.description_outlined,
+        label: 'Upload Doc',
+        color: const Color(0xFF7C3AED),
+        lightBackground: const Color(0xFFF5F3FF),
+        darkBackground: const Color(0xFFA855F7).withValues(alpha: 0.1),
+        lightHoverBackground: const Color(0xFFEDE9FE),
+        darkHoverBackground: const Color(0xFFA855F7).withValues(alpha: 0.2),
+        lightBorder: const Color(0xFFEDE9FE),
+        darkBorder: const Color(0xFFA855F7).withValues(alpha: 0.2),
+        lightIcon: const Color(0xFF7C3AED),
+        darkIcon: const Color(0xFFC084FC),
+        lightText: const Color(0xFF6D28D9),
+        darkText: const Color(0xFFD8B4FE),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DocumentsPage()),
+        ),
       ),
-      const _UpcomingEvent(
-        title: 'Equipment Check',
-        time: 'Dec 26, 10:00 AM',
-        type: 'task',
+      _QuickActionTile(
+        icon: Icons.inventory_2_outlined,
+        label: 'My Assets',
+        color: const Color(0xFF16A34A),
+        lightBackground: const Color(0xFFF0FDF4),
+        darkBackground: const Color(0xFF22C55E).withValues(alpha: 0.1),
+        lightHoverBackground: const Color(0xFFDCFCE7),
+        darkHoverBackground: const Color(0xFF22C55E).withValues(alpha: 0.2),
+        lightBorder: const Color(0xFFDCFCE7),
+        darkBorder: const Color(0xFF22C55E).withValues(alpha: 0.2),
+        lightIcon: const Color(0xFF16A34A),
+        darkIcon: const Color(0xFF4ADE80),
+        lightText: const Color(0xFF15803D),
+        darkText: const Color(0xFF86EFAC),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AssetsPage()),
+        ),
       ),
     ];
 
     final content = ListView(
-        padding: const EdgeInsets.all(20),
+        padding: pagePadding,
         children: [
           Text(
             'Welcome back, ${_capitalize(userName)}!',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontSize: isWide ? 30 : 24,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : const Color(0xFF111827),
+            ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
-            'You have $displayOpenTasks tasks due today.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 16),
-          _ActionBar(
-            primaryLabel: _clockedIn ? 'Clock Out' : 'Clock In',
-            primaryIcon: _clockedIn ? Icons.logout : Icons.login,
-            primaryColor: _clockedIn ? Colors.red : Colors.green,
-            onPrimaryTap: _clockedIn ? _clockOut : _clockIn,
-            secondaryLabel: 'Start My Day',
-            secondaryIcon: Icons.play_arrow,
-            onSecondaryTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const TasksPage()),
-              );
-            },
-            stats: [
-              _InlineStat(
-                icon: Icons.schedule,
-                label: 'Tasks',
-                value: '$displayTasks',
-                color: Colors.blue,
-              ),
-              _InlineStat(
-                icon: Icons.check_circle_outline,
-                label: 'Completed',
-                value: '$displayCompleted',
-                color: Colors.green,
-              ),
-              _InlineStat(
-                icon: Icons.description_outlined,
-                label: 'Documents',
-                value: '$displayDocuments',
-                color: Colors.purple,
-              ),
-              _InlineStat(
-                icon: Icons.photo_camera_outlined,
-                label: 'Photos',
-                value: '$displayPhotos',
-                color: Colors.orange,
-              ),
-            ],
-          ),
-          if (_clockedIn)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: _ClockStatusBanner(
-                timeLabel: _clockInTime ?? 'Now',
-                locationLabel: _locationLabel,
-              ),
+            'You have $dueTodayCount tasks due today',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontSize: 16,
+              color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
             ),
-          const SizedBox(height: 16),
-          NotificationsPanel(
-            notifications: _buildEmployeeNotifications(
-              dashboardAsync.asData?.value.notifications ?? const [],
-            ),
-            onDismiss: (item) {},
-            initialLimit: 2,
           ),
-          const SizedBox(height: 16),
-          _SectionCard(
-            title: 'Quick Actions',
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final crossAxisCount = constraints.maxWidth > 900 ? 4 : 2;
-                return GridView.count(
-                  crossAxisCount: crossAxisCount,
-                  shrinkWrap: true,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  physics: const NeverScrollableScrollPhysics(),
-                  childAspectRatio: 1.35,
-                  children: [
-                    _QuickActionTile(
-                      icon: Icons.description_outlined,
-                      label: 'Submit Form',
-                      color: Colors.blue,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const FormsPage()),
-                      ),
-                    ),
-                    _QuickActionTile(
-                      icon: Icons.warning_amber_outlined,
-                      label: 'Report Issue',
-                      color: Colors.red,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const IncidentsPage()),
-                      ),
-                    ),
-                    _QuickActionTile(
-                      icon: Icons.upload_file_outlined,
-                      label: 'Upload Doc',
-                      color: Colors.purple,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const DocumentsPage()),
-                      ),
-                    ),
-                    _QuickActionTile(
-                      icon: Icons.inventory_2_outlined,
-                      label: 'My Assets',
-                      color: Colors.green,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const AssetsPage()),
-                      ),
-                    ),
-                  ],
+          const SizedBox(height: 12),
+          if (layout.showActionBar) ...[
+            _ActionBar(
+              primaryLabel: _clockedIn ? 'Clock Out' : 'Clock In',
+              primaryIcon: _clockedIn ? Icons.logout : Icons.login,
+              primaryColor:
+                  _clockedIn ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
+              primaryHoverColor:
+                  _clockedIn ? const Color(0xFFB91C1C) : const Color(0xFF15803D),
+              onPrimaryTap: _clockedIn ? _clockOut : _clockIn,
+              secondaryLabel: 'Start My Day',
+              secondaryIcon: Icons.play_arrow,
+              onSecondaryTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const TasksPage()),
                 );
               },
+              secondaryHoverColor: const Color(0xFF1D4ED8),
+              stats: [
+                _InlineStat(
+                  icon: Icons.schedule,
+                  label: 'Tasks',
+                  value: '$taskCount',
+                  color: Colors.blue,
+                  backgroundLight: const Color(0xFFDBEAFE),
+                  backgroundDark: const Color(0xFF1E3A8A).withValues(alpha: 0.3),
+                  iconColorLight: const Color(0xFF2563EB),
+                  iconColorDark: const Color(0xFF60A5FA),
+                ),
+                _InlineStat(
+                  icon: Icons.check_circle_outline,
+                  label: 'Completed',
+                  value: '$completedTasks',
+                  color: Colors.green,
+                  backgroundLight: const Color(0xFFDCFCE7),
+                  backgroundDark: const Color(0xFF14532D).withValues(alpha: 0.3),
+                  iconColorLight: const Color(0xFF16A34A),
+                  iconColorDark: const Color(0xFF4ADE80),
+                ),
+                _InlineStat(
+                  icon: Icons.description_outlined,
+                  label: 'Documents',
+                  value: '$documentsCount',
+                  color: Colors.purple,
+                  backgroundLight: const Color(0xFFF3E8FF),
+                  backgroundDark: const Color(0xFF581C87).withValues(alpha: 0.3),
+                  iconColorLight: const Color(0xFF7C3AED),
+                  iconColorDark: const Color(0xFFC084FC),
+                ),
+                _InlineStat(
+                  icon: Icons.photo_camera_outlined,
+                  label: 'Photos',
+                  value: '$photoCount',
+                  color: Colors.orange,
+                  backgroundLight: const Color(0xFFFFEDD5),
+                  backgroundDark: const Color(0xFF7C2D12).withValues(alpha: 0.3),
+                  iconColorLight: const Color(0xFFEA580C),
+                  iconColorDark: const Color(0xFFFB923C),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
+            if (_clockedIn)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _ClockStatusBanner(
+                  timeLabel: _clockInTime ?? 'Now',
+                  locationLabel: _locationLabel,
+                ),
+              ),
+            SizedBox(height: sectionSpacing),
+          ],
+          if (showNotifications) ...[
+            NotificationsPanel(
+              notifications: employeeNotifications,
+              onDismiss: _dismissNotification,
+              initialLimit: 2,
+            ),
+            SizedBox(height: sectionSpacing),
+          ],
+          if (layout.showQuickActions) ...[
+            _SectionCard(
+              title: 'Quick Actions',
+              titleStyle: sectionTitleStyle,
+              backgroundLight: Colors.white,
+              backgroundDark: const Color(0xFF1F2937),
+              headerPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              bodyPadding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              showShadow: true,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final crossAxisCount = constraints.maxWidth >= 1024 ? 4 : 2;
+                  return GridView.count(
+                    crossAxisCount: crossAxisCount,
+                    shrinkWrap: true,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 1.35,
+                    children: quickActions,
+                  );
+                },
+              ),
+            ),
+            SizedBox(height: sectionSpacing),
+          ],
           LayoutBuilder(
             builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 1100;
+              final isWide = constraints.maxWidth >= 1024;
               final leftColumn = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _SectionCard(
                     title: "Today's Tasks",
-                    trailing: IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.more_vert),
-                    ),
+                    titleStyle: sectionTitleStyle,
+                    backgroundLight: Colors.white,
+                    backgroundDark: const Color(0xFF1F2937),
+                    headerPadding: const EdgeInsets.all(20),
+                    bodyPadding: EdgeInsets.zero,
+                    showDivider: true,
+                    showShadow: true,
+                    clipBehavior: Clip.antiAlias,
+                    trailing: _HeaderIconButton(onTap: () {}),
                     child: Column(
                       children: [
-                        ...employeeTasks.map(
-                          (task) => _EmployeeTaskCard(
-                            task: task,
-                            onTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const TasksPage(),
-                                ),
-                              );
-                            },
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              if (tasksForToday.isEmpty)
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  child: Text(
+                                    'No tasks due today',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          fontSize: 14,
+                                          color: isDark
+                                              ? const Color(0xFF9CA3AF)
+                                              : const Color(0xFF6B7280),
+                                        ),
+                                  ),
+                                )
+                              else
+                                ...tasksForToday.asMap().entries.map((entry) {
+                                  final task = entry.value;
+                                  final isLast =
+                                      entry.key == tasksForToday.length - 1;
+                                  return Padding(
+                                    padding:
+                                        EdgeInsets.only(bottom: isLast ? 0 : 12),
+                                    child: _EmployeeTaskCard(
+                                      task: _EmployeeTask(
+                                        title: task.title,
+                                        location: _taskLocationLabel(task),
+                                        priority: _taskPriorityLabel(task),
+                                        dueTime: _taskDueLabel(task),
+                                      ),
+                                      onTap: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                TaskDetailPage(task: task),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  );
+                                }),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const TasksPage()),
-                            );
-                          },
-                          child: const Text('View All Tasks'),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              top: BorderSide(
+                                color: isDark
+                                    ? const Color(0xFF374151)
+                                    : const Color(0xFFE5E7EB),
+                              ),
+                            ),
+                          ),
+                          child: Center(
+                            child: TextButton(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) => const TasksPage()),
+                                );
+                              },
+                              style: ButtonStyle(
+                                foregroundColor:
+                                    MaterialStateProperty.resolveWith((states) {
+                                  if (states.contains(MaterialState.hovered)) {
+                                    return const Color(0xFF1D4ED8);
+                                  }
+                                  return const Color(0xFF2563EB);
+                                }),
+                                textStyle: MaterialStateProperty.all(
+                                  theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                overlayColor: MaterialStateProperty.all(
+                                  Colors.transparent,
+                                ),
+                                padding:
+                                    MaterialStateProperty.all(EdgeInsets.zero),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('View All Tasks'),
+                                  SizedBox(width: 6),
+                                  Icon(Icons.chevron_right, size: 16),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  _SectionCard(
-                    title: 'Performance',
-                    trailing: TextButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const AnalyticsPage()),
-                        );
-                      },
-                      child: const Text('View Details'),
+                  if (layout.showPerformance) ...[
+                    SizedBox(height: cardSpacing),
+                    _SectionCard(
+                      title: 'Performance',
+                      titleStyle: sectionTitleStyle,
+                      backgroundLight: Colors.white,
+                      backgroundDark: const Color(0xFF1F2937),
+                      headerPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                      bodyPadding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                      showShadow: true,
+                      leading: const Icon(
+                        Icons.track_changes_outlined,
+                        color: Color(0xFF2563EB),
+                      ),
+                      leadingIconSize: 20,
+                      trailing: TextButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const AnalyticsPage(),
+                            ),
+                          );
+                        },
+                        style: ButtonStyle(
+                          foregroundColor:
+                              MaterialStateProperty.resolveWith((states) {
+                            if (states.contains(MaterialState.hovered)) {
+                              return const Color(0xFF1D4ED8);
+                            }
+                            return const Color(0xFF2563EB);
+                          }),
+                          textStyle: MaterialStateProperty.all(
+                            theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          overlayColor:
+                              MaterialStateProperty.all(Colors.transparent),
+                        ),
+                        child: const Text('View Details'),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ...performanceMetrics
+                              .map((metric) =>
+                                  _ProgressMetricRow(
+                                    metric: metric,
+                                    bottomSpacing: 20,
+                                  ))
+                              .toList(),
+                        ],
+                      ),
                     ),
-                    child: Column(
-                      children: performanceMetrics
-                          .map((metric) => _ProgressMetricRow(metric: metric))
-                          .toList(),
-                    ),
-                  ),
+                  ],
                 ],
               );
 
               final rightColumn = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _SectionCard(
-                    title: 'Training',
-                    trailing: TextButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const TrainingHubPage(),
+                  if (layout.showTraining) ...[
+                    _SectionCard(
+                      title: 'Training',
+                      titleStyle: sectionTitleStyle,
+                      backgroundLight: Colors.white,
+                      backgroundDark: const Color(0xFF1F2937),
+                      headerPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                      bodyPadding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                      showShadow: true,
+                      leading: const Icon(
+                        Icons.school_outlined,
+                        color: Color(0xFF7C3AED),
+                      ),
+                      leadingIconSize: 20,
+                      trailing: TextButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const TrainingHubPage(),
+                            ),
+                          );
+                        },
+                        style: ButtonStyle(
+                          foregroundColor:
+                              MaterialStateProperty.resolveWith((states) {
+                            if (states.contains(MaterialState.hovered)) {
+                              return const Color(0xFF1D4ED8);
+                            }
+                            return const Color(0xFF2563EB);
+                          }),
+                          textStyle: MaterialStateProperty.all(
+                            theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
-                        );
-                      },
-                      child: const Text('View All'),
+                          overlayColor:
+                              MaterialStateProperty.all(Colors.transparent),
+                        ),
+                        child: const Text('View All'),
+                      ),
+                      child: Builder(
+                        builder: (context) {
+                          if (trainingRecordsAsync.isLoading) {
+                            return const Center(
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            );
+                          }
+                          if (trainingRecordsAsync.hasError) {
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'Unable to load training progress',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      fontSize: 14,
+                                      color: isDark
+                                          ? const Color(0xFF9CA3AF)
+                                          : const Color(0xFF6B7280),
+                                    ),
+                              ),
+                            );
+                          }
+                          if (trainingItems.isEmpty) {
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'No training progress yet',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      fontSize: 14,
+                                      color: isDark
+                                          ? const Color(0xFF9CA3AF)
+                                          : const Color(0xFF6B7280),
+                                    ),
+                              ),
+                            );
+                          }
+                          return Column(
+                            children: trainingItems
+                                .map((item) => _TrainingProgressRow(item: item))
+                                .toList(),
+                          );
+                        },
+                      ),
                     ),
-                    child: Column(
-                      children: trainingItems
-                          .map((item) => _TrainingProgressRow(item: item))
-                          .toList(),
+                    SizedBox(height: cardSpacing),
+                    _SectionCard(
+                      title: 'Upcoming',
+                      titleStyle: sectionTitleStyle,
+                      backgroundLight: Colors.white,
+                      backgroundDark: const Color(0xFF1F2937),
+                      headerPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                      bodyPadding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                      showShadow: true,
+                      leading: const Icon(
+                        Icons.calendar_today_outlined,
+                        color: Color(0xFF2563EB),
+                      ),
+                      leadingIconSize: 20,
+                      child: Column(
+                        children: upcomingEvents.isEmpty
+                            ? [
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  child: Text(
+                                    'No upcoming items scheduled',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          fontSize: 14,
+                                          color: isDark
+                                              ? const Color(0xFF9CA3AF)
+                                              : const Color(0xFF6B7280),
+                                        ),
+                                  ),
+                                ),
+                              ]
+                            : upcomingEvents
+                                .take(3)
+                                .map(
+                                  (event) => _UpcomingEventCard(event: event),
+                                )
+                                .toList(),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  _SectionCard(
-                    title: 'Upcoming',
-                    leading: const Icon(Icons.calendar_today_outlined),
-                    child: Column(
-                      children: upcomingEvents
-                          .map((event) => _UpcomingEventCard(event: event))
-                          .toList(),
-                    ),
-                  ),
+                  ],
                 ],
               );
 
@@ -563,9 +921,9 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: leftColumn),
-                    const SizedBox(width: 16),
-                    SizedBox(width: 360, child: rightColumn),
+                    Expanded(flex: 2, child: leftColumn),
+                    const SizedBox(width: 24),
+                    Expanded(child: rightColumn),
                   ],
                 );
               }
@@ -573,7 +931,7 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   leftColumn,
-                  const SizedBox(height: 16),
+                  SizedBox(height: cardSpacing),
                   rightColumn,
                 ],
               );
@@ -654,6 +1012,8 @@ class _SupervisorDashboardPageState
 
   @override
   Widget build(BuildContext context) {
+    final layout = ref.watch(dashboardLayoutProvider)[UserRole.supervisor] ??
+        DashboardLayoutConfig.defaultsFor(UserRole.supervisor);
     final teamMembers = [
       const _SupervisorMember(
         name: 'Sarah Johnson',
@@ -718,6 +1078,48 @@ class _SupervisorDashboardPageState
       const _ApprovalItem(type: 'Expense', user: 'Mike Chen', time: '3h ago'),
       const _ApprovalItem(type: 'Leave Request', user: 'Emily Davis', time: '5h ago'),
     ];
+    final quickActions = [
+      _QuickActionTile(
+        icon: Icons.playlist_add_check,
+        label: 'Assign Tasks',
+        color: Colors.blue,
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const TasksPage()),
+          );
+        },
+      ),
+      _QuickActionTile(
+        icon: Icons.rule_folder_outlined,
+        label: 'Review Approvals',
+        color: Colors.red,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ApprovalsPage()),
+        ),
+      ),
+      _QuickActionTile(
+        icon: Icons.schedule,
+        label: 'Team Schedule',
+        color: Colors.orange,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => TimecardsPage(role: UserRole.supervisor),
+          ),
+        ),
+      ),
+      _QuickActionTile(
+        icon: Icons.trending_up,
+        label: 'View Reports',
+        color: Colors.purple,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AnalyticsPage()),
+        ),
+      ),
+    ];
+    final teamCompleted = 78;
+    final teamTotalTasks = 172;
+    final teamCompletionRate =
+        teamTotalTasks == 0 ? 0.0 : teamCompleted / teamTotalTasks;
 
     final content = ListView(
         padding: const EdgeInsets.all(20),
@@ -734,60 +1136,84 @@ class _SupervisorDashboardPageState
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
-          _ActionBar(
-            primaryLabel: _clockedIn ? 'Clock Out' : 'Clock In',
-            primaryIcon: _clockedIn ? Icons.logout : Icons.login,
-            primaryColor: _clockedIn ? Colors.red : Colors.green,
-            onPrimaryTap: _clockedIn ? _clockOut : _clockIn,
-            secondaryLabel: 'Start My Day',
-            secondaryIcon: Icons.play_arrow,
-            onSecondaryTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const TasksPage()),
-              );
-            },
-            stats: const [
-              _InlineStat(
-                icon: Icons.people_outline,
-                label: 'Team',
-                value: '4',
-                color: Colors.blue,
+          if (layout.showActionBar) ...[
+            _ActionBar(
+              primaryLabel: _clockedIn ? 'Clock Out' : 'Clock In',
+              primaryIcon: _clockedIn ? Icons.logout : Icons.login,
+              primaryColor: _clockedIn ? Colors.red : Colors.green,
+              onPrimaryTap: _clockedIn ? _clockOut : _clockIn,
+              secondaryLabel: 'Start My Day',
+              secondaryIcon: Icons.play_arrow,
+              onSecondaryTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const TasksPage()),
+                );
+              },
+              stats: const [
+                _InlineStat(
+                  icon: Icons.people_outline,
+                  label: 'Team',
+                  value: '4',
+                  color: Colors.blue,
+                ),
+                _InlineStat(
+                  icon: Icons.schedule,
+                  label: 'Active',
+                  value: '94',
+                  color: Colors.orange,
+                ),
+                _InlineStat(
+                  icon: Icons.warning_amber_outlined,
+                  label: 'Approvals',
+                  value: '5',
+                  color: Colors.red,
+                ),
+                _InlineStat(
+                  icon: Icons.check_circle_outline,
+                  label: 'Completed',
+                  value: '78',
+                  color: Colors.green,
+                ),
+              ],
+            ),
+            if (_clockedIn)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _ClockStatusBanner(
+                  timeLabel: _clockInTime ?? 'Now',
+                  locationLabel: _locationLabel,
+                ),
               ),
-              _InlineStat(
-                icon: Icons.schedule,
-                label: 'Active',
-                value: '94',
-                color: Colors.orange,
-              ),
-              _InlineStat(
-                icon: Icons.warning_amber_outlined,
-                label: 'Approvals',
-                value: '5',
-                color: Colors.red,
-              ),
-              _InlineStat(
-                icon: Icons.check_circle_outline,
-                label: 'Completed',
-                value: '78',
-                color: Colors.green,
-              ),
-            ],
-          ),
-          if (_clockedIn)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: _ClockStatusBanner(
-                timeLabel: _clockInTime ?? 'Now',
-                locationLabel: _locationLabel,
+            const SizedBox(height: 16),
+          ],
+          if (layout.showNotifications) ...[
+            NotificationsPanel(
+              notifications: _sampleSupervisorNotifications(),
+              onDismiss: (item) {},
+              initialLimit: 2,
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (layout.showQuickActions) ...[
+            _SectionCard(
+              title: 'Quick Actions',
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final crossAxisCount = constraints.maxWidth > 900 ? 4 : 2;
+                  return GridView.count(
+                    crossAxisCount: crossAxisCount,
+                    shrinkWrap: true,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 1.35,
+                    children: quickActions,
+                  );
+                },
               ),
             ),
-          const SizedBox(height: 16),
-          NotificationsPanel(
-            notifications: _sampleSupervisorNotifications(),
-            onDismiss: (item) {},
-            initialLimit: 2,
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
+          ],
           LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 1100;
@@ -839,28 +1265,41 @@ class _SupervisorDashboardPageState
               final rightColumn = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _SectionCard(
-                    title: 'Performance',
-                    leading: const Icon(Icons.bolt),
-                    child: Column(
-                      children: performanceMetrics
-                          .map((metric) => _ProgressMetricRow(metric: metric))
-                          .toList(),
+                  if (layout.showPerformance) ...[
+                    _SectionCard(
+                      title: 'Team Performance',
+                      leading: const Icon(Icons.bolt),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _PerformanceSummaryBar(
+                            completionRate: teamCompletionRate,
+                            completed: teamCompleted,
+                            total: teamTotalTasks,
+                          ),
+                          const SizedBox(height: 12),
+                          ...performanceMetrics
+                              .map((metric) => _ProgressMetricRow(metric: metric))
+                              .toList(),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  _SectionCard(
-                    title: 'Approvals',
-                    trailing: _CountPill(
-                      label: '5',
-                      color: Colors.red,
+                    const SizedBox(height: 16),
+                  ],
+                  if (layout.showApprovals) ...[
+                    _SectionCard(
+                      title: 'Approvals',
+                      trailing: _CountPill(
+                        label: '${approvals.length}',
+                        color: Colors.red,
+                      ),
+                      child: Column(
+                        children: approvals
+                            .map((approval) => _ApprovalCard(item: approval))
+                            .toList(),
+                      ),
                     ),
-                    child: Column(
-                      children: approvals
-                          .map((approval) => _ApprovalCard(item: approval))
-                          .toList(),
-                    ),
-                  ),
+                  ],
                 ],
               );
 
@@ -959,6 +1398,8 @@ class _ManagerDashboardPageState extends ConsumerState<ManagerDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final layout = ref.watch(dashboardLayoutProvider)[UserRole.manager] ??
+        DashboardLayoutConfig.defaultsFor(UserRole.manager);
     final organizationData = [
       _SupervisorTeam(
         id: 1,
@@ -1147,6 +1588,51 @@ class _ManagerDashboardPageState extends ConsumerState<ManagerDashboardPage> {
       _SummaryItem(label: 'Budget Spent', value: '\$340K'),
       _SummaryItem(label: 'Team Growth', value: '+8%', accent: true),
     ];
+    final resourceAllocation = const [
+      _ResourceAllocationItem(
+        label: 'Labor',
+        allocation: 72,
+        detail: 'On-site crews across projects',
+      ),
+      _ResourceAllocationItem(
+        label: 'Equipment',
+        allocation: 64,
+        detail: 'Fleet & heavy machinery utilization',
+      ),
+      _ResourceAllocationItem(
+        label: 'Budget Used',
+        allocation: 58,
+        detail: 'Spend vs plan across all departments',
+      ),
+      _ResourceAllocationItem(
+        label: 'Subcontractors',
+        allocation: 41,
+        detail: 'Active contracts this month',
+      ),
+    ];
+    final crossDepartmentAnalytics = const [
+      _CrossDepartmentMetric(
+        title: 'Efficiency Score',
+        value: '91%',
+        delta: '+5%',
+      ),
+      _CrossDepartmentMetric(
+        title: 'Quality Score',
+        value: '94%',
+        delta: '+2%',
+      ),
+      _CrossDepartmentMetric(
+        title: 'Safety Score',
+        value: '97%',
+        delta: '+1%',
+      ),
+      _CrossDepartmentMetric(
+        title: 'Budget Utilization',
+        value: '82%',
+        delta: '-3%',
+        isNegative: true,
+      ),
+    ];
 
     final content = ListView(
         padding: const EdgeInsets.all(20),
@@ -1163,60 +1649,64 @@ class _ManagerDashboardPageState extends ConsumerState<ManagerDashboardPage> {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
-          _ActionBar(
-            primaryLabel: _clockedIn ? 'Clock Out' : 'Clock In',
-            primaryIcon: _clockedIn ? Icons.logout : Icons.login,
-            primaryColor: _clockedIn ? Colors.red : Colors.green,
-            onPrimaryTap: _clockedIn ? _clockOut : _clockIn,
-            secondaryLabel: 'Start My Day',
-            secondaryIcon: Icons.play_arrow,
-            onSecondaryTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const TasksPage()),
-              );
-            },
-            stats: const [
-              _InlineStat(
-                icon: Icons.folder_outlined,
-                label: 'Projects',
-                value: '9',
-                color: Colors.blue,
-              ),
-              _InlineStat(
-                icon: Icons.people_outline,
-                label: 'Supervisors',
-                value: '3',
-                color: Colors.purple,
-              ),
-              _InlineStat(
-                icon: Icons.groups_outlined,
-                label: 'Employees',
-                value: '19',
-                color: Colors.green,
-              ),
-              _InlineStat(
-                icon: Icons.trending_up,
-                label: 'Performance',
-                value: '91%',
-                color: Colors.teal,
-              ),
-            ],
-          ),
-          if (_clockedIn)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: _ClockStatusBanner(
-                timeLabel: _clockInTime ?? 'Now',
-                locationLabel: _locationLabel,
-              ),
+          if (layout.showActionBar) ...[
+            _ActionBar(
+              primaryLabel: _clockedIn ? 'Clock Out' : 'Clock In',
+              primaryIcon: _clockedIn ? Icons.logout : Icons.login,
+              primaryColor: _clockedIn ? Colors.red : Colors.green,
+              onPrimaryTap: _clockedIn ? _clockOut : _clockIn,
+              secondaryLabel: 'Start My Day',
+              secondaryIcon: Icons.play_arrow,
+              onSecondaryTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const TasksPage()),
+                );
+              },
+              stats: const [
+                _InlineStat(
+                  icon: Icons.folder_outlined,
+                  label: 'Projects',
+                  value: '9',
+                  color: Colors.blue,
+                ),
+                _InlineStat(
+                  icon: Icons.people_outline,
+                  label: 'Supervisors',
+                  value: '3',
+                  color: Colors.purple,
+                ),
+                _InlineStat(
+                  icon: Icons.groups_outlined,
+                  label: 'Employees',
+                  value: '19',
+                  color: Colors.green,
+                ),
+                _InlineStat(
+                  icon: Icons.trending_up,
+                  label: 'Performance',
+                  value: '91%',
+                  color: Colors.teal,
+                ),
+              ],
             ),
-          const SizedBox(height: 16),
-          NotificationsPanel(
-            notifications: _sampleManagerNotifications(),
-            onDismiss: (item) {},
-            initialLimit: 2,
-          ),
-          const SizedBox(height: 16),
+            if (_clockedIn)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _ClockStatusBanner(
+                  timeLabel: _clockInTime ?? 'Now',
+                  locationLabel: _locationLabel,
+                ),
+              ),
+            const SizedBox(height: 16),
+          ],
+          if (layout.showNotifications) ...[
+            NotificationsPanel(
+              notifications: _sampleManagerNotifications(),
+              onDismiss: (item) {},
+              initialLimit: 2,
+            ),
+            const SizedBox(height: 16),
+          ],
           LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 1100;
@@ -1287,6 +1777,22 @@ class _ManagerDashboardPageState extends ConsumerState<ManagerDashboardPage> {
                     child: Column(
                       children: criticalIssues
                           .map((issue) => _CriticalIssueCard(issue: issue))
+                          .toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (layout.showResourceAllocation) ...[
+                    _SectionCard(
+                      title: 'Resource Allocation',
+                      child: _ResourceAllocationGrid(items: resourceAllocation),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  _SectionCard(
+                    title: 'Cross-Department Analytics',
+                    child: Column(
+                      children: crossDepartmentAnalytics
+                          .map((metric) => _CrossDepartmentMetricCard(metric: metric))
                           .toList(),
                     ),
                   ),
@@ -1754,8 +2260,27 @@ class _TechSupportDashboardPageState
       return ticket.title.toLowerCase().contains(query) ||
           ticket.user.toLowerCase().contains(query);
     }).toList();
+    final layout = ref.watch(dashboardLayoutProvider)[UserRole.techSupport] ??
+        DashboardLayoutConfig.defaultsFor(UserRole.techSupport);
     final activeTickets =
         _tickets.where((ticket) => ticket.status != 'resolved').length;
+    final recentErrors = const [
+      _TechErrorItem(
+        title: 'API 500 on /forms',
+        detail: 'Supabase edge function timeout',
+        time: '2 min ago',
+      ),
+      _TechErrorItem(
+        title: 'Slow query detected',
+        detail: 'Tasks search > 1200ms',
+        time: '8 min ago',
+      ),
+      _TechErrorItem(
+        title: 'Storage warning',
+        detail: 'Bucket nearing limit (82%)',
+        time: '15 min ago',
+      ),
+    ];
 
     final content = LayoutBuilder(
       builder: (context, constraints) {
@@ -1829,9 +2354,13 @@ class _TechSupportDashboardPageState
                       children: [
                         _buildSupportTicketsCard(context, filteredTickets),
                         const SizedBox(height: 16),
-                        _buildSystemDiagnostics(context),
-                        const SizedBox(height: 16),
-                        _buildRecentActivity(context),
+                        if (layout.showDiagnostics) ...[
+                          _buildSystemDiagnostics(context),
+                          const SizedBox(height: 16),
+                          _buildRecentErrors(context, recentErrors),
+                          const SizedBox(height: 16),
+                        ],
+                        if (layout.showActivity) _buildRecentActivity(context),
                       ],
                     ),
                   ),
@@ -1841,8 +2370,10 @@ class _TechSupportDashboardPageState
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _buildQuickActions(context),
-                        const SizedBox(height: 16),
+                        if (layout.showQuickActions) ...[
+                          _buildQuickActions(context),
+                          const SizedBox(height: 16),
+                        ],
                         _buildSupportMetrics(context),
                         const SizedBox(height: 16),
                         _buildKnowledgeBase(context),
@@ -1854,12 +2385,20 @@ class _TechSupportDashboardPageState
             else ...[
               _buildSupportTicketsCard(context, filteredTickets),
               const SizedBox(height: 16),
-              _buildSystemDiagnostics(context),
-              const SizedBox(height: 16),
-              _buildRecentActivity(context),
-              const SizedBox(height: 16),
-              _buildQuickActions(context),
-              const SizedBox(height: 16),
+              if (layout.showDiagnostics) ...[
+                _buildSystemDiagnostics(context),
+                const SizedBox(height: 16),
+                _buildRecentErrors(context, recentErrors),
+                const SizedBox(height: 16),
+              ],
+              if (layout.showActivity) ...[
+                _buildRecentActivity(context),
+                const SizedBox(height: 16),
+              ],
+              if (layout.showQuickActions) ...[
+                _buildQuickActions(context),
+                const SizedBox(height: 16),
+              ],
               _buildSupportMetrics(context),
               const SizedBox(height: 16),
               _buildKnowledgeBase(context),
@@ -1900,12 +2439,12 @@ class _TechSupportDashboardPageState
   }
 
   Widget _buildTechActions(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(
-          width: 280,
-          child: TextField(
+    return SizedBox(
+      width: 280,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
             controller: _searchController,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
@@ -1913,11 +2452,8 @@ class _TechSupportDashboardPageState
             ),
             onChanged: (_) => setState(() {}),
           ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: 280,
-          child: ElevatedButton.icon(
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const SupportTicketsPage()),
@@ -1931,8 +2467,8 @@ class _TechSupportDashboardPageState
               padding: const EdgeInsets.symmetric(vertical: 12),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -2050,6 +2586,55 @@ class _TechSupportDashboardPageState
             children: diagnostics,
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildRecentErrors(
+    BuildContext context,
+    List<_TechErrorItem> errors,
+  ) {
+    final theme = Theme.of(context);
+    return _PanelCard(
+      title: 'Recent Errors',
+      child: Column(
+        children: errors
+            .map(
+              (error) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.red),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            error.title,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            error.detail,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      error.time,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList(),
       ),
     );
   }
@@ -2230,6 +2815,14 @@ class _ActionBar extends StatelessWidget {
     this.secondaryLabel,
     this.secondaryIcon,
     this.onSecondaryTap,
+    this.primaryHoverColor,
+    this.secondaryHoverColor,
+    this.buttonPadding,
+    this.buttonRadius,
+    this.iconSize,
+    this.buttonTextStyle,
+    this.actionButtonsWidth = 380,
+    this.wideBreakpoint = 1024,
     required this.stats,
   });
 
@@ -2240,6 +2833,14 @@ class _ActionBar extends StatelessWidget {
   final String? secondaryLabel;
   final IconData? secondaryIcon;
   final VoidCallback? onSecondaryTap;
+  final Color? primaryHoverColor;
+  final Color? secondaryHoverColor;
+  final EdgeInsets? buttonPadding;
+  final double? buttonRadius;
+  final double? iconSize;
+  final TextStyle? buttonTextStyle;
+  final double actionButtonsWidth;
+  final double wideBreakpoint;
   final List<_InlineStat> stats;
 
   @override
@@ -2248,25 +2849,45 @@ class _ActionBar extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final background = isDark ? const Color(0xFF1F2937) : Colors.white;
+    final resolvedPadding =
+        buttonPadding ?? const EdgeInsets.symmetric(horizontal: 24, vertical: 12);
+    final resolvedRadius = buttonRadius ?? 8;
+    final resolvedIconSize = iconSize ?? 20;
+    final resolvedTextStyle = buttonTextStyle ??
+        theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+        );
 
     Widget actionButtons(bool horizontal) {
       Widget buildButton({
         required VoidCallback? onPressed,
         required Color backgroundColor,
+        required Color hoverColor,
         required IconData icon,
         required String label,
       }) {
         final button = FilledButton.icon(
           onPressed: onPressed,
-          style: FilledButton.styleFrom(
-            backgroundColor: backgroundColor,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+          style: ButtonStyle(
+            backgroundColor: MaterialStateProperty.resolveWith((states) {
+              if (states.contains(MaterialState.hovered)) {
+                return hoverColor;
+              }
+              return backgroundColor;
+            }),
+            foregroundColor: MaterialStateProperty.all(Colors.white),
+            padding: MaterialStateProperty.all(resolvedPadding),
+            shape: MaterialStateProperty.all(
+              RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(resolvedRadius),
+              ),
             ),
+            textStyle: MaterialStateProperty.all(resolvedTextStyle),
+            elevation: MaterialStateProperty.all(0),
+            overlayColor: MaterialStateProperty.all(Colors.transparent),
           ),
-          icon: Icon(icon, size: 18),
+          icon: Icon(icon, size: resolvedIconSize),
           label: Text(label),
         );
         if (horizontal) {
@@ -2279,6 +2900,7 @@ class _ActionBar extends StatelessWidget {
         buildButton(
           onPressed: onPrimaryTap,
           backgroundColor: primaryColor,
+          hoverColor: primaryHoverColor ?? primaryColor,
           icon: primaryIcon,
           label: primaryLabel,
         ),
@@ -2295,15 +2917,18 @@ class _ActionBar extends StatelessWidget {
           buildButton(
             onPressed: onSecondaryTap,
             backgroundColor: const Color(0xFF2563EB),
+            hoverColor: secondaryHoverColor ?? const Color(0xFF2563EB),
             icon: secondaryIcon!,
             label: secondaryLabel!,
           ),
         );
       }
 
+      final crossAxisAlignment =
+          horizontal ? CrossAxisAlignment.center : CrossAxisAlignment.stretch;
       return Flex(
         direction: horizontal ? Axis.horizontal : Axis.vertical,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: crossAxisAlignment,
         children: buttons,
       );
     }
@@ -2320,6 +2945,17 @@ class _ActionBar extends StatelessWidget {
       );
     }
 
+    Widget statsRow() {
+      final children = <Widget>[];
+      for (var i = 0; i < stats.length; i++) {
+        if (i > 0) {
+          children.add(const SizedBox(width: 16));
+        }
+        children.add(Expanded(child: stats[i]));
+      }
+      return Row(children: children);
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -2329,29 +2965,30 @@ class _ActionBar extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth > 900;
+          final wide = constraints.maxWidth >= wideBreakpoint;
+          final horizontalButtons = constraints.maxWidth >= 640;
           if (wide) {
-            return IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 360,
-                    child: actionButtons(true),
-                  ),
-                  const SizedBox(width: 16),
-                  Container(width: 1, color: border),
-                  const SizedBox(width: 16),
-                  Expanded(child: statsGrid(true)),
-                ],
-              ),
+            final dividerHeight = resolvedIconSize + resolvedPadding.vertical;
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: actionButtonsWidth,
+                  child: actionButtons(true),
+                ),
+                const SizedBox(width: 16),
+                SizedBox(
+                  height: dividerHeight,
+                  child: Container(width: 1, color: border),
+                ),
+                const SizedBox(width: 16),
+                Expanded(child: statsRow()),
+              ],
             );
           }
           return Column(
             children: [
-              actionButtons(false),
-              const SizedBox(height: 16),
-              Divider(color: border),
+              actionButtons(horizontalButtons),
               const SizedBox(height: 16),
               statsGrid(false),
             ],
@@ -2368,20 +3005,43 @@ class _InlineStat extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    this.backgroundLight,
+    this.backgroundDark,
+    this.iconColorLight,
+    this.iconColorDark,
+    this.labelColorLight,
+    this.labelColorDark,
+    this.valueColorLight,
+    this.valueColorDark,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final Color color;
+  final Color? backgroundLight;
+  final Color? backgroundDark;
+  final Color? iconColorLight;
+  final Color? iconColorDark;
+  final Color? labelColorLight;
+  final Color? labelColorDark;
+  final Color? valueColorLight;
+  final Color? valueColorDark;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    final iconBackground = color.withValues(alpha: isDark ? 0.25 : 0.15);
-    final labelColor = isDark ? const Color(0xFF9CA3AF) : scheme.onSurfaceVariant;
+    final iconBackground = isDark
+        ? (backgroundDark ?? color.withValues(alpha: 0.25))
+        : (backgroundLight ?? color.withValues(alpha: 0.15));
+    final iconColor = isDark ? (iconColorDark ?? color) : (iconColorLight ?? color);
+    final labelColor = isDark
+        ? (labelColorDark ?? const Color(0xFF9CA3AF))
+        : (labelColorLight ?? const Color(0xFF4B5563));
+    final valueColor = isDark
+        ? (valueColorDark ?? Colors.white)
+        : (valueColorLight ?? const Color(0xFF111827));
     return Row(
       children: [
         Container(
@@ -2389,11 +3049,11 @@ class _InlineStat extends StatelessWidget {
           height: 40,
           decoration: BoxDecoration(
             color: iconBackground,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, size: 20, color: color),
+          child: Icon(icon, size: 20, color: iconColor),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2402,13 +3062,18 @@ class _InlineStat extends StatelessWidget {
               Text(
                 label,
                 style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 12,
                   color: labelColor,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               Text(
                 value,
                 style: theme.textTheme.titleLarge?.copyWith(
+                  fontSize: 20,
                   fontWeight: FontWeight.w700,
+                  color: valueColor,
                 ),
               ),
             ],
@@ -2438,11 +3103,12 @@ class _ClockStatusBanner extends StatelessWidget {
     final border = isDark
         ? const Color(0xFF22C55E).withValues(alpha: 0.3)
         : const Color(0xFFBBF7D0);
-    final textPrimary = isDark ? const Color(0xFFBBF7D0) : const Color(0xFF065F46);
+    final textPrimary =
+        isDark ? const Color(0xFF86EFAC) : const Color(0xFF166534);
     final textSecondary =
-        isDark ? const Color(0xFF86EFAC) : const Color(0xFF047857);
+        isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(12),
@@ -2450,21 +3116,8 @@ class _ClockStatusBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: Colors.green,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.green.withValues(alpha: 0.4),
-                  blurRadius: 6,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
+          const _PulsingDot(color: Colors.green, size: 8),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2472,7 +3125,8 @@ class _ClockStatusBanner extends StatelessWidget {
                 Text(
                   'Currently Clocked In',
                   style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                     color: textPrimary,
                   ),
                 ),
@@ -2480,6 +3134,7 @@ class _ClockStatusBanner extends StatelessWidget {
                 Text(
                   'Since $timeLabel',
                   style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 12,
                     color: textSecondary,
                   ),
                 ),
@@ -2488,17 +3143,64 @@ class _ClockStatusBanner extends StatelessWidget {
           ),
           Row(
             children: [
-              Icon(Icons.navigation, size: 14, color: textSecondary),
+              Icon(Icons.navigation, size: 12, color: textSecondary),
               const SizedBox(width: 6),
               Text(
                 locationLabel,
                 style: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: 12,
                   color: textSecondary,
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PulsingDot extends StatefulWidget {
+  const _PulsingDot({required this.color, this.size = 8});
+
+  final Color color;
+  final double size;
+
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat(reverse: true);
+  late final Animation<double> _scale = Tween<double>(begin: 1, end: 1.4)
+      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  late final Animation<double> _opacity = Tween<double>(begin: 0.6, end: 1)
+      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: ScaleTransition(
+        scale: _scale,
+        child: Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(
+            color: widget.color,
+            shape: BoxShape.circle,
+          ),
+        ),
       ),
     );
   }
@@ -2583,6 +3285,15 @@ class _SectionCard extends StatelessWidget {
     this.trailing,
     this.showDivider = false,
     this.isGradient = false,
+    this.backgroundLight,
+    this.backgroundDark,
+    this.headerPadding,
+    this.bodyPadding,
+    this.titleStyle,
+    this.leadingIconSize,
+    this.showShadow = false,
+    this.borderRadius,
+    this.clipBehavior = Clip.none,
   });
 
   final String title;
@@ -2591,13 +3302,29 @@ class _SectionCard extends StatelessWidget {
   final Widget? trailing;
   final bool showDivider;
   final bool isGradient;
+  final Color? backgroundLight;
+  final Color? backgroundDark;
+  final EdgeInsets? headerPadding;
+  final EdgeInsets? bodyPadding;
+  final TextStyle? titleStyle;
+  final double? leadingIconSize;
+  final bool showShadow;
+  final double? borderRadius;
+  final Clip clipBehavior;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    final background = theme.colorScheme.surface;
+    final background = isDark
+        ? (backgroundDark ?? theme.colorScheme.surface)
+        : (backgroundLight ?? theme.colorScheme.surface);
+    final radius = borderRadius ?? 12;
+    final resolvedHeaderPadding =
+        headerPadding ?? const EdgeInsets.fromLTRB(16, 16, 16, 12);
+    final resolvedBodyPadding =
+        bodyPadding ?? const EdgeInsets.fromLTRB(16, 12, 16, 16);
     final gradient = LinearGradient(
       colors: isDark
           ? [
@@ -2616,21 +3343,31 @@ class _SectionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isGradient ? null : background,
         gradient: isGradient ? gradient : null,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: border),
+        boxShadow: showShadow
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
+      clipBehavior: clipBehavior,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            padding: resolvedHeaderPadding,
             child: Row(
               children: [
                 if (leading != null) ...[
                   IconTheme(
                     data: IconThemeData(
                       color: isDark ? Colors.white : const Color(0xFF111827),
-                      size: 18,
+                      size: leadingIconSize ?? 18,
                     ),
                     child: leading!,
                   ),
@@ -2639,10 +3376,12 @@ class _SectionCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : const Color(0xFF111827),
-                    ),
+                    style: titleStyle ??
+                        theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color:
+                              isDark ? Colors.white : const Color(0xFF111827),
+                        ),
                   ),
                 ),
                 if (trailing != null) trailing!,
@@ -2651,7 +3390,7 @@ class _SectionCard extends StatelessWidget {
           ),
           if (showDivider) Divider(height: 1, color: border),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            padding: resolvedBodyPadding,
             child: child,
           ),
         ],
@@ -2660,108 +3399,117 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
-class _QuickActionTile extends StatelessWidget {
-  const _QuickActionTile({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({required this.onTap});
 
-  final IconData icon;
-  final String label;
-  final Color color;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final background = color.withValues(alpha: isDark ? 0.2 : 0.12);
-    final border = color.withValues(alpha: isDark ? 0.35 : 0.2);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color),
-            const SizedBox(height: 10),
-            Text(
-              label,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
-            ),
-          ],
+      borderRadius: BorderRadius.circular(8),
+      hoverColor:
+          isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Icon(
+          Icons.more_vert,
+          size: 20,
+          color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
         ),
       ),
     );
   }
 }
 
-class _EmployeeTaskCard extends StatelessWidget {
-  const _EmployeeTaskCard({required this.task, this.onTap});
+class _QuickActionTile extends StatefulWidget {
+  const _QuickActionTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+    this.lightBackground,
+    this.darkBackground,
+    this.lightHoverBackground,
+    this.darkHoverBackground,
+    this.lightBorder,
+    this.darkBorder,
+    this.lightIcon,
+    this.darkIcon,
+    this.lightText,
+    this.darkText,
+  });
 
-  final _EmployeeTask task;
-  final VoidCallback? onTap;
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  final Color? lightBackground;
+  final Color? darkBackground;
+  final Color? lightHoverBackground;
+  final Color? darkHoverBackground;
+  final Color? lightBorder;
+  final Color? darkBorder;
+  final Color? lightIcon;
+  final Color? darkIcon;
+  final Color? lightText;
+  final Color? darkText;
+
+  @override
+  State<_QuickActionTile> createState() => _QuickActionTileState();
+}
+
+class _QuickActionTileState extends State<_QuickActionTile> {
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB);
-    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: border),
-          ),
-          child: Row(
+    final background = isDark
+        ? (widget.darkBackground ?? widget.color.withValues(alpha: 0.2))
+        : (widget.lightBackground ?? widget.color.withValues(alpha: 0.12));
+    final hoverBackground = isDark
+        ? (widget.darkHoverBackground ?? background)
+        : (widget.lightHoverBackground ?? background);
+    final border = isDark
+        ? (widget.darkBorder ?? widget.color.withValues(alpha: 0.35))
+        : (widget.lightBorder ?? widget.color.withValues(alpha: 0.2));
+    final iconColor =
+        isDark ? (widget.darkIcon ?? widget.color) : (widget.lightIcon ?? widget.color);
+    final textColor =
+        isDark ? (widget.darkText ?? widget.color) : (widget.lightText ?? widget.color);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _isHovered ? hoverBackground : background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: widget.onTap,
+          hoverColor: Colors.transparent,
+          splashColor: Colors.transparent,
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Checkbox(value: false, onChanged: (_) {}),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      task.title,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 4,
-                      children: [
-                        _MetaItem(icon: Icons.place_outlined, text: task.location),
-                        _MetaItem(icon: Icons.schedule, text: task.dueTime),
-                      ],
-                    ),
-                  ],
+              Icon(widget.icon, size: 24, color: iconColor),
+              const SizedBox(height: 12),
+              Text(
+                widget.label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: textColor,
                 ),
-              ),
-              _TagChip(
-                label: task.priority,
-                color: _priorityColor(task.priority),
               ),
             ],
           ),
@@ -2771,18 +3519,199 @@ class _EmployeeTaskCard extends StatelessWidget {
   }
 }
 
+class _EmployeeTaskCard extends StatefulWidget {
+  const _EmployeeTaskCard({required this.task, this.onTap});
+
+  final _EmployeeTask task;
+  final VoidCallback? onTap;
+
+  @override
+  State<_EmployeeTaskCard> createState() => _EmployeeTaskCardState();
+}
+
+class _EmployeeTaskCardState extends State<_EmployeeTaskCard> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF2D3748) : const Color(0xFFF9FAFB);
+    final hoverBackground =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+    const checkboxBorder = Color(0xFFD1D5DB);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: _isHovered ? hoverBackground : background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: widget.onTap,
+          hoverColor: Colors.transparent,
+          splashColor: Colors.transparent,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IgnorePointer(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Checkbox(
+                      value: false,
+                      onChanged: (_) {},
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      side: BorderSide(color: checkboxBorder),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.task.title,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: isDark
+                              ? Colors.white
+                              : const Color(0xFF111827),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          _EmployeeTaskMeta(
+                            icon: Icons.place_outlined,
+                            text: widget.task.location,
+                          ),
+                          _EmployeeTaskMeta(
+                            icon: Icons.schedule,
+                            text: widget.task.dueTime,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                _EmployeePriorityBadge(priority: widget.task.priority),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmployeeTaskMeta extends StatelessWidget {
+  const _EmployeeTaskMeta({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontSize: 14,
+                color: color,
+              ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EmployeePriorityBadge extends StatelessWidget {
+  const _EmployeePriorityBadge({required this.priority});
+
+  final String priority;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    late final Color background;
+    late final Color textColor;
+    switch (priority) {
+      case 'high':
+        background = isDark
+            ? const Color(0xFF7F1D1D).withValues(alpha: 0.3)
+            : const Color(0xFFFEE2E2);
+        textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFB91C1C);
+        break;
+      case 'medium':
+        background = isDark
+            ? const Color(0xFF78350F).withValues(alpha: 0.3)
+            : const Color(0xFFFEF3C7);
+        textColor = isDark ? const Color(0xFFFACC15) : const Color(0xFFA16207);
+        break;
+      case 'low':
+        background = isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+        textColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
+        break;
+      default:
+        background = isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+        textColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        priority,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: textColor,
+            ),
+      ),
+    );
+  }
+}
+
 class _ProgressMetricRow extends StatelessWidget {
-  const _ProgressMetricRow({required this.metric});
+  const _ProgressMetricRow({required this.metric, this.bottomSpacing = 16});
 
   final _ProgressMetric metric;
+  final double bottomSpacing;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final background = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final labelColor =
+        isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.only(bottom: bottomSpacing),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2792,30 +3721,81 @@ class _ProgressMetricRow extends StatelessWidget {
               Text(
                 metric.label,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: labelColor,
                 ),
               ),
               Text(
                 '${metric.value}%',
                 style: theme.textTheme.bodyLarge?.copyWith(
+                  fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: metric.color,
+                  color: metric.textColor ?? metric.color,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: metric.value / 100,
-            minHeight: 12,
-            backgroundColor: background,
-            valueColor: AlwaysStoppedAnimation(metric.color),
-          ),
+            child: LinearProgressIndicator(
+              value: metric.value / 100,
+              minHeight: 12,
+              backgroundColor: background,
+              valueColor: AlwaysStoppedAnimation(metric.color),
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PerformanceSummaryBar extends StatelessWidget {
+  const _PerformanceSummaryBar({
+    required this.completionRate,
+    required this.completed,
+    required this.total,
+  });
+
+  final double completionRate;
+  final int completed;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final percentLabel = (completionRate * 100).toStringAsFixed(0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '$percentLabel% complete',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '$completed / $total tasks this week',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: completionRate.clamp(0, 1),
+            minHeight: 12,
+            backgroundColor: theme.colorScheme.surfaceVariant,
+            valueColor: const AlwaysStoppedAnimation(Color(0xFF2563EB)),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2832,9 +3812,13 @@ class _TrainingProgressRow extends StatelessWidget {
     final background = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final badgeBackground = isDark
         ? const Color(0xFF78350F).withValues(alpha: 0.2)
-        : const Color(0xFFFEF9C3);
-    final badgeText =
-        isDark ? const Color(0xFFFCD34D) : const Color(0xFFB45309);
+        : const Color(0xFFFFFBEB);
+    final badgeText = isDark ? const Color(0xFFFACC15) : const Color(0xFFA16207);
+    final badgeIcon = isDark ? const Color(0xFFEAB308) : const Color(0xFFD97706);
+    final labelColor =
+        isDark ? const Color(0xFFD1D5DB) : const Color(0xFF111827);
+    final valueColor =
+        isDark ? const Color(0xFFE5E7EB) : const Color(0xFF111827);
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -2846,18 +3830,22 @@ class _TrainingProgressRow extends StatelessWidget {
               Text(
                 item.label,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: labelColor,
                 ),
               ),
               Text(
                 '${item.value}%',
                 style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 16,
                   fontWeight: FontWeight.w700,
+                  color: valueColor,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
           child: LinearProgressIndicator(
@@ -2870,20 +3858,21 @@ class _TrainingProgressRow extends StatelessWidget {
           if (item.badge != null) ...[
             const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: badgeBackground,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.emoji_events_outlined, color: badgeText, size: 18),
+                  Icon(Icons.emoji_events_outlined, color: badgeIcon, size: 20),
                   const SizedBox(width: 8),
                   Text(
                     item.badge!,
                     style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
                       color: badgeText,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
@@ -2905,17 +3894,17 @@ class _UpcomingEventCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB);
-    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final background = isDark ? const Color(0xFF2D3748) : const Color(0xFFF9FAFB);
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
     final dotColor = switch (event.type) {
-      'meeting' => Colors.blue,
-      'training' => Colors.purple,
-      _ => Colors.green,
+      'meeting' => const Color(0xFF3B82F6),
+      'training' => const Color(0xFFA855F7),
+      _ => const Color(0xFF22C55E),
     };
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: background,
           borderRadius: BorderRadius.circular(12),
@@ -2939,13 +3928,22 @@ class _UpcomingEventCard extends StatelessWidget {
                   Text(
                     event.title,
                     style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? const Color(0xFFE5E7EB)
+                          : const Color(0xFF111827),
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     event.time,
-                    style: theme.textTheme.bodySmall,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
+                      color: isDark
+                          ? const Color(0xFF9CA3AF)
+                          : const Color(0xFF6B7280),
+                    ),
                   ),
                 ],
               ),
@@ -2953,6 +3951,97 @@ class _UpcomingEventCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+enum ActivityStatus { success, warning, info }
+
+class _ActivityFeedItem {
+  const _ActivityFeedItem({
+    required this.title,
+    required this.detail,
+    required this.timeLabel,
+    required this.status,
+  });
+
+  final String title;
+  final String detail;
+  final String timeLabel;
+  final ActivityStatus status;
+}
+
+class _RecentActivityFeed extends StatelessWidget {
+  const _RecentActivityFeed({required this.items});
+
+  final List<_ActivityFeedItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background =
+        isDark ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB);
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    return Column(
+      children: items.map((item) {
+        final color = switch (item.status) {
+          ActivityStatus.success => Colors.green,
+          ActivityStatus.warning => Colors.orange,
+          ActivityStatus.info => Colors.blue,
+        };
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: border),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.title,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item.detail,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  item.timeLabel,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -3755,6 +4844,170 @@ class _SummaryRow extends StatelessWidget {
   }
 }
 
+class _ResourceAllocationItem {
+  const _ResourceAllocationItem({
+    required this.label,
+    required this.allocation,
+    required this.detail,
+  });
+
+  final String label;
+  final int allocation;
+  final String detail;
+}
+
+class _ResourceAllocationGrid extends StatelessWidget {
+  const _ResourceAllocationGrid({required this.items});
+
+  final List<_ResourceAllocationItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final crossAxisCount = constraints.maxWidth > 320 ? 2 : 1;
+        return GridView.count(
+          crossAxisCount: crossAxisCount,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.6,
+          children:
+              items.map((item) => _ResourceAllocationTile(item: item)).toList(),
+        );
+      },
+    );
+  }
+}
+
+class _ResourceAllocationTile extends StatelessWidget {
+  const _ResourceAllocationTile({required this.item});
+
+  final _ResourceAllocationItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB);
+    final border = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                item.label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Text(
+                '${item.allocation}%',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: item.allocation / 100,
+              minHeight: 10,
+              backgroundColor:
+                  isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+              valueColor: const AlwaysStoppedAnimation(Color(0xFF2563EB)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            item.detail,
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CrossDepartmentMetric {
+  const _CrossDepartmentMetric({
+    required this.title,
+    required this.value,
+    required this.delta,
+    this.isNegative = false,
+  });
+
+  final String title;
+  final String value;
+  final String delta;
+  final bool isNegative;
+}
+
+class _CrossDepartmentMetricCard extends StatelessWidget {
+  const _CrossDepartmentMetricCard({required this.metric});
+
+  final _CrossDepartmentMetric metric;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final deltaColor = metric.isNegative ? Colors.red : Colors.green;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: deltaColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  metric.title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  metric.delta,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: deltaColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            metric.value,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MaintenanceWorkOrderCard extends StatelessWidget {
   const _MaintenanceWorkOrderCard({required this.order});
 
@@ -4382,11 +5635,13 @@ class _ProgressMetric {
     required this.label,
     required this.value,
     required this.color,
+    this.textColor,
   });
 
   final String label;
   final int value;
   final Color color;
+  final Color? textColor;
 }
 
 class _TrainingItem {
@@ -4661,6 +5916,18 @@ class _SupportTicket {
   final String status;
   final String time;
   final String category;
+}
+
+class _TechErrorItem {
+  const _TechErrorItem({
+    required this.title,
+    required this.detail,
+    required this.time,
+  });
+
+  final String title;
+  final String detail;
+  final String time;
 }
 
 class _DiagnosticTile extends StatelessWidget {
@@ -5025,30 +6292,320 @@ Color _stockColor(String status) {
   }
 }
 
+String _taskLocationLabel(Task task) {
+  final metadata = task.metadata ?? const <String, dynamic>{};
+  final location = metadata['location']?.toString() ??
+      metadata['site']?.toString() ??
+      metadata['address']?.toString() ??
+      task.assignedTeam ??
+      '';
+  if (location.trim().isEmpty) return 'Location not set';
+  return location;
+}
+
+String _taskPriorityLabel(Task task) {
+  final priority = task.priority ?? task.metadata?['priority']?.toString();
+  if (priority == null || priority.trim().isEmpty) return 'medium';
+  return priority.toLowerCase();
+}
+
+String _taskDueLabel(Task task) {
+  final due = task.dueDate;
+  if (due == null) return 'No due date';
+  return DateFormat.jm().format(due);
+}
+
+bool _isSameDay(DateTime? date, DateTime now) {
+  if (date == null) return false;
+  return date.year == now.year &&
+      date.month == now.month &&
+      date.day == now.day;
+}
+
+int _onTimeCompletionPercent(List<Task> tasks) {
+  final completed = tasks.where(
+    (task) => task.isComplete && task.completedAt != null && task.dueDate != null,
+  );
+  if (completed.isEmpty) return 0;
+  final onTime =
+      completed.where((task) => !task.completedAt!.isAfter(task.dueDate!));
+  return ((onTime.length / completed.length) * 100).round();
+}
+
+List<_TrainingItem> _buildTrainingItems(List<Training> records) {
+  if (records.isEmpty) return const [];
+  final colors = const [
+    Color(0xFF22C55E),
+    Color(0xFF3B82F6),
+    Color(0xFFA855F7),
+  ];
+  final items = <_TrainingItem>[];
+  for (var i = 0; i < records.length && items.length < 3; i++) {
+    final record = records[i];
+    final progress = _trainingProgressValue(record);
+    final label = _trainingLabel(record);
+    final badge = (progress >= 100 ||
+            record.status == TrainingStatus.certified ||
+            record.certificateUrl != null)
+        ? 'Certificate earned!'
+        : null;
+    items.add(
+      _TrainingItem(
+        label: label,
+        value: progress,
+        color: colors[items.length % colors.length],
+        badge: badge,
+      ),
+    );
+  }
+  return items;
+}
+
+String _trainingLabel(Training training) {
+  final type = training.trainingType?.trim();
+  if (type != null && type.isNotEmpty) {
+    return type;
+  }
+  return training.trainingName;
+}
+
+int _trainingProgressValue(Training training) {
+  final metadata = training.metadata ?? const <String, dynamic>{};
+  final raw = metadata['progress'] ?? metadata['completion'];
+  final parsed = raw is num ? raw.toDouble() : double.tryParse('$raw');
+  if (parsed != null) {
+    final normalized = parsed <= 1 ? parsed * 100 : parsed;
+    return _clampPercent(normalized.round());
+  }
+  switch (training.status) {
+    case TrainingStatus.certified:
+      return 100;
+    case TrainingStatus.inProgress:
+      return 50;
+    case TrainingStatus.dueForRecert:
+      return 80;
+    case TrainingStatus.failed:
+      return 30;
+    case TrainingStatus.expired:
+    case TrainingStatus.notStarted:
+      return 0;
+  }
+}
+
+int _clampPercent(int value) {
+  if (value < 0) return 0;
+  if (value > 100) return 100;
+  return value;
+}
+
+List<_UpcomingEvent> _buildUpcomingEvents(
+  List<Task> tasks,
+  List<Training> trainings,
+) {
+  final now = DateTime.now();
+  final entries = <({DateTime date, _UpcomingEvent event})>[];
+  for (final task in tasks) {
+    final due = task.dueDate;
+    if (due == null || due.isBefore(now)) continue;
+    entries.add((
+      date: due,
+      event: _UpcomingEvent(
+        title: task.title,
+        time: _formatEventTime(due, now),
+        type: 'task',
+      ),
+    ));
+  }
+  for (final training in trainings) {
+    final next =
+        training.nextRecertificationDate ?? training.expirationDate;
+    if (next == null || next.isBefore(now)) continue;
+    entries.add((
+      date: next,
+      event: _UpcomingEvent(
+        title: training.trainingName,
+        time: _formatEventTime(next, now),
+        type: 'training',
+      ),
+    ));
+  }
+  entries.sort((a, b) => a.date.compareTo(b.date));
+  return entries.map((entry) => entry.event).toList();
+}
+
+String _formatEventTime(DateTime date, DateTime now) {
+  final today = DateTime(now.year, now.month, now.day);
+  final eventDay = DateTime(date.year, date.month, date.day);
+  final diff = eventDay.difference(today).inDays;
+  if (diff == 0) {
+    return 'Today, ${DateFormat.jm().format(date)}';
+  }
+  if (diff == 1) {
+    return 'Tomorrow, ${DateFormat.jm().format(date)}';
+  }
+  return DateFormat('MMM d, h:mm a').format(date);
+}
+
 String _capitalize(String value) {
   if (value.isEmpty) return value;
   return value[0].toUpperCase() + value.substring(1);
 }
 
 List<NotificationItem> _buildEmployeeNotifications(
-  List<AppNotification> notifications,
+  List<AppNotification> notifications, {
+  Set<String>? dismissedIds,
+}
 ) {
-  if (notifications.isEmpty) {
-    return _sampleEmployeeNotifications();
+  final visible = notifications.where((notification) {
+    if (notification.isRead) return false;
+    if (dismissedIds != null && dismissedIds.contains(notification.id)) {
+      return false;
+    }
+    return true;
+  }).toList();
+  if (visible.isEmpty) {
+    return const [];
   }
-  return notifications.map((notification) {
-    final priority = notification.isRead
-        ? NotificationPriority.low
-        : NotificationPriority.medium;
+  return visible.map((notification) {
+    final priority = _priorityFromNotification(notification);
+    final icon = _iconForNotificationType(notification.type);
     return NotificationItem(
       id: notification.id,
       title: notification.title,
       description: notification.body,
-      timeLabel: DateFormat('MMM d').format(notification.createdAt),
-      icon: Icons.notifications,
+      timeLabel: _formatRelativeTime(notification.createdAt),
+      icon: icon,
       priority: priority,
     );
   }).toList();
+}
+
+NotificationPriority _priorityFromNotification(AppNotification notification) {
+  final candidates = [
+    notification.metadata?['priority'],
+    notification.metadata?['priorityLevel'],
+    notification.metadata?['severity'],
+    notification.metadata?['level'],
+    notification.data?['priority'],
+    notification.data?['severity'],
+    notification.type,
+  ];
+  for (final candidate in candidates) {
+    final parsed = _priorityFromValue(candidate);
+    if (parsed != null) return parsed;
+  }
+  return NotificationPriority.low;
+}
+
+NotificationPriority? _priorityFromValue(dynamic value) {
+  if (value == null) return null;
+  if (value is num) {
+    switch (value.toInt()) {
+      case 1:
+        return NotificationPriority.urgent;
+      case 2:
+        return NotificationPriority.high;
+      case 3:
+        return NotificationPriority.medium;
+      case 4:
+        return NotificationPriority.low;
+    }
+  }
+  final text = value.toString().trim().toLowerCase();
+  if (text.isEmpty) return null;
+  switch (text) {
+    case 'urgent':
+    case 'critical':
+    case 'p1':
+    case 'sev1':
+    case 'emergency':
+    case 'outage':
+      return NotificationPriority.urgent;
+    case 'high':
+    case 'p2':
+    case 'sev2':
+    case 'alert':
+    case 'error':
+    case 'warning':
+    case 'incident':
+    case 'task':
+    case 'task_due':
+    case 'task_approval':
+    case 'overdue':
+    case 'approval':
+    case 'sop_ack_due':
+      return NotificationPriority.high;
+    case 'medium':
+    case 'p3':
+    case 'sev3':
+    case 'training':
+    case 'training_expire':
+    case 'milestone':
+    case 'support':
+    case 'ticket':
+    case 'system':
+    case 'request':
+    case 'asset_due':
+    case 'inspection_due':
+    case 'timesheet':
+      return NotificationPriority.medium;
+    case 'low':
+    case 'p4':
+    case 'sev4':
+    case 'info':
+    case 'success':
+    case 'message':
+    case 'document':
+    case 'submission':
+    case 'sop':
+    case 'comment':
+    case 'update':
+    case 'completion':
+    case 'backup':
+    case 'sync':
+      return NotificationPriority.low;
+    default:
+      return null;
+  }
+}
+
+IconData _iconForNotificationType(String? type) {
+  final normalized = type?.toLowerCase().trim();
+  if (normalized == null || normalized.isEmpty) {
+    return Icons.notifications;
+  }
+  if (normalized.contains('task')) {
+    return Icons.check_circle_outline;
+  }
+  if (normalized.contains('training') || normalized.contains('cert')) {
+    return Icons.warning_amber_outlined;
+  }
+  if (normalized.contains('timesheet') ||
+      normalized.contains('time') ||
+      normalized.contains('clock')) {
+    return Icons.schedule;
+  }
+  if (normalized.contains('message') || normalized.contains('chat')) {
+    return Icons.chat_bubble_outline;
+  }
+  if (normalized.contains('document') || normalized.contains('submission')) {
+    return Icons.description_outlined;
+  }
+  if (normalized.contains('alert') || normalized.contains('incident')) {
+    return Icons.warning_amber_outlined;
+  }
+  return Icons.notifications;
+}
+
+String _formatRelativeTime(DateTime time) {
+  final now = DateTime.now();
+  final diff = now.difference(time);
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+  if (diff.inHours < 24) return '${diff.inHours} hours ago';
+  if (diff.inDays < 7) return '${diff.inDays} days ago';
+  final weeks = (diff.inDays / 7).floor();
+  return '$weeks weeks ago';
 }
 
 List<NotificationItem> _sampleEmployeeNotifications() {

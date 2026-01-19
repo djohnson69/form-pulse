@@ -22,6 +22,7 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
   final List<_UserEntry> _localUsers = [];
   String _roleFilter = 'all';
   String _statusFilter = 'all';
+  String _viewMode = 'table';
 
   @override
   void dispose() {
@@ -76,12 +77,20 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
                 onRoleChanged: (value) => setState(() => _roleFilter = value),
                 onStatusChanged: (value) => setState(() => _statusFilter = value),
                 onSearchChanged: (_) => setState(() {}),
+                viewMode: _viewMode,
+                onViewModeChanged: (mode) => setState(() => _viewMode = mode),
               ),
               SizedBox(height: sectionSpacing),
-              _UsersTable(
-                colors: colors,
-                users: filteredUsers,
-              ),
+              if (_viewMode == 'table')
+                _UsersTable(
+                  colors: colors,
+                  users: filteredUsers,
+                )
+              else
+                _UsersGrid(
+                  colors: colors,
+                  users: filteredUsers,
+                ),
               const SizedBox(height: 80),
             ],
           );
@@ -591,6 +600,8 @@ class _FiltersBar extends StatelessWidget {
     required this.onRoleChanged,
     required this.onStatusChanged,
     required this.onSearchChanged,
+    required this.viewMode,
+    required this.onViewModeChanged,
   });
 
   final _UserDirectoryColors colors;
@@ -600,6 +611,8 @@ class _FiltersBar extends StatelessWidget {
   final ValueChanged<String> onRoleChanged;
   final ValueChanged<String> onStatusChanged;
   final ValueChanged<String> onSearchChanged;
+  final String viewMode;
+  final ValueChanged<String> onViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -623,10 +636,19 @@ class _FiltersBar extends StatelessWidget {
           final isWide = constraints.maxWidth >= 720;
           final fieldWidth =
               isWide ? (constraints.maxWidth - 24) / 3 : constraints.maxWidth;
+          final toggleWidth = isWide ? 220.0 : constraints.maxWidth;
           return Wrap(
             spacing: 12,
             runSpacing: 12,
             children: [
+              SizedBox(
+                width: toggleWidth,
+                child: _ViewModeToggle(
+                  colors: colors,
+                  viewMode: viewMode,
+                  onChanged: onViewModeChanged,
+                ),
+              ),
               SizedBox(
                 width: fieldWidth,
                 child: TextField(
@@ -693,6 +715,63 @@ class _FiltersBar extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _ViewModeToggle extends StatelessWidget {
+  const _ViewModeToggle({
+    required this.colors,
+    required this.viewMode,
+    required this.onChanged,
+  });
+
+  final _UserDirectoryColors colors;
+  final String viewMode;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isTable = viewMode == 'table';
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'View',
+            style: Theme.of(context)
+                .textTheme
+                .labelLarge
+                ?.copyWith(color: colors.muted),
+          ),
+          ToggleButtons(
+            isSelected: [isTable, !isTable],
+            onPressed: (index) =>
+                onChanged(index == 0 ? 'table' : 'grid'),
+            borderRadius: BorderRadius.circular(10),
+            selectedColor: Colors.white,
+            fillColor: colors.primary,
+            color: colors.muted,
+            constraints: const BoxConstraints(minWidth: 80, minHeight: 36),
+            children: const [
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: Text('Table'),
+              ),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: Text('Grid'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -797,6 +876,206 @@ class _UsersTable extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _UsersGrid extends StatelessWidget {
+  const _UsersGrid({
+    required this.colors,
+    required this.users,
+  });
+
+  final _UserDirectoryColors colors;
+  final List<_UserEntry> users;
+
+  @override
+  Widget build(BuildContext context) {
+    if (users.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Text(
+          'No users found.',
+          style: Theme.of(context)
+              .textTheme
+              .bodyMedium
+              ?.copyWith(color: colors.muted),
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final crossAxisCount = constraints.maxWidth >= 1100
+            ? 3
+            : constraints.maxWidth >= 720
+                ? 2
+                : 1;
+        final ratio = crossAxisCount == 1 ? 1.7 : 1.35;
+        return GridView.count(
+          crossAxisCount: crossAxisCount,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 16,
+          crossAxisSpacing: 16,
+          childAspectRatio: ratio,
+          children: users
+              .map((user) => _UserCard(colors: colors, user: user))
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _UserCard extends StatelessWidget {
+  const _UserCard({required this.colors, required this.user});
+
+  final _UserDirectoryColors colors;
+  final _UserEntry user;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          if (!colors.isDark)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _InitialsAvatar(
+                colors: colors,
+                initials: _initialsFor(user.name),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            user.name,
+                            style: TextStyle(
+                              color: colors.title,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        _StatusBadge(
+                          colors: colors,
+                          isActive: user.isActive,
+                          label: user.isActive ? 'Active' : 'Inactive',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    _RoleBadge(colors: colors, role: user.role),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Joined ${_formatDate(user.joinedDate)} • ${user.lastActive}',
+                      style: TextStyle(color: colors.muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.mail_outline, size: 14, color: colors.muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  user.email,
+                  style: TextStyle(color: colors.body, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.phone_outlined, size: 14, color: colors.muted),
+              const SizedBox(width: 6),
+              Text(user.phone, style: TextStyle(color: colors.muted, fontSize: 12)),
+              const SizedBox(width: 12),
+              Icon(Icons.place_outlined, size: 14, color: colors.muted),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  user.location,
+                  style: TextStyle(color: colors.muted, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _MetricPill(
+                label: 'Tasks',
+                value: '${user.tasksCompleted}',
+                color: const Color(0xFF22C55E),
+              ),
+              _MetricPill(
+                label: 'Forms',
+                value: '${user.formsSubmitted}',
+                color: const Color(0xFF3B82F6),
+              ),
+              _MetricPill(
+                label: 'Certs',
+                value: '${user.certifications}',
+                color: const Color(0xFF7C3AED),
+              ),
+            ],
+          ),
+          const Spacer(),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              _ActionIconButton(
+                colors: colors,
+                icon: Icons.edit_outlined,
+                onTap: () {},
+              ),
+              const SizedBox(width: 8),
+              _ActionIconButton(
+                colors: colors,
+                icon: Icons.delete_outline,
+                onTap: () {},
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -996,6 +1275,35 @@ class _ActionButtons extends StatelessWidget {
           padding: EdgeInsets.zero,
         ),
       ],
+    );
+  }
+}
+
+class _ActionIconButton extends StatelessWidget {
+  const _ActionIconButton({
+    required this.colors,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final _UserDirectoryColors colors;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: colors.border),
+        ),
+        child: Icon(icon, size: 18, color: colors.muted),
+      ),
     );
   }
 }
@@ -1572,6 +1880,54 @@ class _UserDirectoryColors {
       avatarStart: const Color(0xFF60A5FA),
       avatarEnd: const Color(0xFF2563EB),
       danger: const Color(0xFFDC2626),
+    );
+  }
+}
+
+class _MetricPill extends StatelessWidget {
+  const _MetricPill({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = color.withValues(alpha: isDark ? 0.2 : 0.12);
+    final foreground = isDark
+        ? Color.lerp(color, Colors.white, 0.4) ?? color
+        : color;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              color: foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: foreground,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

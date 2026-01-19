@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../dashboard/data/dashboard_provider.dart';
 import '../../../dashboard/data/active_role_provider.dart';
@@ -22,7 +23,12 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
     final role = ref.watch(activeRoleProvider);
     final data = ref.watch(dashboardDataProvider);
     final live = data.asData?.value.notifications ?? const <AppNotification>[];
-    final display = _buildDisplayNotifications(role: role, live: live)
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    final display = _buildDisplayNotifications(
+          role: role,
+          live: live,
+          userId: userId,
+        )
         .where((item) => !_dismissed.contains(item.id))
         .toList();
     final filtered = display
@@ -98,11 +104,16 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
   List<_NotificationDisplay> _buildDisplayNotifications({
     required UserRole role,
     required List<AppNotification> live,
+    String? userId,
   }) {
-    if (live.isNotEmpty) {
-      return live.map(_mapFromAppNotification).toList();
-    }
-    return _demoNotificationsForRole(role);
+    final filtered = live.where(
+      (notification) => _shouldIncludeNotification(
+        role: role,
+        notification: notification,
+        userId: userId,
+      ),
+    );
+    return filtered.map(_mapFromAppNotification).toList();
   }
 
   _NotificationDisplay _mapFromAppNotification(AppNotification notification) {
@@ -134,6 +145,74 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
       if (parsed != null) return parsed;
     }
     return _PriorityFilter.low;
+  }
+
+  bool _shouldIncludeNotification({
+    required UserRole role,
+    required AppNotification notification,
+    String? userId,
+  }) {
+    if (notification.targetUserId != null &&
+        notification.targetUserId!.trim().isNotEmpty) {
+      if (userId == null || notification.targetUserId != userId) {
+        return false;
+      }
+    }
+    final roleTargets = _extractRoleTargets(notification);
+    if (roleTargets.isEmpty) return true;
+    if (roleTargets.contains('all')) return true;
+    final normalizedRole = _normalizeRole(role);
+    return roleTargets.any((target) => target == normalizedRole);
+  }
+
+  List<String> _extractRoleTargets(AppNotification notification) {
+    final rawTargets = <dynamic>[
+      notification.targetRole,
+      notification.metadata?['targetRole'],
+      notification.metadata?['roles'],
+      notification.data?['targetRole'],
+      notification.data?['roles'],
+    ];
+    final targets = <String>[];
+    for (final raw in rawTargets) {
+      if (raw == null) continue;
+      if (raw is List) {
+        for (final item in raw) {
+          final normalized = _normalizeRoleValue(item);
+          if (normalized != null) targets.add(normalized);
+        }
+        continue;
+      }
+      if (raw is String && raw.contains(',')) {
+        for (final part in raw.split(',')) {
+          final normalized = _normalizeRoleValue(part);
+          if (normalized != null) targets.add(normalized);
+        }
+      } else {
+        final normalized = _normalizeRoleValue(raw);
+        if (normalized != null) targets.add(normalized);
+      }
+    }
+    return targets.toSet().toList();
+  }
+
+  String _normalizeRole(UserRole role) {
+    return _normalizeRoleValue(role.name) ?? role.name.toLowerCase();
+  }
+
+  String? _normalizeRoleValue(dynamic value) {
+    if (value == null) return null;
+    final raw = value.toString().trim();
+    if (raw.isEmpty) return null;
+    final normalized = raw.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    if (normalized.isEmpty) return null;
+    if (normalized == 'all' ||
+        normalized == 'any' ||
+        normalized == 'everyone' ||
+        normalized == 'allroles') {
+      return 'all';
+    }
+    return normalized;
   }
 
   _PriorityFilter? _priorityFromValue(dynamic value) {
@@ -246,373 +325,7 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
     };
   }
 
-  List<_NotificationDisplay> _demoNotificationsForRole(UserRole role) {
-    final items = <_NotificationDisplay>[];
-    void add({
-      required String id,
-      required String title,
-      required String desc,
-      required _PriorityFilter priority,
-      required String time,
-      required IconData icon,
-    }) {
-      items.add(
-        _NotificationDisplay(
-          id: id,
-          title: title,
-          description: desc,
-          priority: priority,
-          timeLabel: time,
-          icon: icon,
-        ),
-      );
-    }
 
-    switch (role) {
-      case UserRole.employee:
-        add(
-          id: 'e-1',
-          title: 'New Task Assigned',
-          desc: 'Complete safety inspection for Building A by Friday',
-          priority: _PriorityFilter.high,
-          time: '15 min ago',
-          icon: Icons.schedule,
-        );
-        add(
-          id: 'e-2',
-          title: 'Training Due Soon',
-          desc: 'Annual OSHA certification expires in 7 days',
-          priority: _PriorityFilter.medium,
-          time: '1 hour ago',
-          icon: Icons.school,
-        );
-        add(
-          id: 'e-3',
-          title: 'Timesheet Reminder',
-          desc: 'Submit your timesheet for this week by EOD tomorrow',
-          priority: _PriorityFilter.medium,
-          time: '3 hours ago',
-          icon: Icons.access_time,
-        );
-        add(
-          id: 'e-4',
-          title: 'Message from Supervisor',
-          desc: 'Sarah Johnson: Great work on the Johnson project!',
-          priority: _PriorityFilter.low,
-          time: '5 hours ago',
-          icon: Icons.message,
-        );
-        add(
-          id: 'e-5',
-          title: 'Asset Assignment',
-          desc: 'Equipment #A-1234 has been assigned to you',
-          priority: _PriorityFilter.medium,
-          time: '6 hours ago',
-          icon: Icons.inventory_2,
-        );
-        add(
-          id: 'e-6',
-          title: 'Document Updated',
-          desc: 'Safety manual v2.1 has been published',
-          priority: _PriorityFilter.low,
-          time: '1 day ago',
-          icon: Icons.description,
-        );
-        break;
-      case UserRole.supervisor:
-        add(
-          id: 's-1',
-          title: 'URGENT: Team Emergency',
-          desc: 'Employee reported injury on site - immediate attention needed',
-          priority: _PriorityFilter.urgent,
-          time: 'Just now',
-          icon: Icons.warning_amber,
-        );
-        add(
-          id: 's-2',
-          title: 'Approval Required',
-          desc: 'Mike Chen submitted timesheet for review - 3 pending approvals',
-          priority: _PriorityFilter.high,
-          time: '30 min ago',
-          icon: Icons.assignment_turned_in,
-        );
-        add(
-          id: 's-3',
-          title: 'Task Overdue',
-          desc: 'Equipment maintenance task assigned to Sarah is 2 days overdue',
-          priority: _PriorityFilter.high,
-          time: '1 hour ago',
-          icon: Icons.error_outline,
-        );
-        add(
-          id: 's-4',
-          title: 'Team Achievement',
-          desc: 'Your team completed 95% of weekly tasks - excellent work!',
-          priority: _PriorityFilter.low,
-          time: '2 hours ago',
-          icon: Icons.check_circle,
-        );
-        add(
-          id: 's-5',
-          title: 'New Team Member',
-          desc: 'Emily Davis has been assigned to your team',
-          priority: _PriorityFilter.medium,
-          time: '4 hours ago',
-          icon: Icons.person_add,
-        );
-        add(
-          id: 's-6',
-          title: 'Form Submission',
-          desc: 'Daily inspection form completed by Chris Wilson',
-          priority: _PriorityFilter.low,
-          time: '5 hours ago',
-          icon: Icons.description,
-        );
-        break;
-      case UserRole.manager:
-        add(
-          id: 'm-1',
-          title: 'Budget Alert',
-          desc: 'Department spending at 85% - review Q4 allocations',
-          priority: _PriorityFilter.high,
-          time: '30 min ago',
-          icon: Icons.attach_money,
-        );
-        add(
-          id: 'm-2',
-          title: 'Supervisor Report Due',
-          desc: "John Smith's quarterly performance review needs approval",
-          priority: _PriorityFilter.medium,
-          time: '2 hours ago',
-          icon: Icons.people,
-        );
-        add(
-          id: 'm-3',
-          title: 'Project Milestone',
-          desc: 'Building A construction 90% complete - ahead of schedule',
-          priority: _PriorityFilter.low,
-          time: '4 hours ago',
-          icon: Icons.business_center,
-        );
-        add(
-          id: 'm-4',
-          title: 'Team Performance',
-          desc: 'Department exceeded productivity goals by 12% this month',
-          priority: _PriorityFilter.low,
-          time: '1 day ago',
-          icon: Icons.trending_up,
-        );
-        add(
-          id: 'm-5',
-          title: 'Resource Request',
-          desc: 'Maria Garcia requested 3 additional team members for Q1',
-          priority: _PriorityFilter.medium,
-          time: '1 day ago',
-          icon: Icons.group_add,
-        );
-        add(
-          id: 'm-6',
-          title: 'Critical Issue',
-          desc: 'Equipment Upgrade project budget overrun detected',
-          priority: _PriorityFilter.high,
-          time: '2 days ago',
-          icon: Icons.warning,
-        );
-        break;
-      case UserRole.admin:
-        add(
-          id: 'a-1',
-          title: 'Payroll Processing',
-          desc: 'Weekly payroll ready for review - 68 timesheets to approve',
-          priority: _PriorityFilter.high,
-          time: '1 hour ago',
-          icon: Icons.attach_money,
-        );
-        add(
-          id: 'a-2',
-          title: 'ADP Integration',
-          desc: 'Payroll data successfully synced with ADP',
-          priority: _PriorityFilter.medium,
-          time: '3 hours ago',
-          icon: Icons.check_circle,
-        );
-        add(
-          id: 'a-3',
-          title: 'Document Approval',
-          desc: '5 documents pending your approval',
-          priority: _PriorityFilter.medium,
-          time: '5 hours ago',
-          icon: Icons.description,
-        );
-        add(
-          id: 'a-4',
-          title: 'User Account Request',
-          desc: 'New user registration requires admin approval',
-          priority: _PriorityFilter.medium,
-          time: '6 hours ago',
-          icon: Icons.person_add,
-        );
-        add(
-          id: 'a-5',
-          title: 'Compliance Report',
-          desc: 'Monthly compliance report generated and ready for review',
-          priority: _PriorityFilter.low,
-          time: '1 day ago',
-          icon: Icons.article,
-        );
-        break;
-      case UserRole.techSupport:
-        add(
-          id: 't-1',
-          title: 'Support Ticket Urgent',
-          desc: 'Ticket #1234: User cannot access critical system - Priority 1',
-          priority: _PriorityFilter.urgent,
-          time: 'Just now',
-          icon: Icons.support_agent,
-        );
-        add(
-          id: 't-2',
-          title: 'System Performance',
-          desc: 'Database response time increased by 40% - investigate',
-          priority: _PriorityFilter.high,
-          time: '45 min ago',
-          icon: Icons.storage,
-        );
-        add(
-          id: 't-3',
-          title: 'New Support Ticket',
-          desc: 'Ticket #1235: Password reset request from Sarah Johnson',
-          priority: _PriorityFilter.medium,
-          time: '2 hours ago',
-          icon: Icons.shield,
-        );
-        add(
-          id: 't-4',
-          title: 'Ticket Resolved',
-          desc: 'Ticket #1230: Email configuration issue successfully resolved',
-          priority: _PriorityFilter.low,
-          time: '4 hours ago',
-          icon: Icons.check_circle,
-        );
-        add(
-          id: 't-5',
-          title: 'System Update',
-          desc: 'Security patch scheduled for deployment tonight at 11 PM',
-          priority: _PriorityFilter.medium,
-          time: '6 hours ago',
-          icon: Icons.security,
-        );
-        break;
-      case UserRole.maintenance:
-        add(
-          id: 'mt-1',
-          title: 'Equipment Failure',
-          desc: 'HVAC Unit #3 reported malfunction - immediate repair needed',
-          priority: _PriorityFilter.urgent,
-          time: '20 min ago',
-          icon: Icons.warning_amber,
-        );
-        add(
-          id: 'mt-2',
-          title: 'Work Order Assigned',
-          desc: 'Repair electrical outlet in Conference Room B',
-          priority: _PriorityFilter.high,
-          time: '1 hour ago',
-          icon: Icons.build,
-        );
-        add(
-          id: 'mt-3',
-          title: 'Preventive Maintenance',
-          desc: 'Monthly generator inspection due this week',
-          priority: _PriorityFilter.medium,
-          time: '3 hours ago',
-          icon: Icons.schedule,
-        );
-        add(
-          id: 'mt-4',
-          title: 'Asset Checkout',
-          desc: 'Tool Kit #45 checked out successfully',
-          priority: _PriorityFilter.low,
-          time: '5 hours ago',
-          icon: Icons.inventory_2,
-        );
-        add(
-          id: 'mt-5',
-          title: 'Safety Alert',
-          desc: 'Ladder inspection certifications expire in 10 days',
-          priority: _PriorityFilter.medium,
-          time: '1 day ago',
-          icon: Icons.report,
-        );
-        break;
-      case UserRole.developer:
-      case UserRole.superAdmin:
-        add(
-          id: 'sa-1',
-          title: 'CRITICAL: System Outage',
-          desc: 'Database server is down - immediate action required',
-          priority: _PriorityFilter.urgent,
-          time: 'Just now',
-          icon: Icons.warning_amber,
-        );
-        add(
-          id: 'sa-2',
-          title: 'Security Alert',
-          desc:
-              'Multiple failed login attempts detected from IP 192.168.1.45',
-          priority: _PriorityFilter.high,
-          time: '2 min ago',
-          icon: Icons.security,
-        );
-        add(
-          id: 'sa-3',
-          title: 'License Expiration',
-          desc: 'Enterprise license expires in 30 days - renewal required',
-          priority: _PriorityFilter.high,
-          time: '1 hour ago',
-          icon: Icons.error_outline,
-        );
-        add(
-          id: 'sa-4',
-          title: 'Backup Completed',
-          desc: 'Automated system backup completed successfully',
-          priority: _PriorityFilter.low,
-          time: '2 hours ago',
-          icon: Icons.check_circle,
-        );
-        add(
-          id: 'sa-5',
-          title: 'User Activity Report',
-          desc: 'Weekly user activity report generated',
-          priority: _PriorityFilter.medium,
-          time: '5 hours ago',
-          icon: Icons.people,
-        );
-        add(
-          id: 'sa-6',
-          title: 'System Maintenance',
-          desc: 'Scheduled maintenance window this Sunday 2-4 AM',
-          priority: _PriorityFilter.medium,
-          time: '1 day ago',
-          icon: Icons.dns_outlined,
-        );
-        break;
-      case UserRole.client:
-      case UserRole.vendor:
-      case UserRole.viewer:
-        add(
-          id: 'v-1',
-          title: 'Updates Available',
-          desc: 'New updates are available for your projects',
-          priority: _PriorityFilter.low,
-          time: '1 day ago',
-          icon: Icons.update,
-        );
-        break;
-    }
-
-    return items;
-  }
 }
 
 class _NotificationsHeader extends StatelessWidget {
@@ -733,6 +446,13 @@ class _PriorityFilterCard extends StatelessWidget {
         color: colors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: colors.isDark ? 0.2 : 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1006,6 +726,13 @@ class _EmptyState extends StatelessWidget {
         color: colors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: colors.isDark ? 0.2 : 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: [

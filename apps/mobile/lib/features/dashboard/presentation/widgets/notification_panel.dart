@@ -67,6 +67,15 @@ class _NotificationsPanelState extends State<NotificationsPanel> {
             color: backgroundColor,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: borderColor),
+            boxShadow: [
+              BoxShadow(
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.2)
+                    : Colors.black.withValues(alpha: 0.06),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Column(
             children: [
@@ -177,30 +186,46 @@ class _NotificationsPanelState extends State<NotificationsPanel> {
                         ),
                       ),
                     if (filtered.length > widget.initialLimit)
-                      TextButton.icon(
-                        onPressed: () => setState(() => _showMore = !_showMore),
-                        icon: Icon(
-                          _showMore ? Icons.expand_less : Icons.expand_more,
-                        ),
-                        style: TextButton.styleFrom(
-                          foregroundColor: isDark
-                              ? const Color(0xFFE5E7EB)
-                              : const Color(0xFF374151),
-                          backgroundColor: isDark
-                              ? const Color(0xFF374151)
-                              : const Color(0xFFF3F4F6),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed: () =>
+                              setState(() => _showMore = !_showMore),
+                          style: TextButton.styleFrom(
+                            foregroundColor: isDark
+                                ? const Color(0xFFE5E7EB)
+                                : const Color(0xFF374151),
+                            backgroundColor: isDark
+                                ? const Color(0xFF374151)
+                                : const Color(0xFFF3F4F6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            textStyle: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _showMore
+                                    ? 'Show Less'
+                                    : 'Show ${filtered.length - widget.initialLimit} More',
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(
+                                _showMore
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                                size: 16,
+                              ),
+                            ],
                           ),
-                        ),
-                        label: Text(
-                          _showMore
-                              ? 'Show Less'
-                              : 'Show ${filtered.length - widget.initialLimit} More',
                         ),
                       ),
                   ],
@@ -303,6 +328,31 @@ class _NotificationTileState extends State<_NotificationTile> {
   Widget build(BuildContext context) {
     final colors = _priorityCardStyle(context, widget.item.priority);
     final background = _isHovered ? colors.hoverBackground : colors.background;
+    final dismissButton = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: widget.onDismiss == null
+            ? null
+            : () => widget.onDismiss!(widget.item),
+        hoverColor: colors.dismissHoverBackground,
+        splashColor: colors.dismissHoverBackground,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.check,
+            size: 14,
+            color: colors.dismiss,
+          ),
+        ),
+      ),
+    );
+    final dismissControl = widget.onDismiss == null
+        ? dismissButton
+        : Tooltip(
+            message: 'Dismiss notification',
+            child: dismissButton,
+          );
     final content = Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -346,22 +396,7 @@ class _NotificationTileState extends State<_NotificationTile> {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 24,
-                              minHeight: 24,
-                            ),
-                            onPressed: widget.onDismiss == null
-                                ? null
-                                : () => widget.onDismiss!(widget.item),
-                            icon: Icon(
-                              Icons.check,
-                              size: 14,
-                              color: colors.dismiss,
-                            ),
-                          ),
+                          dismissControl,
                         ],
                       ),
                     );
@@ -543,23 +578,23 @@ _NotificationCardStyle _priorityCardStyle(
   const red900 = Color(0xFF7F1D1D);
   const yellow50 = Color(0xFFFFFBEB);
   const yellow100 = Color(0xFFFEF3C7);
-  // const yellow200 = Color(0xFFFDE68A);
+  const yellow200 = Color(0xFFFDE68A);
   const yellow300 = Color(0xFFFCD34D);
   const yellow400 = Color(0xFFFBBF24);
   const yellow500 = Color(0xFFF59E0B);
   const yellow600 = Color(0xFFD97706);
   const yellow700 = Color(0xFFB45309);
-  // const yellow800 = Color(0xFF92400E);
+  const yellow800 = Color(0xFF92400E);
   const yellow900 = Color(0xFF78350F);
   const green50 = Color(0xFFF0FDF4);
   const green100 = Color(0xFFDCFCE7);
-  // const green200 = Color(0xFFBBF7D0);
+  const green200 = Color(0xFFBBF7D0);
   const green300 = Color(0xFF86EFAC);
   const green400 = Color(0xFF4ADE80);
   const green500 = Color(0xFF22C55E);
   const green600 = Color(0xFF16A34A);
   const green700 = Color(0xFF15803D);
-  // const green800 = Color(0xFF166534);
+  const green800 = Color(0xFF166534);
   const green900 = Color(0xFF14532D);
 
   switch (priority) {
@@ -568,56 +603,68 @@ _NotificationCardStyle _priorityCardStyle(
         background: isDark ? red900.withValues(alpha: 0.4) : red100,
         hoverBackground:
             isDark ? red900.withValues(alpha: 0.5) : red200,
-        border: Colors.transparent,
+        border: isDark ? red700 : red300,
         icon: isDark ? red400 : red600,
         title: isDark ? red200 : red900,
         description: isDark ? red300 : red800,
         time: isDark ? red400 : red700,
-        badgeBackground: red600,
-        badgeText: Colors.white,
-        dismiss: isDark ? red400 : red600,
+        badgeBackground:
+            isDark ? red900.withValues(alpha: 0.6) : red200,
+        badgeText: isDark ? red200 : red900,
+        dismiss: isDark ? red400 : red700,
+        dismissHoverBackground:
+            isDark ? red900.withValues(alpha: 0.6) : red300,
       );
     case NotificationPriority.high:
       return _NotificationCardStyle(
         background: isDark ? red900.withValues(alpha: 0.2) : red50,
         hoverBackground:
             isDark ? red900.withValues(alpha: 0.3) : red100,
-        border: Colors.transparent,
+        border: isDark ? red800 : red200,
         icon: isDark ? red400 : red600,
         title: isDark ? red300 : red900,
         description: isDark ? red400 : red700,
         time: isDark ? red500 : red600,
-        badgeBackground: red500,
-        badgeText: Colors.white,
+        badgeBackground:
+            isDark ? red900.withValues(alpha: 0.4) : red100,
+        badgeText: isDark ? red400 : red700,
         dismiss: isDark ? red400 : red600,
+        dismissHoverBackground:
+            isDark ? red900.withValues(alpha: 0.4) : red200,
       );
     case NotificationPriority.medium:
       return _NotificationCardStyle(
         background: isDark ? yellow900.withValues(alpha: 0.2) : yellow50,
         hoverBackground:
             isDark ? yellow900.withValues(alpha: 0.3) : yellow100,
-        border: Colors.transparent,
+        border: isDark ? yellow800 : yellow200,
         icon: isDark ? yellow400 : yellow600,
         title: isDark ? yellow300 : yellow900,
         description: isDark ? yellow400 : yellow700,
         time: isDark ? yellow500 : yellow600,
-        badgeBackground: yellow500,
-        badgeText: Colors.white,
+        badgeBackground:
+            isDark ? yellow900.withValues(alpha: 0.4) : yellow100,
+        badgeText: isDark ? yellow400 : yellow700,
         dismiss: isDark ? yellow400 : yellow600,
+        dismissHoverBackground:
+            isDark ? yellow900.withValues(alpha: 0.4) : yellow200,
       );
     case NotificationPriority.low:
       return _NotificationCardStyle(
         background: isDark ? green900.withValues(alpha: 0.2) : green50,
         hoverBackground:
             isDark ? green900.withValues(alpha: 0.3) : green100,
-        border: Colors.transparent,
+        border: isDark ? green800 : green200,
         icon: isDark ? green400 : green600,
         title: isDark ? green300 : const Color(0xFF14532D),
         description: isDark ? green400 : green700,
         time: isDark ? green500 : green600,
-        badgeBackground: green500,
-        badgeText: Colors.white,
+        badgeBackground:
+            isDark ? green900.withValues(alpha: 0.4) : green100,
+        badgeText: isDark ? green400 : green700,
         dismiss: isDark ? green400 : green600,
+        dismissHoverBackground:
+            isDark ? green900.withValues(alpha: 0.4) : green200,
       );
   }
 }
@@ -646,6 +693,7 @@ class _NotificationCardStyle {
     required this.badgeBackground,
     required this.badgeText,
     required this.dismiss,
+    required this.dismissHoverBackground,
   });
 
   final Color background;
@@ -658,6 +706,7 @@ class _NotificationCardStyle {
   final Color badgeBackground;
   final Color badgeText;
   final Color dismiss;
+  final Color dismissHoverBackground;
 }
 
 Map<NotificationPriority?, int> _priorityCounts(

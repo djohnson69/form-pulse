@@ -1,11 +1,19 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 import 'package:shared/shared.dart';
 
+import '../../../../core/utils/file_bytes_loader.dart';
 import '../../../ops/data/ops_provider.dart';
+import '../../../ops/data/ops_repository.dart' as ops_repo;
 import '../../../projects/data/projects_provider.dart';
 import 'project_feed_page.dart';
 
@@ -18,8 +26,8 @@ class PhotosPage extends ConsumerStatefulWidget {
 
 class _PhotosPageState extends ConsumerState<PhotosPage> {
   final TextEditingController _searchController = TextEditingController();
-  final Set<int> _likedItems = {};
-  final Set<int> _flaggedItems = {};
+  final Set<String> _likedItems = {};
+  final Set<String> _flaggedItems = {};
   final Set<String> _selectedTags = {};
   _MediaViewMode _viewMode = _MediaViewMode.grid;
   String _selectedFilter = 'all';
@@ -35,6 +43,8 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
   Widget build(BuildContext context) {
     final photosAsync = ref.watch(projectPhotosProvider(null));
     final projectsAsync = ref.watch(projectsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isWide = MediaQuery.of(context).size.width >= 768;
     final projectNames = {
       for (final project in projectsAsync.asData?.value ?? const <Project>[])
         project.id: project.name,
@@ -45,15 +55,16 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
             photosAsync.asData!.value,
             projectNames,
           );
-    final mediaItems =
-        mediaFromProjects.isNotEmpty ? mediaFromProjects : _demoMediaItems;
+    final mediaItems = mediaFromProjects;
     final tags = _allTags(mediaItems);
     final filteredMedia = _applyFilters(mediaItems);
     final isLoading = photosAsync.isLoading || projectsAsync.isLoading;
 
     return Scaffold(
+      backgroundColor:
+          isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(isWide ? 24 : 16),
         children: [
           if (isLoading) const LinearProgressIndicator(),
           if (photosAsync.hasError)
@@ -62,15 +73,13 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
               child: _ErrorBanner(message: photosAsync.error.toString()),
             ),
           _buildHeader(context, mediaItems),
-          const SizedBox(height: 16),
-          _buildSearchControls(context),
-          const SizedBox(height: 12),
-          _buildQuickActions(context, mediaItems),
+          const SizedBox(height: 24),
+          _buildSearchControls(context, mediaItems),
           if (tags.isNotEmpty) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             _buildTagsPanel(context, tags, filteredMedia.length, mediaItems.length),
           ],
-          const SizedBox(height: 16),
+          SizedBox(height: tags.isNotEmpty ? 16 : 24),
           _buildMediaSection(context, filteredMedia),
           const SizedBox(height: 80),
         ],
@@ -81,50 +90,115 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
   Widget _buildHeader(BuildContext context, List<_MediaItem> mediaItems) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final isWide = MediaQuery.of(context).size.width >= 768;
     final titleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Photo & Video Gallery',
-          style: theme.textTheme.headlineSmall?.copyWith(
+          style: TextStyle(
+            fontSize: isWide ? 30 : 24,
             fontWeight: FontWeight.w700,
+            color: isDark ? Colors.white : const Color(0xFF111827),
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Text(
           'Cloud storage with GPS timestamps and collaboration',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: isDark ? Colors.grey[400] : Colors.grey[600],
+          style: TextStyle(
+            fontSize: 14,
+            color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
           ),
         ),
       ],
     );
 
-        final actions = Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF2563EB),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              ),
-              onPressed: () => _openMultiCapturePanel(context, mediaItems),
-              icon: const Icon(Icons.camera_alt_outlined, size: 20),
-              label: const Text('Capture'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => _openUploadPanel(context, mediaItems),
-              icon: const Icon(Icons.upload_file_outlined, size: 20),
-              label: const Text('Upload'),
-            ),
-          ],
-        );
-
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 720;
+        final isWide = constraints.maxWidth >= 768;
+        final showLabel = constraints.maxWidth >= 640;
+        final uploadBackground =
+            isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+        final uploadForeground =
+            isDark ? Colors.white : const Color(0xFF111827);
+        final captureButton = showLabel
+            ? FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  elevation: 1,
+                  shadowColor: const Color(0xFF2563EB).withValues(alpha: 0.2),
+                  textStyle: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () => _openMultiCapturePanel(context, mediaItems),
+                icon: const Icon(Icons.camera_alt_outlined, size: 20),
+                label: const Text('Capture'),
+              )
+            : FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  elevation: 1,
+                  shadowColor: const Color(0xFF2563EB).withValues(alpha: 0.2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () => _openMultiCapturePanel(context, mediaItems),
+                child: const Icon(Icons.camera_alt_outlined, size: 20),
+              );
+        final uploadButton = showLabel
+            ? OutlinedButton.icon(
+                onPressed: () => _openUploadPanel(context, mediaItems),
+                icon: const Icon(Icons.upload_file_outlined, size: 20),
+                label: const Text('Upload'),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: uploadBackground,
+                  foregroundColor: uploadForeground,
+                  side: BorderSide(color: uploadBackground),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  textStyle: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              )
+            : OutlinedButton(
+                onPressed: () => _openUploadPanel(context, mediaItems),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: uploadBackground,
+                  foregroundColor: uploadForeground,
+                  side: BorderSide(color: uploadBackground),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Icon(Icons.upload_file_outlined, size: 20),
+              );
+        final actions = Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            captureButton,
+            uploadButton,
+          ],
+        );
         if (isWide) {
           return Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -146,134 +220,192 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
     );
   }
 
-  Widget _buildSearchControls(BuildContext context) {
+  Widget _buildSearchControls(
+    BuildContext context,
+    List<_MediaItem> mediaItems,
+  ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final inputBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(
+        color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+      ),
+    );
+    InputDecoration inputDecoration({IconData? prefixIcon, String? hintText}) {
+      return InputDecoration(
+        prefixIcon: prefixIcon == null
+            ? null
+            : Icon(
+                prefixIcon,
+                size: 20,
+                color: isDark
+                    ? const Color(0xFF6B7280)
+                    : const Color(0xFF9CA3AF),
+              ),
+        hintText: hintText,
+        hintStyle: TextStyle(
+          fontSize: 16,
+          color: isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+        ),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        border: inputBorder,
+        enabledBorder: inputBorder,
+        focusedBorder: inputBorder.copyWith(
+          borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= 820;
-          final searchField = TextField(
-            controller: _searchController,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Search photos and videos...',
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (value) => setState(() => _searchQuery = value.trim()),
-          );
-          final filterDropdown = DropdownButtonFormField<String>(
-            value: _selectedFilter,
-            isExpanded: true,
-            decoration: const InputDecoration(border: OutlineInputBorder()),
-            items: const [
-              DropdownMenuItem(
-                value: 'all',
-                child:
-                    Text('All Media', maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-              DropdownMenuItem(
-                value: 'photos',
-                child: Text(
-                  'Photos Only',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              DropdownMenuItem(
-                value: 'videos',
-                child: Text(
-                  'Videos Only',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-            onChanged: (value) =>
-                setState(() => _selectedFilter = value ?? 'all'),
-          );
-          final viewToggle = Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _ViewToggleButton(
-                icon: Icons.grid_view_outlined,
-                isSelected: _viewMode == _MediaViewMode.grid,
-                onTap: () => setState(() => _viewMode = _MediaViewMode.grid),
-              ),
-              const SizedBox(width: 6),
-              _ViewToggleButton(
-                icon: Icons.view_list_outlined,
-                isSelected: _viewMode == _MediaViewMode.list,
-                onTap: () => setState(() => _viewMode = _MediaViewMode.list),
-              ),
-            ],
-          );
-
-          if (isWide) {
-            return Row(
-              children: [
-                Expanded(child: searchField),
-                const SizedBox(width: 12),
-                SizedBox(width: 180, child: filterDropdown),
-                const SizedBox(width: 12),
-                viewToggle,
-              ],
-            );
-          }
-          return Column(
-            children: [
-              searchField,
-              const SizedBox(height: 12),
-              filterDropdown,
-              const SizedBox(height: 12),
-              Align(alignment: Alignment.centerLeft, child: viewToggle),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildQuickActions(BuildContext context, List<_MediaItem> mediaItems) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor),
-      ),
-      child: Wrap(
-        spacing: 12,
-        runSpacing: 8,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextButton.icon(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ProjectFeedPage()),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 768;
+              final searchField = TextField(
+                controller: _searchController,
+                decoration: inputDecoration(
+                  prefixIcon: Icons.search,
+                  hintText: 'Search photos and videos...',
+                ),
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isDark ? Colors.white : const Color(0xFF111827),
+                ),
+                onChanged: (value) =>
+                    setState(() => _searchQuery = value.trim()),
+              );
+              final filterDropdown = DropdownButtonFormField<String>(
+                value: _selectedFilter,
+                isExpanded: true,
+                decoration: inputDecoration(),
+                dropdownColor:
+                    isDark ? const Color(0xFF111827) : Colors.white,
+                iconEnabledColor:
+                    isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isDark ? Colors.white : const Color(0xFF111827),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'all',
+                    child: Text(
+                      'All Media',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'photos',
+                    child: Text(
+                      'Photos Only',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'videos',
+                    child: Text(
+                      'Videos Only',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                onChanged: (value) =>
+                    setState(() => _selectedFilter = value ?? 'all'),
+              );
+              final viewToggle = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ViewToggleButton(
+                    icon: Icons.grid_view_outlined,
+                    isSelected: _viewMode == _MediaViewMode.grid,
+                    onTap: () => setState(() => _viewMode = _MediaViewMode.grid),
+                  ),
+                  const SizedBox(width: 4),
+                  _ViewToggleButton(
+                    icon: Icons.view_list_outlined,
+                    isSelected: _viewMode == _MediaViewMode.list,
+                    onTap: () => setState(() => _viewMode = _MediaViewMode.list),
+                  ),
+                ],
+              );
+
+              if (isWide) {
+                return Row(
+                  children: [
+                    Expanded(child: searchField),
+                    const SizedBox(width: 16),
+                    SizedBox(width: 200, child: filterDropdown),
+                  const SizedBox(width: 8),
+                  viewToggle,
+                ],
+              );
+            }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  searchField,
+                  const SizedBox(height: 12),
+                  filterDropdown,
+                  const SizedBox(height: 12),
+                  Align(alignment: Alignment.centerLeft, child: viewToggle),
+                ],
               );
             },
-            icon: const Icon(Icons.image_outlined, size: 18),
-            label: const Text('Project Feed'),
           ),
-          TextButton.icon(
-            onPressed: () => _openTimelinePanel(context, mediaItems),
-            icon: const Icon(Icons.history, size: 18),
-            label: const Text('View Timeline'),
-          ),
-          TextButton.icon(
-            onPressed: () => _openCuratedGalleryPanel(context, mediaItems),
-            icon: const Icon(Icons.collections_outlined, size: 18),
-            label: const Text('Create Gallery'),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.only(top: 12),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: borderColor)),
+            ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _QuickActionButton(
+                  icon: Icons.image_outlined,
+                  label: 'Project Feed',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ProjectFeedPage()),
+                    );
+                  },
+                ),
+                _QuickActionButton(
+                  icon: Icons.show_chart,
+                  label: 'View Timeline',
+                  onTap: () => _openTimelinePanel(context, mediaItems),
+                ),
+                _QuickActionButton(
+                  icon: Icons.check_box_outlined,
+                  label: 'Create Gallery',
+                  onTap: () => _openCuratedGalleryPanel(context, mediaItems),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -288,36 +420,59 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.sell_outlined,
-                  size: 16,
-                  color: isDark ? Colors.grey[400] : Colors.grey[600]),
+              Icon(
+                Icons.sell_outlined,
+                size: 16,
+                color: isDark ? Colors.grey[400] : Colors.grey[600],
+              ),
               const SizedBox(width: 8),
               Text(
                 _selectedTags.isEmpty
                     ? 'Filter by Tags'
                     : 'Filter by Tags (${_selectedTags.length})',
                 style: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: 14,
                   color: isDark ? Colors.grey[300] : Colors.grey[700],
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
               const Spacer(),
               if (_selectedTags.isNotEmpty)
                 TextButton(
                   onPressed: () => setState(() => _selectedTags.clear()),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    foregroundColor: isDark
+                        ? const Color(0xFF60A5FA)
+                        : const Color(0xFF2563EB),
+                    textStyle: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   child: const Text('Clear All'),
                 ),
             ],
@@ -328,17 +483,43 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
             runSpacing: 8,
             children: tags.map((tag) {
               final isSelected = _selectedTags.contains(tag);
-              return FilterChip(
-                selected: isSelected,
-                label: Text(tag),
-                onSelected: (_) => setState(() => _toggleTag(tag)),
+              final background = isSelected
+                  ? const Color(0xFF2563EB)
+                  : (isDark
+                      ? const Color(0xFF374151)
+                      : const Color(0xFFF3F4F6));
+              final textColor = isSelected
+                  ? Colors.white
+                  : (isDark
+                      ? const Color(0xFFD1D5DB)
+                      : const Color(0xFF374151));
+              return InkWell(
+                onTap: () => setState(() => _toggleTag(tag)),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: background,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    tag,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
+                      color: textColor,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
               );
             }).toList(),
           ),
           const SizedBox(height: 12),
           Text(
-            'Showing $filteredCount of $totalCount items',
+            'Showing $filteredCount of $totalCount ${filteredCount == 1 ? 'item' : 'items'}',
             style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 12,
               color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
@@ -373,7 +554,7 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
     }
   }
 
-  void _toggleLike(int id) {
+  void _toggleLike(String id) {
     setState(() {
       if (_likedItems.contains(id)) {
         _likedItems.remove(id);
@@ -383,7 +564,7 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
     });
   }
 
-  void _toggleFlag(int id) {
+  void _toggleFlag(String id) {
     setState(() {
       if (_flaggedItems.contains(id)) {
         _flaggedItems.remove(id);
@@ -413,77 +594,39 @@ class _PhotosPageState extends ConsumerState<PhotosPage> {
     for (final item in items) {
       tagSet.addAll(item.tags);
     }
-    final tags = tagSet.toList()..sort();
-    return tags;
+    return tagSet.toList();
   }
 
   List<_TimelineEvent> _buildTimelineEvents(List<_MediaItem> items) {
-    final media = items.isNotEmpty ? items : _demoMediaItems;
-    final photoMedia = media.firstWhere(
-      (item) => item.type == _MediaType.photo,
-      orElse: () => media.first,
-    );
-    final videoMedia = media.firstWhere(
-      (item) => item.type == _MediaType.video,
-      orElse: () => media.first,
-    );
-    final now = DateTime.now();
-    return [
-      _TimelineEvent(
-        id: '1',
-        type: _TimelineEventType.photo,
-        title: 'Safety Inspection Complete',
-        description: 'Documented all safety equipment installations.',
-        user: 'John Doe',
-        timestamp: now.subtract(const Duration(minutes: 5)),
-        location: 'Building A - Level 3',
-        mediaUrl: photoMedia.url,
-        tags: const ['Safety', 'Inspection'],
-        project: 'Building A Construction',
-      ),
-      _TimelineEvent(
-        id: '2',
-        type: _TimelineEventType.comment,
-        title: 'Comment on Foundation Photo',
-        description: '@mikechen Please review the foundation depth measurements.',
-        user: 'Sarah Johnson',
-        timestamp: now.subtract(const Duration(minutes: 10)),
-        project: 'Building A Construction',
-      ),
-      _TimelineEvent(
-        id: '3',
-        type: _TimelineEventType.video,
-        title: 'Equipment Walkthrough',
-        description: 'New excavator demonstration and safety briefing.',
-        user: 'Mike Chen',
-        timestamp: now.subtract(const Duration(minutes: 30)),
-        location: 'Equipment Yard',
-        mediaUrl: videoMedia.url,
-        tags: const ['Equipment', 'Training'],
-        project: 'Site Operations',
-      ),
-      _TimelineEvent(
-        id: '4',
-        type: _TimelineEventType.photo,
-        title: 'Progress Update - Week 12',
-        description: 'Main structure completion milestone reached.',
-        user: 'Emily Davis',
-        timestamp: now.subtract(const Duration(hours: 1)),
-        location: 'Building A - Main Floor',
-        mediaUrl: photoMedia.url,
-        tags: const ['Progress', 'Milestone'],
-        project: 'Building A Construction',
-      ),
-      _TimelineEvent(
-        id: '5',
-        type: _TimelineEventType.upload,
-        title: 'Uploaded 15 photos',
-        description: 'Material delivery and storage documentation.',
-        user: 'Tom Brown',
-        timestamp: now.subtract(const Duration(hours: 2)),
-        project: 'Supply Chain',
-      ),
-    ];
+    if (items.isEmpty) return [];
+    final sorted = [...items]
+      ..sort((a, b) => b.capturedAt.compareTo(a.capturedAt));
+    return sorted.take(30).map((item) {
+      final descriptionParts = <String>[];
+      if (item.tags.isNotEmpty) {
+        descriptionParts.add(item.tags.join(', '));
+      }
+      if (item.location.isNotEmpty) {
+        descriptionParts.add(item.location);
+      }
+      final description = descriptionParts.isEmpty
+          ? 'Uploaded to ${item.project}'
+          : descriptionParts.join(' • ');
+      return _TimelineEvent(
+        id: item.id.toString(),
+        type: item.type == _MediaType.video
+            ? _TimelineEventType.video
+            : _TimelineEventType.photo,
+        title: item.title,
+        description: description,
+        user: item.uploadedBy,
+        timestamp: item.capturedAt,
+        project: item.project,
+        location: item.location.isEmpty ? null : item.location,
+        mediaUrl: item.url,
+        tags: item.tags.isEmpty ? null : item.tags,
+      );
+    }).toList();
   }
 
   List<String> _projectOptions(List<_MediaItem> items) {
@@ -580,11 +723,14 @@ enum _MediaType { photo, video }
 class _MediaItem {
   const _MediaItem({
     required this.id,
+    required this.photoId,
+    required this.attachmentId,
     required this.type,
     required this.url,
     required this.title,
     required this.project,
     required this.location,
+    required this.capturedAt,
     required this.dateLabel,
     required this.timestampLabel,
     required this.tags,
@@ -595,12 +741,15 @@ class _MediaItem {
     this.duration,
   });
 
-  final int id;
+  final String id;
   final _MediaType type;
   final String url;
   final String title;
   final String project;
   final String location;
+  final DateTime capturedAt;
+  final String photoId;
+  final String attachmentId;
   final String dateLabel;
   final String timestampLabel;
   final String? gps;
@@ -622,7 +771,7 @@ class _PhotoComment {
     this.isLiked = false,
   });
 
-  final int id;
+  final String id;
   final String author;
   final String timestampLabel;
   final String? message;
@@ -650,6 +799,73 @@ class _PhotoComment {
       isLiked: isLiked ?? this.isLiked,
     );
   }
+}
+
+String _commentAuthorLabel(PhotoComment comment) {
+  return comment.metadata?['authorName']?.toString() ??
+      comment.metadata?['author_email']?.toString() ??
+      comment.authorId ??
+      'User';
+}
+
+int _commentBaseLikes(PhotoComment comment) {
+  final raw = comment.metadata?['likes'];
+  if (raw is int) return raw;
+  if (raw is num) return raw.round();
+  return int.tryParse(raw?.toString() ?? '') ?? 0;
+}
+
+int? _voiceNoteDurationSeconds(Map? voiceNote) {
+  if (voiceNote == null) return null;
+  final raw = voiceNote['duration'] ??
+      voiceNote['durationSeconds'] ??
+      voiceNote['duration_seconds'];
+  if (raw == null) return 0;
+  if (raw is int) return raw;
+  if (raw is num) return raw.round();
+  return int.tryParse(raw.toString()) ?? 0;
+}
+
+String? _commentMessage(PhotoComment comment, int? voiceDurationSeconds) {
+  if (voiceDurationSeconds != null) {
+    final body = comment.body.trim();
+    if (body.isEmpty || body.toLowerCase() == 'voice note') {
+      return null;
+    }
+  }
+  return comment.body;
+}
+
+_PhotoComment _mapPhotoComment(
+  PhotoComment comment, {
+  Set<String>? likedIds,
+  String Function(DateTime)? formatTimestamp,
+}) {
+  final voiceNoteRaw = comment.metadata?['voiceNote'];
+  final voiceNote = voiceNoteRaw is Map ? voiceNoteRaw : null;
+  final voiceDurationSeconds = _voiceNoteDurationSeconds(voiceNote);
+  final baseLikes = _commentBaseLikes(comment);
+  final isLiked = likedIds?.contains(comment.id) ?? false;
+  final likes = isLiked ? baseLikes + 1 : baseLikes;
+  final format = formatTimestamp ?? _relativeTimeShort;
+  return _PhotoComment(
+    id: comment.id,
+    author: _commentAuthorLabel(comment),
+    timestampLabel: format(comment.createdAt),
+    message: _commentMessage(comment, voiceDurationSeconds),
+    voiceDurationSeconds: voiceDurationSeconds,
+    likes: likes,
+    isLiked: isLiked,
+  );
+}
+
+List<String> _extractMentions(String text) {
+  final regex = RegExp(r'@([A-Za-z0-9_]+)');
+  return regex
+      .allMatches(text)
+      .map((m) => m.group(1) ?? '')
+      .where((v) => v.isNotEmpty)
+      .toList();
 }
 
 enum _TimelineEventType { photo, video, upload, comment }
@@ -728,47 +944,11 @@ class _TimelinePanel extends StatefulWidget {
 
 class _TimelinePanelState extends State<_TimelinePanel> {
   late List<_TimelineEvent> _events;
-  Timer? _liveTimer;
-  bool _liveUpdate = false;
 
   @override
   void initState() {
     super.initState();
     _events = [...widget.events];
-    _liveTimer = Timer.periodic(const Duration(seconds: 12), (_) {
-      _appendLiveEvent();
-    });
-  }
-
-  @override
-  void dispose() {
-    _liveTimer?.cancel();
-    super.dispose();
-  }
-
-  void _appendLiveEvent() {
-    final now = DateTime.now();
-    final newEvent = _TimelineEvent(
-      id: now.microsecondsSinceEpoch.toString(),
-      type: _TimelineEventType.comment,
-      title: 'New Activity',
-      description: 'Real-time update detected from the field.',
-      user: 'System',
-      timestamp: now,
-      project: 'Building A Construction',
-    );
-    setState(() {
-      _events = [newEvent, ..._events];
-      if (_events.length > 20) {
-        _events = _events.take(20).toList();
-      }
-      _liveUpdate = true;
-    });
-    Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() => _liveUpdate = false);
-      }
-    });
   }
 
   void _showPanelMessage(String message) {
@@ -804,11 +984,7 @@ class _TimelinePanelState extends State<_TimelinePanel> {
   }
 
   String _relativeTime(DateTime timestamp) {
-    final delta = DateTime.now().difference(timestamp);
-    if (delta.inMinutes < 1) return 'Just now';
-    if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
-    if (delta.inHours < 24) return '${delta.inHours}h ago';
-    return '${delta.inDays}d ago';
+    return _relativeTimeShort(timestamp);
   }
 
   @override
@@ -856,28 +1032,6 @@ class _TimelinePanelState extends State<_TimelinePanel> {
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                if (_liveUpdate)
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: const BoxDecoration(
-                                          color: Color(0xFF22C55E),
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Live',
-                                        style: theme.textTheme.labelSmall?.copyWith(
-                                          color: const Color(0xFF22C55E),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
                               ],
                             ),
                             const SizedBox(height: 4),
@@ -910,21 +1064,32 @@ class _TimelinePanelState extends State<_TimelinePanel> {
                 ),
                 const Divider(height: 1),
                 Expanded(
-                  child: ListView.builder(
-                    controller: controller,
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                    itemCount: _events.length,
-                    itemBuilder: (context, index) {
-                      final event = _events[index];
-                      return _TimelineEventTile(
-                        event: event,
-                        icon: _iconForType(event.type),
-                        color: _colorForType(event.type),
-                        isLast: index == _events.length - 1,
-                        timeLabel: _relativeTime(event.timestamp),
-                      );
-                    },
-                  ),
+                  child: _events.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No activity yet. Upload photos or videos to see timeline events.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color:
+                                  isDark ? Colors.grey[400] : Colors.grey[600],
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: controller,
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                          itemCount: _events.length,
+                          itemBuilder: (context, index) {
+                            final event = _events[index];
+                            return _TimelineEventTile(
+                              event: event,
+                              icon: _iconForType(event.type),
+                              color: _colorForType(event.type),
+                              isLast: index == _events.length - 1,
+                              timeLabel: _relativeTime(event.timestamp),
+                            );
+                          },
+                        ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1175,7 +1340,7 @@ class _TimelineStat extends StatelessWidget {
   }
 }
 
-class _UploadPanel extends StatefulWidget {
+class _UploadPanel extends ConsumerStatefulWidget {
   const _UploadPanel({
     required this.projects,
     required this.suggestedTags,
@@ -1185,10 +1350,10 @@ class _UploadPanel extends StatefulWidget {
   final List<String> suggestedTags;
 
   @override
-  State<_UploadPanel> createState() => _UploadPanelState();
+  ConsumerState<_UploadPanel> createState() => _UploadPanelState();
 }
 
-class _UploadPanelState extends State<_UploadPanel> {
+class _UploadPanelState extends ConsumerState<_UploadPanel> {
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _tagController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
@@ -1196,14 +1361,16 @@ class _UploadPanelState extends State<_UploadPanel> {
   final TextEditingController _timestampController = TextEditingController();
   final FocusNode _mentionFocus = FocusNode();
   final List<String> _tags = [];
-  final List<_UploadPreview> _selectedFiles = [];
+  final List<ops_repo.AttachmentDraft> _selectedFiles = [];
   final List<_TeamMember> _mentions = [];
+  final ImagePicker _picker = ImagePicker();
   DateTime _timestamp = DateTime.now();
   String? _selectedProject;
   bool _gpsCapturing = false;
   String? _gpsLocation;
   String? _gpsError;
   bool _isUploading = false;
+  String? _uploadError;
 
   @override
   void initState() {
@@ -1237,14 +1404,73 @@ class _UploadPanelState extends State<_UploadPanel> {
     _tagController.clear();
   }
 
-  void _addSampleFile({required bool isVideo}) {
-    final index = _selectedFiles.length + 1;
+  String _inferType(String? mime, String name) {
+    final lower = name.toLowerCase();
+    if (mime != null && mime.startsWith('video')) return 'video';
+    if (mime != null && mime.startsWith('image')) return 'photo';
+    if (lower.endsWith('.mp4') || lower.endsWith('.mov')) return 'video';
+    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return 'photo';
+    }
+    return 'file';
+  }
+
+  String _sizeLabel(int bytes) {
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    final mb = kb / 1024;
+    return '${mb.toStringAsFixed(1)} MB';
+  }
+
+  String _guessMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.mp4')) return 'video/mp4';
+    if (lower.endsWith('.mov')) return 'video/quicktime';
+    return 'application/octet-stream';
+  }
+
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+      type: FileType.media,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final drafts = <ops_repo.AttachmentDraft>[];
+    for (final file in result.files) {
+      final bytes = file.bytes;
+      if (bytes == null) continue;
+      final mime = _guessMime(file.name);
+      final type = _inferType(mime, file.name);
+      drafts.add(
+        ops_repo.AttachmentDraft(
+          type: type,
+          bytes: bytes,
+          filename: file.name,
+          mimeType: mime,
+          metadata: _gpsLocation == null ? null : {'gpsLabel': _gpsLocation},
+        ),
+      );
+    }
+    if (drafts.isEmpty) return;
+    setState(() => _selectedFiles.addAll(drafts));
+  }
+
+  Future<void> _takePhoto() async {
+    final picked = await _picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
     setState(() {
       _selectedFiles.add(
-        _UploadPreview(
-          name: isVideo ? 'Video Clip $index.mp4' : 'Photo $index.jpg',
-          sizeLabel: isVideo ? '24.3 MB' : '3.2 MB',
-          isVideo: isVideo,
+        ops_repo.AttachmentDraft(
+          type: 'photo',
+          bytes: bytes,
+          filename: picked.name,
+          mimeType: 'image/jpeg',
+          metadata: _gpsLocation == null ? null : {'gpsLabel': _gpsLocation},
         ),
       );
     });
@@ -1309,11 +1535,35 @@ class _UploadPanelState extends State<_UploadPanel> {
 
   Future<void> _submitUpload() async {
     if (_selectedFiles.isEmpty) return;
-    setState(() => _isUploading = true);
-    await Future<void>.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-    setState(() => _isUploading = false);
-    Navigator.of(context).pop();
+    setState(() {
+      _isUploading = true;
+      _uploadError = null;
+    });
+    try {
+      final repo = ref.read(opsRepositoryProvider);
+      final title = _notesController.text.trim().isEmpty
+          ? 'Photo Upload'
+          : _notesController.text.trim();
+      final project = (_selectedProject ?? '').isEmpty ? null : _selectedProject;
+      await repo.createProjectPhoto(
+        projectId: project,
+        title: title,
+        description:
+            _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+        tags: _tags,
+        attachments: _selectedFiles,
+        isFeatured: false,
+        isShared: true,
+      );
+      ref.invalidate(projectPhotosProvider(null));
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      setState(() => _uploadError = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
+    }
   }
 
   @override
@@ -1367,15 +1617,13 @@ class _UploadPanelState extends State<_UploadPanel> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           FilledButton.icon(
-                            onPressed: () =>
-                                _addSampleFile(isVideo: false),
+                            onPressed: _isUploading ? null : _pickFiles,
                             icon: const Icon(Icons.folder_open, size: 18),
                             label: const Text('Choose Files'),
                           ),
                           const SizedBox(width: 12),
                           OutlinedButton.icon(
-                            onPressed: () =>
-                                _addSampleFile(isVideo: false),
+                            onPressed: _isUploading ? null : _takePhoto,
                             icon: const Icon(Icons.camera_alt_outlined, size: 18),
                             label: const Text('Take Photo'),
                           ),
@@ -1403,6 +1651,8 @@ class _UploadPanelState extends State<_UploadPanel> {
                     ..._selectedFiles.asMap().entries.map((entry) {
                       final index = entry.key;
                       final file = entry.value;
+                      final isVideo = file.type == 'video';
+                      final sizeLabel = _sizeLabel(file.bytes.length);
                       return Container(
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.all(12),
@@ -1425,7 +1675,7 @@ class _UploadPanelState extends State<_UploadPanel> {
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Icon(
-                                file.isVideo
+                                isVideo
                                     ? Icons.videocam_outlined
                                     : Icons.photo_outlined,
                               ),
@@ -1436,13 +1686,13 @@ class _UploadPanelState extends State<_UploadPanel> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    file.name,
+                                    file.filename,
                                     style: theme.textTheme.bodyMedium?.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   Text(
-                                    file.sizeLabel,
+                                    sizeLabel,
                                     style: theme.textTheme.labelSmall?.copyWith(
                                       color: isDark
                                           ? Colors.grey[400]
@@ -1461,7 +1711,7 @@ class _UploadPanelState extends State<_UploadPanel> {
                       );
                     }),
                     OutlinedButton(
-                      onPressed: () => _addSampleFile(isVideo: false),
+                      onPressed: _isUploading ? null : _pickFiles,
                       child: const Text('+ Add More Files'),
                     ),
                   ],
@@ -1759,6 +2009,16 @@ class _UploadPanelState extends State<_UploadPanel> {
                   },
                 ),
                 const SizedBox(height: 16),
+                if (_uploadError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      _uploadError!,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFFDC2626),
+                      ),
+                    ),
+                  ),
                 Row(
                   children: [
                     Expanded(
@@ -1775,7 +2035,7 @@ class _UploadPanelState extends State<_UploadPanel> {
                           : () => Navigator.of(context).pop(),
                       child: const Text('Cancel'),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     FilledButton.icon(
                       onPressed:
                           _selectedFiles.isEmpty || _isUploading ? null : _submitUpload,
@@ -1811,7 +2071,7 @@ class _CuratedGalleryPanel extends StatefulWidget {
 class _CuratedGalleryPanelState extends State<_CuratedGalleryPanel> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  final Set<int> _selected = {};
+  final Set<String> _selected = {};
   bool _shareLink = true;
   bool _isPublic = false;
   bool _allowDownloads = true;
@@ -1823,7 +2083,7 @@ class _CuratedGalleryPanelState extends State<_CuratedGalleryPanel> {
     super.dispose();
   }
 
-  void _toggleSelection(int id) {
+  void _toggleSelection(String id) {
     setState(() {
       if (_selected.contains(id)) {
         _selected.remove(id);
@@ -2415,23 +2675,27 @@ class _CapturedPhoto {
   final bool hasGps;
 }
 
-class _MultiCapturePanel extends StatefulWidget {
+class _MultiCapturePanel extends ConsumerStatefulWidget {
   const _MultiCapturePanel({required this.projects});
 
   final List<String> projects;
 
   @override
-  State<_MultiCapturePanel> createState() => _MultiCapturePanelState();
+  ConsumerState<_MultiCapturePanel> createState() => _MultiCapturePanelState();
 }
 
-class _MultiCapturePanelState extends State<_MultiCapturePanel> {
+class _MultiCapturePanelState extends ConsumerState<_MultiCapturePanel> {
   final TextEditingController _galleryController = TextEditingController();
   String? _selectedProject;
   bool _cameraActive = false;
   bool _gpsCapturing = false;
   String? _gpsLocation;
   String? _gpsError;
+  final ImagePicker _picker = ImagePicker();
+  final List<ops_repo.AttachmentDraft> _drafts = [];
   final List<_CapturedPhoto> _capturedPhotos = [];
+  bool _isUploading = false;
+  String? _uploadError;
 
   @override
   void initState() {
@@ -2467,10 +2731,22 @@ class _MultiCapturePanelState extends State<_MultiCapturePanel> {
     setState(() => _cameraActive = false);
   }
 
-  void _capturePhoto() {
+  Future<void> _capturePhoto() async {
     if (!_cameraActive) return;
+    final picked = await _picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
     final now = DateTime.now();
     setState(() {
+      _drafts.add(
+        ops_repo.AttachmentDraft(
+          type: 'photo',
+          bytes: bytes,
+          filename: picked.name,
+          mimeType: 'image/jpeg',
+          metadata: _gpsLocation == null ? null : {'gpsLabel': _gpsLocation},
+        ),
+      );
       _capturedPhotos.add(
         _CapturedPhoto(
           id: now.microsecondsSinceEpoch.toString(),
@@ -2482,11 +2758,49 @@ class _MultiCapturePanelState extends State<_MultiCapturePanel> {
   }
 
   void _removePhoto(String id) {
-    setState(() => _capturedPhotos.removeWhere((photo) => photo.id == id));
+    final index = _capturedPhotos.indexWhere((photo) => photo.id == id);
+    setState(() {
+      _capturedPhotos.removeWhere((photo) => photo.id == id);
+      if (index >= 0 && index < _drafts.length) {
+        _drafts.removeAt(index);
+      }
+    });
   }
 
   String _formatCaptureTime(DateTime timestamp) {
     return DateFormat('HH:mm').format(timestamp);
+  }
+
+  Future<void> _submitCapture() async {
+    if (_drafts.isEmpty) return;
+    setState(() {
+      _isUploading = true;
+      _uploadError = null;
+    });
+    try {
+      final repo = ref.read(opsRepositoryProvider);
+      final project = (_selectedProject ?? '').isEmpty ? null : _selectedProject;
+      final title = _galleryController.text.trim().isEmpty
+          ? 'Captured Photos'
+          : _galleryController.text.trim();
+      await repo.createProjectPhoto(
+        projectId: project,
+        title: title,
+        description: 'Uploaded from multi-capture',
+        tags: const [],
+        attachments: List<ops_repo.AttachmentDraft>.from(_drafts),
+        isFeatured: false,
+        isShared: true,
+      );
+      ref.invalidate(projectPhotosProvider(null));
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      setState(() => _uploadError = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
+    }
   }
 
   @override
@@ -2868,6 +3182,16 @@ class _MultiCapturePanelState extends State<_MultiCapturePanel> {
                   ),
                 ],
                 const SizedBox(height: 16),
+                if (_uploadError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      _uploadError!,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFFDC2626),
+                      ),
+                    ),
+                  ),
                 if (_cameraActive)
                   Row(
                     children: [
@@ -2880,12 +3204,14 @@ class _MultiCapturePanelState extends State<_MultiCapturePanel> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: _capturedPhotos.isEmpty
+                          onPressed: _capturedPhotos.isEmpty || _isUploading
                               ? null
-                              : () => Navigator.of(context).pop(),
+                              : _submitCapture,
                           icon: const Icon(Icons.check),
                           label: Text(
-                            'Complete (${_capturedPhotos.length})',
+                            _isUploading
+                                ? 'Uploading...'
+                                : 'Complete (${_capturedPhotos.length})',
                           ),
                         ),
                       ),
@@ -2950,18 +3276,71 @@ class _ViewToggleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final baseColor =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    final hoverColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(8),
+      hoverColor: isSelected ? null : hoverColor,
       child: Container(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFF2563EB) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
-          color: isSelected ? Colors.white : Theme.of(context).iconTheme.color,
+          size: 20,
+          color: isSelected ? Colors.white : baseColor,
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickActionButton extends StatelessWidget {
+  const _QuickActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final foreground =
+        isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
+    final hoverColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      hoverColor: hoverColor,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: foreground),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 14,
+                color: foreground,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -2980,10 +3359,10 @@ class _MediaGrid extends StatelessWidget {
   });
 
   final List<_MediaItem> items;
-  final Set<int> likedItems;
-  final Set<int> flaggedItems;
-  final ValueChanged<int> onToggleLike;
-  final ValueChanged<int> onToggleFlag;
+  final Set<String> likedItems;
+  final Set<String> flaggedItems;
+  final ValueChanged<String> onToggleLike;
+  final ValueChanged<String> onToggleFlag;
   final ValueChanged<_MediaItem> onOpenComments;
   final ValueChanged<_MediaItem> onOpenWatermark;
 
@@ -2992,20 +3371,25 @@ class _MediaGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         var columns = 1;
-        if (constraints.maxWidth >= 1100) {
+        if (constraints.maxWidth >= 1024) {
           columns = 3;
-        } else if (constraints.maxWidth >= 760) {
+        } else if (constraints.maxWidth >= 768) {
           columns = 2;
         }
+        final childAspectRatio = columns == 1
+            ? 0.9
+            : columns == 2
+                ? 0.75
+                : 0.65;
         return GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: items.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 0.75,
+            mainAxisSpacing: 16,
+            crossAxisSpacing: 16,
+            childAspectRatio: childAspectRatio,
           ),
           itemBuilder: (context, index) {
             final item = items[index];
@@ -3025,7 +3409,7 @@ class _MediaGrid extends StatelessWidget {
   }
 }
 
-class _MediaGridCard extends StatelessWidget {
+class _MediaGridCard extends StatefulWidget {
   const _MediaGridCard({
     required this.item,
     required this.liked,
@@ -3045,162 +3429,233 @@ class _MediaGridCard extends StatelessWidget {
   final VoidCallback onOpenWatermark;
 
   @override
+  State<_MediaGridCard> createState() => _MediaGridCardState();
+}
+
+class _MediaGridCardState extends State<_MediaGridCard> {
+  bool _hovering = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    final likeCount = liked ? item.initialLikes + 1 : item.initialLikes;
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Stack(
-            children: [
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                              child: Image.network(
-                                item.url,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) =>
-                                    const _PhotoImageFallback(),
-                              ),
-              ),
-              if (item.type == _MediaType.video)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black.withOpacity(0.3),
-                    child: Center(
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.play_arrow, size: 28),
-                      ),
-                    ),
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final item = widget.item;
+    final likeCount =
+        widget.liked ? item.initialLikes + 1 : item.initialLikes;
+    final supportsHover = kIsWeb ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux;
+    final showOverlayButtons = supportsHover && _hovering;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+          boxShadow: supportsHover && _hovering
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
                   ),
-                ),
-              if (item.duration != null)
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      item.duration!,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Column(
-                  children: [
-                    _MediaOverlayButton(
-                      icon: Icons.chat_bubble_outline,
-                      onTap: onOpenComments,
-                    ),
-                    const SizedBox(height: 6),
-                    _MediaOverlayButton(
-                      icon: Icons.brush_outlined,
-                      onTap: onOpenWatermark,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+                ]
+              : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
               children: [
-                Text(
-                  item.title,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(12),
+                  ),
+                  child: AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: Image.network(
+                      item.url,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          const _PhotoImageFallback(),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 6),
-                _MetaRow(
-                  icon: Icons.calendar_today_outlined,
-                  label: item.timestampLabel,
-                ),
-                if (item.gps != null)
-                  _MetaRow(
-                    icon: Icons.place_outlined,
-                    label: item.gps!,
+                if (item.type == _MediaType.video)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black.withOpacity(0.3),
+                      child: Center(
+                        child: Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow,
+                            size: 32,
+                            color: Color(0xFF111827),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: item.tags
-                      .map((tag) => Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? const Color(0xFF1E3A8A)
-                                  : const Color(0xFFDBEAFE),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              tag,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: isDark
-                                    ? const Color(0xFFBFDBFE)
-                                    : const Color(0xFF1D4ED8),
-                              ),
-                            ),
-                          ))
-                      .toList(),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    _ActionIcon(
-                      icon: liked ? Icons.favorite : Icons.favorite_border,
-                      label: likeCount.toString(),
-                      color: liked ? Colors.redAccent : null,
-                      onTap: onToggleLike,
+                if (item.duration != null)
+                  Positioned(
+                    bottom: 8,
+                    right: 8,
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.75),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        item.duration!,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    _ActionIcon(
-                      icon: Icons.chat_bubble_outline,
-                      label: item.commentCount.toString(),
-                      onTap: onOpenComments,
+                  ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IgnorePointer(
+                    ignoring: !showOverlayButtons,
+                    child: AnimatedOpacity(
+                      opacity: showOverlayButtons ? 1 : 0,
+                      duration: const Duration(milliseconds: 150),
+                      child: Column(
+                        children: [
+                          _MediaOverlayButton(
+                            icon: Icons.chat_bubble_outline,
+                            onTap: widget.onOpenComments,
+                          ),
+                          const SizedBox(height: 6),
+                          _MediaOverlayButton(
+                            icon: Icons.branding_watermark_outlined,
+                            onTap: widget.onOpenWatermark,
+                          ),
+                        ],
+                      ),
                     ),
-                    const Spacer(),
-                    _ActionIcon(
-                      icon: flagged ? Icons.flag : Icons.outlined_flag,
-                      label: '',
-                      color: flagged ? Colors.orange : null,
-                      onTap: onToggleFlag,
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _MetaRow(
+                    icon: Icons.calendar_today_outlined,
+                    label: item.timestampLabel,
+                  ),
+                  if (item.gps != null)
+                    _MetaRow(
+                      icon: Icons.place_outlined,
+                      label: item.gps!,
+                    ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: item.tags
+                        .map((tag) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? const Color(0xFF3B82F6)
+                                        .withValues(alpha: 0.2)
+                                    : const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                tag,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: isDark
+                                      ? const Color(0xFF60A5FA)
+                                      : const Color(0xFF1D4ED8),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.only(top: 12),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: borderColor)),
+                    ),
+                    child: Row(
+                      children: [
+                        _ActionIcon(
+                          icon:
+                              widget.liked ? Icons.favorite : Icons.favorite_border,
+                          label: likeCount.toString(),
+                          color: widget.liked ? Colors.redAccent : null,
+                          onTap: widget.onToggleLike,
+                        ),
+                        const SizedBox(width: 4),
+                        _ActionIcon(
+                          icon: Icons.chat_bubble_outline,
+                          label: item.commentCount.toString(),
+                          onTap: () {},
+                        ),
+                        const Spacer(),
+                        _ActionIcon(
+                          icon: widget.flagged
+                              ? Icons.flag
+                              : Icons.outlined_flag,
+                          label: '',
+                          color: widget.flagged ? Colors.orange : null,
+                          onTap: widget.onToggleFlag,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.only(top: 12),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: borderColor)),
+                    ),
+                    child: _InlineCommentsSection(item: item),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3216,15 +3671,414 @@ class _MediaOverlayButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.6),
-          borderRadius: BorderRadius.circular(10),
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(icon, color: Colors.white, size: 16),
       ),
+    );
+  }
+}
+
+class _InlineCommentsSection extends ConsumerStatefulWidget {
+  const _InlineCommentsSection({required this.item});
+
+  final _MediaItem item;
+
+  @override
+  ConsumerState<_InlineCommentsSection> createState() =>
+      _InlineCommentsSectionState();
+}
+
+class _InlineCommentsSectionState
+    extends ConsumerState<_InlineCommentsSection> {
+  final TextEditingController _commentController = TextEditingController();
+  final AudioRecorder _recorder = AudioRecorder();
+  final Stopwatch _recordingStopwatch = Stopwatch();
+  final Set<String> _likedComments = {};
+  bool _isSubmitting = false;
+  bool _isRecording = false;
+  bool _isExpanded = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    _recorder.dispose();
+    super.dispose();
+  }
+
+  void _toggleLike(String commentId) {
+    setState(() {
+      if (_likedComments.contains(commentId)) {
+        _likedComments.remove(commentId);
+      } else {
+        _likedComments.add(commentId);
+      }
+    });
+  }
+
+  Future<void> _submitTextComment() async {
+    final text = _commentController.text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+    });
+    try {
+      final mentions = _extractMentions(text);
+      await ref.read(opsRepositoryProvider).addPhotoComment(
+            photoId: widget.item.photoId,
+            body: text,
+            mentions: mentions,
+          );
+      _commentController.clear();
+      ref.invalidate(photoCommentsProvider(widget.item.photoId));
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      await _stopVoiceNote();
+    } else {
+      await _startVoiceNote();
+    }
+  }
+
+  Future<void> _startVoiceNote() async {
+    final hasPermission = await _recorder.hasPermission();
+    if (!hasPermission) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission required.')),
+      );
+      return;
+    }
+    final dir = await getTemporaryDirectory();
+    final path = p.join(
+      dir.path,
+      'photo_comment_${DateTime.now().millisecondsSinceEpoch}.m4a',
+    );
+    await _recorder.start(const RecordConfig(), path: path);
+    _recordingStopwatch
+      ..reset()
+      ..start();
+    if (!mounted) return;
+    setState(() {
+      _isRecording = true;
+      _error = null;
+    });
+  }
+
+  Future<void> _stopVoiceNote() async {
+    final path = await _recorder.stop();
+    _recordingStopwatch.stop();
+    if (!mounted) return;
+    setState(() => _isRecording = false);
+    if (path == null) return;
+    final bytes = await loadFileBytes(path);
+    if (bytes == null) return;
+    final durationSeconds = _recordingStopwatch.elapsed.inSeconds;
+    final draft = ops_repo.AttachmentDraft(
+      type: 'audio',
+      bytes: bytes,
+      filename: p.basename(path),
+      mimeType: 'audio/m4a',
+      metadata: {
+        'voiceNote': true,
+        'durationSeconds': durationSeconds,
+      },
+    );
+    await _submitVoiceNote(draft);
+  }
+
+  Future<void> _submitVoiceNote(ops_repo.AttachmentDraft draft) async {
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+    });
+    try {
+      await ref.read(opsRepositoryProvider).addPhotoComment(
+            photoId: widget.item.photoId,
+            body: 'Voice note',
+            voiceNote: draft,
+          );
+      ref.invalidate(photoCommentsProvider(widget.item.photoId));
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final isWide = MediaQuery.of(context).size.width >= 768;
+    final commentsAsync = ref.watch(photoCommentsProvider(widget.item.photoId));
+    final canSend = !_isRecording &&
+        !_isSubmitting &&
+        _commentController.text.trim().isNotEmpty;
+    final micBg = _isRecording
+        ? const Color(0xFFEF4444)
+        : Colors.transparent;
+    final micIconColor = _isRecording
+        ? Colors.white
+        : (isDark ? Colors.grey[400] : Colors.grey[600]);
+    final micHoverColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
+    final sendBg = canSend
+        ? const Color(0xFF2563EB)
+        : isDark
+            ? const Color(0xFF374151)
+            : const Color(0xFFE5E7EB);
+    final sendIconColor = canSend
+        ? Colors.white
+        : isDark
+            ? Colors.grey[500]
+            : Colors.grey[400];
+
+    Widget commentsBody = commentsAsync.when(
+      loading: () => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
+            ),
+          ),
+        ),
+      ),
+      error: (err, _) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          'Failed to load comments.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: const Color(0xFFDC2626),
+          ),
+        ),
+      ),
+      data: (comments) {
+        if (comments.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'No comments yet. Be the first to comment!',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 14,
+                color:
+                    isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+              ),
+              textAlign: TextAlign.center,
+            ),
+          );
+        }
+        final mapped = comments
+            .map((comment) => _mapPhotoComment(
+                  comment,
+                  likedIds: _likedComments,
+                ))
+            .toList();
+        if (isWide) {
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: ListView.separated(
+              padding: const EdgeInsets.only(right: 8),
+              shrinkWrap: true,
+              itemCount: mapped.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final comment = mapped[index];
+                return _CommentItem(
+                  comment: comment,
+                  onToggleLike: () => _toggleLike(comment.id),
+                );
+              },
+            ),
+          );
+        }
+        final displayed =
+            _isExpanded ? mapped : mapped.take(2).toList(growable: false);
+        final hasMore = mapped.length > 2;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ...displayed.map(
+              (comment) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _CommentItem(
+                  comment: comment,
+                  onToggleLike: () => _toggleLike(comment.id),
+                ),
+              ),
+            ),
+            if (hasMore && !_isExpanded)
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _isExpanded = true),
+                  style: TextButton.styleFrom(
+                    backgroundColor: isDark
+                        ? const Color(0xFF374151)
+                        : const Color(0xFFF3F4F6),
+                    foregroundColor:
+                        isDark ? Colors.grey[300] : Colors.grey[700],
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    alignment: Alignment.center,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    textStyle: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  icon: const Icon(Icons.expand_more, size: 16),
+                  label: Text('View all ${mapped.length} comments'),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        commentsBody,
+        Container(
+          padding: const EdgeInsets.only(top: 12),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: borderColor)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    _error!,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: const Color(0xFFDC2626),
+                    ),
+                  ),
+                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _commentController,
+                      enabled: !_isRecording,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Add a comment...',
+                        hintStyle: TextStyle(
+                          fontSize: 14,
+                          color: isDark
+                              ? const Color(0xFF9CA3AF)
+                              : const Color(0xFF6B7280),
+                        ),
+                        filled: true,
+                        fillColor:
+                            isDark ? const Color(0xFF374151) : Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? const Color(0xFF4B5563)
+                                : const Color(0xFFD1D5DB),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? const Color(0xFF4B5563)
+                                : const Color(0xFFD1D5DB),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF2563EB),
+                            width: 1.5,
+                          ),
+                        ),
+                        isDense: true,
+                      ),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDark ? Colors.white : const Color(0xFF111827),
+                      ),
+                      minLines: 1,
+                      maxLines: 2,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: _isSubmitting ? null : _toggleRecording,
+                    hoverColor: _isRecording ? null : micHoverColor,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: micBg,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.mic,
+                        size: 16,
+                        color: micIconColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: canSend ? _submitTextComment : null,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: sendBg,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.send,
+                        size: 16,
+                        color: sendIconColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3238,99 +4092,162 @@ class _MediaList extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final isWide = MediaQuery.of(context).size.width >= 768;
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final hoverColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF9FAFB);
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: items.map((item) {
           final isLast = item == items.last;
-          return Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              border: isLast
-                  ? null
-                  : Border(bottom: BorderSide(color: borderColor)),
-            ),
-            child: Row(
-              children: [
-                Stack(
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {},
+              hoverColor: hoverColor,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: isLast
+                      ? null
+                      : Border(bottom: BorderSide(color: borderColor)),
+                ),
+                child: Row(
                   children: [
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        item.url,
-                        width: 96,
-                        height: 64,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) =>
-                            const _PhotoImageFallback(),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Stack(
+                        children: [
+                          Image.network(
+                            item.url,
+                            width: 96,
+                            height: 64,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const _PhotoImageFallback(),
+                          ),
+                          if (item.type == _MediaType.video)
+                            Positioned.fill(
+                              child: Container(
+                                color: Colors.black.withOpacity(0.35),
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.play_arrow,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    if (item.type == _MediaType.video)
-                      Positioned.fill(
-                        child: Container(
-                          color: Colors.black.withOpacity(0.35),
-                          child: const Center(
-                            child: Icon(Icons.play_arrow, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            item.project,
-                            style: theme.textTheme.bodySmall?.copyWith(
+                            item.title,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w500,
                               color: isDark
-                                  ? Colors.grey[400]
-                                  : Colors.grey[600],
+                                  ? Colors.white
+                                  : const Color(0xFF111827),
                             ),
                           ),
-                          Text(
-                            item.location,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark
-                                  ? Colors.grey[400]
-                                  : Colors.grey[600],
-                            ),
-                          ),
-                          Text(
-                            item.dateLabel,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark
-                                  ? Colors.grey[400]
-                                  : Colors.grey[600],
-                            ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: isWide ? 16 : 8,
+                            runSpacing: 4,
+                            children: [
+                              Text(
+                                item.project,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.grey[400]
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                              if (isWide && item.location.isNotEmpty)
+                                Text(
+                                  '•',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.grey[400]
+                                        : Colors.grey[600],
+                                  ),
+                                ),
+                              if (item.location.isNotEmpty)
+                                _ListMetaItem(
+                                  icon: Icons.place_outlined,
+                                  label: item.location,
+                                ),
+                              if (isWide && item.location.isNotEmpty)
+                                Text(
+                                  '•',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.grey[400]
+                                        : Colors.grey[600],
+                                  ),
+                                ),
+                              _ListMetaItem(
+                                icon: Icons.access_time,
+                                label: item.dateLabel,
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           );
         }).toList(),
       ),
+    );
+  }
+}
+
+class _ListMetaItem extends StatelessWidget {
+  const _ListMetaItem({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontSize: 12,
+          color: isDark ? Colors.grey[400] : Colors.grey[600],
+        );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+        const SizedBox(width: 4),
+        Text(label, style: textStyle),
+      ],
     );
   }
 }
@@ -3348,12 +4265,17 @@ class _MetaRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         children: [
-          Icon(icon, size: 14, color: isDark ? Colors.grey[500] : Colors.grey[600]),
+          Icon(
+            icon,
+            size: 12,
+            color: isDark ? Colors.grey[500] : Colors.grey[600],
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               label,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontSize: 12,
                     color: isDark ? Colors.grey[400] : Colors.grey[600],
                   ),
             ),
@@ -3382,21 +4304,25 @@ class _ActionIcon extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor =
         color ?? (isDark ? Colors.grey[300] : Colors.grey[700]);
+    final hoverColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(8),
+      hoverColor: hoverColor,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
             Icon(icon, size: 16, color: color ?? textColor),
             if (label.isNotEmpty) ...[
-              const SizedBox(width: 4),
+              const SizedBox(width: 6),
               Text(
                 label,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
                       color: textColor,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
               ),
             ],
@@ -3407,337 +4333,59 @@ class _ActionIcon extends StatelessWidget {
   }
 }
 
-class _PhotoCommentsSection extends StatefulWidget {
-  const _PhotoCommentsSection({required this.photoId});
-
-  final int photoId;
-
-  @override
-  State<_PhotoCommentsSection> createState() => _PhotoCommentsSectionState();
-}
-
-class _PhotoCommentsSectionState extends State<_PhotoCommentsSection> {
-  final TextEditingController _commentController = TextEditingController();
-  Timer? _recordingTimer;
-  int _recordingSeconds = 0;
-  bool _isRecording = false;
-  bool _isExpanded = false;
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    _recordingTimer?.cancel();
-    super.dispose();
-  }
-
-  void _addComment() {
-    final text = _commentController.text.trim();
-    if (text.isEmpty) return;
-    _addPhotoComment(
-      widget.photoId,
-      _PhotoComment(
-        id: _nextCommentId(),
-        author: 'You',
-        timestampLabel: 'Just now',
-        message: text,
-      ),
-    );
-    _commentController.clear();
-  }
-
-  void _toggleRecording() {
-    if (_isRecording) {
-      _finishRecording(addVoiceNote: true);
-      return;
-    }
-    _startRecording();
-  }
-
-  void _startRecording() {
-    _recordingTimer?.cancel();
-    setState(() {
-      _isRecording = true;
-      _recordingSeconds = 0;
-    });
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
-      setState(() => _recordingSeconds++);
-      if (_recordingSeconds >= 3) {
-        _finishRecording(addVoiceNote: true);
-      }
-    });
-  }
-
-  void _finishRecording({required bool addVoiceNote}) {
-    _recordingTimer?.cancel();
-    if (addVoiceNote) {
-      _addPhotoComment(
-        widget.photoId,
-        _PhotoComment(
-          id: _nextCommentId(),
-          author: 'You',
-          timestampLabel: 'Just now',
-          voiceDurationSeconds: _recordingSeconds.clamp(1, 60).toInt(),
-        ),
-      );
-    }
-    setState(() {
-      _isRecording = false;
-      _recordingSeconds = 0;
-    });
-  }
-
-  void _toggleLike(_PhotoComment comment) {
-    _togglePhotoCommentLike(widget.photoId, comment.id);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-
-    return ValueListenableBuilder<int>(
-      valueListenable: _commentStoreVersion,
-      builder: (context, _, __) {
-        final comments = _commentsForPhoto(widget.photoId);
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 520;
-            final visibleComments = isWide || _isExpanded
-                ? comments
-                : comments.take(2).toList();
-            final hasMore = comments.length > 2 && !isWide;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Divider(color: borderColor),
-                if (comments.isEmpty)
-                  Text(
-                    'No comments yet. Be the first to comment.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: isDark ? Colors.grey[400] : Colors.grey[600],
-                    ),
-                  )
-                else if (isWide)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 220),
-                    child: ListView.separated(
-                      itemCount: comments.length,
-                      shrinkWrap: true,
-                      physics: const ClampingScrollPhysics(),
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        final comment = comments[index];
-                        return _CommentItem(
-                          comment: comment,
-                          onToggleLike: () => _toggleLike(comment),
-                        );
-                      },
-                    ),
-                  )
-                else
-                  Column(
-                    children: [
-                      ...visibleComments.map(
-                        (comment) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _CommentItem(
-                            comment: comment,
-                            onToggleLike: () => _toggleLike(comment),
-                          ),
-                        ),
-                      ),
-                      if (hasMore && !_isExpanded)
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: () =>
-                                setState(() => _isExpanded = true),
-                            icon: const Icon(Icons.expand_more),
-                            label: Text(
-                              'View all ${comments.length} comments',
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _commentController,
-                  enabled: !_isRecording,
-                  decoration: const InputDecoration(
-                    hintText: 'Add a comment...',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                  onSubmitted: (_) => _addComment(),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: _toggleRecording,
-                      icon: Icon(
-                        _isRecording ? Icons.stop_circle : Icons.mic,
-                        color: _isRecording ? Colors.redAccent : null,
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        _isRecording
-                            ? 'Recording... 0:${_recordingSeconds.toString().padLeft(2, '0')}'
-                            : 'Add voice note or send message',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: isDark ? Colors.grey[400] : Colors.grey[600],
-                        ),
-                      ),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _commentController.text.trim().isEmpty ||
-                              _isRecording
-                          ? null
-                          : _addComment,
-                      icon: const Icon(Icons.send, size: 18),
-                      label: const Text('Send'),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _PhotoCommentsPanel extends StatefulWidget {
+class _PhotoCommentsPanel extends ConsumerStatefulWidget {
   const _PhotoCommentsPanel({required this.item});
 
   final _MediaItem item;
 
   @override
-  State<_PhotoCommentsPanel> createState() => _PhotoCommentsPanelState();
+  ConsumerState<_PhotoCommentsPanel> createState() => _PhotoCommentsPanelState();
 }
 
-class _PhotoCommentsPanelState extends State<_PhotoCommentsPanel> {
+class _PhotoCommentsPanelState extends ConsumerState<_PhotoCommentsPanel> {
   final TextEditingController _commentController = TextEditingController();
-  final FocusNode _commentFocus = FocusNode();
+  final AudioRecorder _recorder = AudioRecorder();
+  final Set<String> _likedComments = {};
   Timer? _recordingTimer;
   int _recordingSeconds = 0;
+  bool _isSubmitting = false;
   bool _isRecording = false;
   bool _showMentions = false;
   String _mentionQuery = '';
-  int _cursorPosition = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _commentFocus.addListener(() {
-      if (!_commentFocus.hasFocus && _showMentions && mounted) {
-        setState(() => _showMentions = false);
-      }
-    });
-  }
+  String? _error;
 
   @override
   void dispose() {
     _commentController.dispose();
-    _commentFocus.dispose();
     _recordingTimer?.cancel();
+    _recorder.dispose();
     super.dispose();
   }
 
-  void _handleTextChanged(String value) {
-    final cursor = _commentController.selection.baseOffset;
-    _cursorPosition = cursor;
-    if (cursor < 0) {
-      setState(() => _showMentions = false);
-      return;
-    }
-    final lastAt = value.lastIndexOf('@', cursor - 1);
-    if (lastAt == -1) {
-      setState(() => _showMentions = false);
-      return;
-    }
-    final textAfterAt = value.substring(lastAt + 1, cursor);
-    if (textAfterAt.contains(' ')) {
-      setState(() => _showMentions = false);
-      return;
-    }
-    setState(() {
-      _mentionQuery = textAfterAt;
-      _showMentions = true;
-    });
-  }
-
-  void _insertMention(_MentionTarget target) {
-    final text = _commentController.text;
-    final lastAt = text.lastIndexOf('@', _cursorPosition - 1);
-    if (lastAt == -1) return;
-    final updated = text.replaceRange(
-      lastAt,
-      _cursorPosition,
-      '@${target.username} ',
-    );
-    _commentController.text = updated;
-    _commentController.selection = TextSelection.collapsed(
-      offset: lastAt + target.username.length + 2,
-    );
-    setState(() => _showMentions = false);
-    _commentFocus.requestFocus();
-  }
-
-  void _addComment() {
+  Future<void> _submitComment() async {
     final text = _commentController.text.trim();
     if (text.isEmpty) return;
-    _addPhotoComment(
-      widget.item.id,
-      _PhotoComment(
-        id: _nextCommentId(),
-        author: 'You',
-        timestampLabel: 'Just now',
-        message: text,
-      ),
-    );
-    _commentController.clear();
-    setState(() => _showMentions = false);
-  }
-
-  void _toggleLike(_PhotoComment comment) {
-    _togglePhotoCommentLike(widget.item.id, comment.id);
-  }
-
-  void _startRecording() {
-    if (_isRecording) return;
-    _recordingTimer?.cancel();
     setState(() {
-      _isRecording = true;
-      _recordingSeconds = 0;
+      _isSubmitting = true;
+      _error = null;
     });
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
-      setState(() => _recordingSeconds++);
-    });
-  }
-
-  void _stopRecording() {
-    if (!_isRecording) return;
-    _recordingTimer?.cancel();
-    _addPhotoComment(
-      widget.item.id,
-      _PhotoComment(
-        id: _nextCommentId(),
-        author: 'You',
-        timestampLabel: 'Just now',
-        voiceDurationSeconds: _recordingSeconds.clamp(1, 120).toInt(),
-      ),
-    );
-    setState(() {
-      _isRecording = false;
-      _recordingSeconds = 0;
-    });
+    try {
+      final mentions = _extractMentions(text);
+      await ref.read(opsRepositoryProvider).addPhotoComment(
+            photoId: widget.item.photoId,
+            body: text,
+            mentions: mentions,
+          );
+      _commentController.clear();
+      _hideMentions();
+      ref.invalidate(photoCommentsProvider(widget.item.photoId));
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
   void _showPanelMessage(String message) {
@@ -3746,18 +4394,161 @@ class _PhotoCommentsPanelState extends State<_PhotoCommentsPanel> {
     );
   }
 
+  void _toggleLike(String commentId) {
+    setState(() {
+      if (_likedComments.contains(commentId)) {
+        _likedComments.remove(commentId);
+      } else {
+        _likedComments.add(commentId);
+      }
+    });
+  }
+
+  void _handleTextChanged(String value) {
+    final cursor = _commentController.selection.baseOffset;
+    if (cursor <= 0 || cursor > value.length) {
+      _hideMentions();
+      return;
+    }
+    final atIndex = value.lastIndexOf('@', cursor - 1);
+    if (atIndex == -1) {
+      _hideMentions();
+      return;
+    }
+    final query = value.substring(atIndex + 1, cursor);
+    if (query.contains(' ')) {
+      _hideMentions();
+      return;
+    }
+    setState(() {
+      _showMentions = true;
+      _mentionQuery = query.toLowerCase();
+    });
+  }
+
+  void _hideMentions() {
+    if (!_showMentions && _mentionQuery.isEmpty) return;
+    setState(() {
+      _showMentions = false;
+      _mentionQuery = '';
+    });
+  }
+
+  void _insertMention(ops_repo.MentionCandidate candidate) {
+    final text = _commentController.text;
+    final cursor = _commentController.selection.baseOffset;
+    if (cursor < 0) return;
+    final atIndex = text.lastIndexOf('@', cursor - 1);
+    if (atIndex == -1) return;
+    final before = text.substring(0, atIndex);
+    final after = text.substring(cursor);
+    final handle = candidate.handle;
+    final insert = '@$handle ';
+    final updated = '$before$insert$after';
+    _commentController.text = updated;
+    _commentController.selection = TextSelection.collapsed(
+      offset: before.length + insert.length,
+    );
+    _hideMentions();
+  }
+
+  Future<void> _startVoiceNote() async {
+    if (_isRecording) return;
+    final hasPermission = await _recorder.hasPermission();
+    if (!hasPermission) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission required.')),
+      );
+      return;
+    }
+    final dir = await getTemporaryDirectory();
+    final path = p.join(
+      dir.path,
+      'panel_comment_${DateTime.now().millisecondsSinceEpoch}.m4a',
+    );
+    await _recorder.start(const RecordConfig(), path: path);
+    if (!mounted) return;
+    _recordingTimer?.cancel();
+    _recordingSeconds = 0;
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _recordingSeconds += 1);
+    });
+    setState(() {
+      _isRecording = true;
+      _error = null;
+    });
+  }
+
+  Future<void> _stopVoiceNote() async {
+    final path = await _recorder.stop();
+    _recordingTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _isRecording = false);
+    if (path == null) return;
+    final bytes = await loadFileBytes(path);
+    if (bytes == null) return;
+    final draft = ops_repo.AttachmentDraft(
+      type: 'audio',
+      bytes: bytes,
+      filename: p.basename(path),
+      mimeType: 'audio/m4a',
+      metadata: {
+        'voiceNote': true,
+        'durationSeconds': _recordingSeconds,
+      },
+    );
+    await _submitVoiceNote(draft);
+  }
+
+  Future<void> _submitVoiceNote(ops_repo.AttachmentDraft draft) async {
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+    });
+    try {
+      await ref.read(opsRepositoryProvider).addPhotoComment(
+            photoId: widget.item.photoId,
+            body: 'Voice note',
+            voiceNote: draft,
+          );
+      ref.invalidate(photoCommentsProvider(widget.item.photoId));
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  String _formatDuration(int seconds) {
+    final minutes = seconds ~/ 60;
+    final remainder = seconds % 60;
+    return '$minutes:${remainder.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    final mentionResults = _mentionTargets
-        .where(
-          (member) =>
-              member.username.toLowerCase().contains(_mentionQuery.toLowerCase()) ||
-              member.name.toLowerCase().contains(_mentionQuery.toLowerCase()),
-        )
-        .toList();
+    final commentsAsync = ref.watch(photoCommentsProvider(widget.item.photoId));
+    final mentionCandidatesAsync = ref.watch(mentionCandidatesProvider);
+    final mentionCandidates =
+        mentionCandidatesAsync.asData?.value ?? const <ops_repo.MentionCandidate>[];
+    final filteredMentions = mentionCandidates.where((candidate) {
+      if (_mentionQuery.isEmpty) return true;
+      final query = _mentionQuery.toLowerCase();
+      return candidate.name.toLowerCase().contains(query) ||
+          candidate.handle.toLowerCase().contains(query) ||
+          (candidate.email?.toLowerCase().contains(query) ?? false);
+    }).toList();
+    final showMentions = _showMentions && filteredMentions.isNotEmpty;
+    final canSend = !_isSubmitting &&
+        !_isRecording &&
+        _commentController.text.trim().isNotEmpty;
 
     return SafeArea(
       child: DraggableScrollableSheet(
@@ -3766,6 +4557,16 @@ class _PhotoCommentsPanelState extends State<_PhotoCommentsPanel> {
         minChildSize: 0.55,
         maxChildSize: 0.98,
         builder: (context, controller) {
+          final comments = commentsAsync.asData?.value ?? const <PhotoComment>[];
+          final mapped = comments
+              .map(
+                (comment) => _mapPhotoComment(
+                  comment,
+                  likedIds: _likedComments,
+                  formatTimestamp: _relativeTimePanel,
+                ),
+              )
+              .toList();
           return Padding(
             padding: EdgeInsets.only(
               bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -3824,11 +4625,21 @@ class _PhotoCommentsPanelState extends State<_PhotoCommentsPanel> {
                   ),
                   const Divider(height: 1),
                   Expanded(
-                    child: ValueListenableBuilder<int>(
-                      valueListenable: _commentStoreVersion,
-                      builder: (context, _, __) {
-                        final comments = _commentsForPhoto(widget.item.id);
-                        if (comments.isEmpty) {
+                    child: commentsAsync.when(
+                      loading: () => const Center(child: CircularProgressIndicator()),
+                      error: (err, _) => Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            'Failed to load comments: $err',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFFDC2626),
+                            ),
+                          ),
+                        ),
+                      ),
+                      data: (_) {
+                        if (mapped.isEmpty) {
                           return Center(
                             child: Text(
                               'No comments yet.',
@@ -3843,59 +4654,25 @@ class _PhotoCommentsPanelState extends State<_PhotoCommentsPanel> {
                         return ListView.separated(
                           controller: controller,
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                          itemCount: comments.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 12),
+                          itemCount: mapped.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 12),
                           itemBuilder: (context, index) {
-                            final comment = comments[index];
+                            final comment = mapped[index];
                             return _CommentItem(
                               comment: comment,
                               useBubble: true,
-                              onToggleLike: () => _toggleLike(comment),
+                              useInitials: true,
+                              showMenu: true,
+                              showReply: true,
+                              showLikeLabel: false,
+                              onToggleLike: () => _toggleLike(comment.id),
+                              onReply: () => _showPanelMessage('Reply'),
                             );
                           },
                         );
                       },
                     ),
                   ),
-                  if (_showMentions && mentionResults.isNotEmpty)
-                    Container(
-                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF1F2937)
-                            : const Color(0xFFF9FAFB),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: borderColor),
-                      ),
-                      constraints: const BoxConstraints(maxHeight: 160),
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        physics: const ClampingScrollPhysics(),
-                        itemCount: mentionResults.length,
-                        separatorBuilder: (_, __) => Divider(
-                          height: 1,
-                          color: borderColor,
-                        ),
-                        itemBuilder: (context, index) {
-                          final member = mentionResults[index];
-                          return ListTile(
-                            onTap: () => _insertMention(member),
-                            leading: CircleAvatar(
-                              backgroundColor: isDark
-                                  ? const Color(0xFF374151)
-                                  : const Color(0xFFE5E7EB),
-                              child: Text(
-                                member.name.substring(0, 1),
-                                style: theme.textTheme.labelMedium,
-                              ),
-                            ),
-                            title: Text(member.name),
-                            subtitle: Text('@${member.username}'),
-                          );
-                        },
-                      ),
-                    ),
                   Container(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                     decoration: BoxDecoration(
@@ -3909,82 +4686,179 @@ class _PhotoCommentsPanelState extends State<_PhotoCommentsPanel> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              _error!,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: const Color(0xFFDC2626),
+                              ),
+                            ),
+                          ),
+                        if (_showMentions && mentionCandidatesAsync.isLoading)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Center(
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (showMentions)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            constraints: const BoxConstraints(maxHeight: 180),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: borderColor),
+                            ),
+                            child: ListView.builder(
+                              itemCount: filteredMentions.length,
+                              shrinkWrap: true,
+                              itemBuilder: (context, index) {
+                                final candidate = filteredMentions[index];
+                                return ListTile(
+                                  dense: true,
+                                  leading: const Icon(Icons.alternate_email),
+                                  title: Text(candidate.name),
+                                  subtitle: Text('@${candidate.handle}'),
+                                  onTap: () => _insertMention(candidate),
+                                );
+                              },
+                            ),
+                          ),
                         if (_isRecording)
                           Container(
                             padding: const EdgeInsets.all(12),
-                            margin: const EdgeInsets.only(bottom: 12),
                             decoration: BoxDecoration(
                               color: isDark
-                                  ? const Color(0xFF3F1D1D)
-                                  : const Color(0xFFFFF1F2),
+                                  ? const Color(0xFF7F1D1D)
+                                  : const Color(0xFFFEE2E2),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                 color: isDark
-                                    ? const Color(0xFF7F1D1D)
+                                    ? const Color(0xFF991B1B)
                                     : const Color(0xFFFECACA),
                               ),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.circle, size: 10, color: Colors.red),
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFEF4444),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'Recording... ${_formatSeconds(_recordingSeconds)}',
+                                    'Recording... ${_formatDuration(_recordingSeconds)}',
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color: isDark
-                                          ? Colors.grey[200]
-                                          : Colors.grey[800],
+                                      color: isDark ? Colors.white : const Color(0xFF7F1D1D),
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ),
-                                FilledButton.icon(
-                                  onPressed: _stopRecording,
+                                TextButton.icon(
+                                  onPressed: _stopVoiceNote,
+                                  style: TextButton.styleFrom(
+                                    backgroundColor: const Color(0xFFDC2626),
+                                    foregroundColor: Colors.white,
+                                  ),
                                   icon: const Icon(Icons.mic_off, size: 16),
                                   label: const Text('Stop'),
                                 ),
                               ],
                             ),
-                          ),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _commentController,
-                                focusNode: _commentFocus,
-                                minLines: 2,
-                                maxLines: 3,
-                                enabled: !_isRecording,
-                                decoration: const InputDecoration(
-                                  hintText: 'Add a comment... Use @ to mention',
-                                  border: OutlineInputBorder(),
+                          )
+                        else
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _commentController,
+                                  enabled: !_isRecording,
+                                  onChanged: (value) {
+                                    _handleTextChanged(value);
+                                    setState(() {});
+                                  },
+                                  decoration: const InputDecoration(
+                                    hintText:
+                                        'Add a comment... Use @ to mention someone',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  maxLines: 2,
+                                  minLines: 1,
                                 ),
-                                onChanged: _handleTextChanged,
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              children: [
-                                IconButton(
-                                  onPressed: _commentController.text.trim().isEmpty ||
-                                          _isRecording
-                                      ? null
-                                      : _addComment,
-                                  icon: const Icon(Icons.send),
-                                ),
-                                const SizedBox(height: 4),
-                                IconButton(
-                                  onPressed: _isRecording ? null : _startRecording,
-                                  icon: const Icon(Icons.mic),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
+                              const SizedBox(width: 8),
+                              Column(
+                                children: [
+                                  InkWell(
+                                    onTap: canSend ? _submitComment : null,
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: canSend
+                                            ? const Color(0xFF2563EB)
+                                            : isDark
+                                                ? const Color(0xFF374151)
+                                                : const Color(0xFFE5E7EB),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(
+                                        Icons.send,
+                                        size: 18,
+                                        color: canSend
+                                            ? Colors.white
+                                            : isDark
+                                                ? Colors.grey[500]
+                                                : Colors.grey[400],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  InkWell(
+                                    onTap:
+                                        _isSubmitting ? null : _startVoiceNote,
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? const Color(0xFF374151)
+                                            : const Color(0xFFE5E7EB),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(
+                                        Icons.mic,
+                                        size: 18,
+                                        color: isDark
+                                            ? Colors.grey[300]
+                                            : Colors.grey[700],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        const SizedBox(height: 8),
                         Text(
-                          'Tip: type @ to mention team members.',
-                          style: theme.textTheme.bodySmall?.copyWith(
+                          'Type @ to mention team members',
+                          style: theme.textTheme.labelSmall?.copyWith(
                             color: isDark ? Colors.grey[500] : Colors.grey[600],
                           ),
                         ),
@@ -4000,53 +4874,80 @@ class _PhotoCommentsPanelState extends State<_PhotoCommentsPanel> {
     );
   }
 }
-
 class _CommentItem extends StatelessWidget {
   const _CommentItem({
     required this.comment,
     required this.onToggleLike,
     this.useBubble = false,
+    this.showMenu = false,
+    this.showReply = false,
+    this.showLikeLabel = true,
+    this.useInitials = false,
+    this.onReply,
   });
 
   final _PhotoComment comment;
   final VoidCallback onToggleLike;
   final bool useBubble;
+  final bool showMenu;
+  final bool showReply;
+  final bool showLikeLabel;
+  final bool useInitials;
+  final VoidCallback? onReply;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final baseTextStyle = theme.textTheme.bodySmall?.copyWith(
+      fontSize: 14,
       color: isDark ? Colors.grey[300] : Colors.grey[700],
     );
     final mentionStyle = theme.textTheme.bodySmall?.copyWith(
-      color: const Color(0xFF2563EB),
-      fontWeight: FontWeight.w600,
+      fontSize: 14,
+      color: const Color(0xFF3B82F6),
+      fontWeight: FontWeight.w500,
     );
 
+    final likeLabel = comment.likes > 0
+        ? comment.likes.toString()
+        : (showLikeLabel ? 'Like' : '');
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text(
-              comment.author,
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : Colors.black87,
+            Expanded(
+              child: Row(
+                children: [
+                  Text(
+                    comment.author,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    comment.timestampLabel,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 12,
+                      color: isDark ? Colors.grey[500] : Colors.grey[600],
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              comment.timestampLabel,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: isDark ? Colors.grey[500] : Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
+        if (showMenu)
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.more_vert, size: 16),
+            splashRadius: 16,
+          ),
+      ],
+    ),
+        const SizedBox(height: 2),
         if (comment.message != null)
           RichText(
             text: TextSpan(
@@ -4056,37 +4957,77 @@ class _CommentItem extends StatelessWidget {
                 mentionStyle,
               ),
             ),
-          )
-        else if (comment.isVoiceNote)
+          ),
+        if (comment.message != null && comment.isVoiceNote)
+          const SizedBox(height: 4),
+        if (comment.isVoiceNote)
           _VoiceNotePlayer(durationSeconds: comment.voiceDurationSeconds ?? 0),
         const SizedBox(height: 6),
-        InkWell(
-          onTap: onToggleLike,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  comment.isLiked ? Icons.favorite : Icons.favorite_border,
-                  size: 14,
-                  color: comment.isLiked ? Colors.redAccent : null,
+        Row(
+          children: [
+            InkWell(
+              onTap: onToggleLike,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      comment.isLiked ? Icons.favorite : Icons.favorite_border,
+                      size: 14,
+                      color: comment.isLiked ? Colors.redAccent : null,
+                    ),
+                    if (likeLabel.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        likeLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: comment.isLiked
+                              ? Colors.redAccent
+                              : isDark
+                                  ? Colors.grey[400]
+                                  : Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  comment.likes > 0 ? comment.likes.toString() : 'Like',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: comment.isLiked
-                        ? Colors.redAccent
-                        : isDark
-                            ? Colors.grey[400]
-                            : Colors.grey[600],
+              ),
+            ),
+            if (showReply) ...[
+              const SizedBox(width: 12),
+              InkWell(
+                onTap: onReply,
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.reply,
+                        size: 14,
+                        color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Reply',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color:
+                              isDark ? Colors.grey[400] : Colors.grey[600],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
+              ),
+            ],
+          ],
         ),
       ],
     );
@@ -4094,7 +5035,10 @@ class _CommentItem extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _CommentAvatar(name: comment.author),
+        _CommentAvatar(
+          name: comment.author,
+          useInitials: useInitials,
+        ),
         const SizedBox(width: 10),
         Expanded(
           child: useBubble
@@ -4102,10 +5046,9 @@ class _CommentItem extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: isDark
-                        ? const Color(0xFF111827)
+                        ? const Color(0xFF1F2937)
                         : const Color(0xFFF3F4F6),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: borderColor),
                   ),
                   child: content,
                 )
@@ -4117,23 +5060,40 @@ class _CommentItem extends StatelessWidget {
 }
 
 class _CommentAvatar extends StatelessWidget {
-  const _CommentAvatar({required this.name});
+  const _CommentAvatar({
+    required this.name,
+    required this.useInitials,
+  });
 
   final String name;
+  final bool useInitials;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (useInitials) {
+      final initial = name.isEmpty ? '?' : name.substring(0, 1).toUpperCase();
+      return CircleAvatar(
+        radius: 16,
+        backgroundColor: const Color(0xFF2563EB),
+        child: Text(
+          initial,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                fontSize: 14,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      );
+    }
     return CircleAvatar(
       radius: 16,
       backgroundColor:
           isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
-      child: Text(
-        name.isEmpty ? '?' : name.substring(0, 1),
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: isDark ? Colors.white : Colors.black87,
-        ),
+      child: Icon(
+        Icons.person_outline,
+        size: 16,
+        color: isDark ? Colors.grey[300] : Colors.grey[600],
       ),
     );
   }
@@ -4199,44 +5159,49 @@ class _VoiceNotePlayerState extends State<_VoiceNotePlayer> {
     final isDark = theme.brightness == Brightness.dark;
     final durationLabel = _formatSeconds(widget.durationSeconds);
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFEFF6FF),
-        borderRadius: BorderRadius.circular(10),
+        color: isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
           InkWell(
             onTap: _togglePlay,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             child: Container(
-              padding: const EdgeInsets.all(4),
+              padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: const Color(0xFF2563EB),
-                borderRadius: BorderRadius.circular(16),
+                color: isDark
+                    ? const Color(0xFF2563EB)
+                    : const Color(0xFF3B82F6),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
                 _isPlaying ? Icons.pause : Icons.play_arrow,
+                size: 12,
                 color: Colors.white,
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: LinearProgressIndicator(
               value: _progress,
-              minHeight: 4,
+              minHeight: 6,
               backgroundColor:
-                  isDark ? const Color(0xFF374151) : const Color(0xFFCBD5F5),
+                  isDark ? const Color(0xFF4B5563) : const Color(0xFFD1D5DB),
               valueColor: const AlwaysStoppedAnimation<Color>(
-                Color(0xFF2563EB),
+                Color(0xFF3B82F6),
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Text(
             durationLabel,
             style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
               color: isDark ? Colors.grey[300] : Colors.grey[700],
             ),
           ),
@@ -4244,33 +5209,6 @@ class _VoiceNotePlayerState extends State<_VoiceNotePlayer> {
       ),
     );
   }
-}
-
-class _MentionTarget {
-  const _MentionTarget({required this.username, required this.name});
-
-  final String username;
-  final String name;
-}
-
-const List<_MentionTarget> _mentionTargets = [
-  _MentionTarget(username: 'johndoe', name: 'John Doe'),
-  _MentionTarget(username: 'mikechen', name: 'Mike Chen'),
-  _MentionTarget(username: 'sarahjohnson', name: 'Sarah Johnson'),
-  _MentionTarget(username: 'emilydavis', name: 'Emily Davis'),
-  _MentionTarget(username: 'tombrown', name: 'Tom Brown'),
-];
-
-class _UploadPreview {
-  const _UploadPreview({
-    required this.name,
-    required this.sizeLabel,
-    required this.isVideo,
-  });
-
-  final String name;
-  final String sizeLabel;
-  final bool isVideo;
 }
 
 class _TeamMember {
@@ -4285,142 +5223,7 @@ class _TeamMember {
   final String initials;
 }
 
-const List<_TeamMember> _uploadTeamMembers = [
-  _TeamMember(name: 'John Doe', role: 'Manager', initials: 'JD'),
-  _TeamMember(name: 'Sarah Johnson', role: 'Supervisor', initials: 'SJ'),
-  _TeamMember(name: 'Mike Chen', role: 'Supervisor', initials: 'MC'),
-  _TeamMember(name: 'Emily Davis', role: 'Manager', initials: 'ED'),
-  _TeamMember(name: 'Tom Brown', role: 'Supervisor', initials: 'TB'),
-  _TeamMember(name: 'Lisa Anderson', role: 'Manager', initials: 'LA'),
-  _TeamMember(name: 'David Wilson', role: 'Supervisor', initials: 'DW'),
-  _TeamMember(name: 'Maria Garcia', role: 'Super Admin', initials: 'MG'),
-];
-
-final ValueNotifier<int> _commentStoreVersion = ValueNotifier<int>(0);
-int _commentIdCounter = 2000;
-
-int _nextCommentId() => _commentIdCounter++;
-
-final Map<int, List<_PhotoComment>> _commentStore = {
-  1: [
-    _PhotoComment(
-      id: 1,
-      author: 'Sarah Johnson',
-      message: 'Great shot. The lighting is perfect.',
-      timestampLabel: '2h ago',
-      likes: 12,
-    ),
-    _PhotoComment(
-      id: 2,
-      author: 'Mike Chen',
-      message: '@johndoe can you check the measurements here?',
-      timestampLabel: '1h ago',
-      likes: 3,
-    ),
-    _PhotoComment(
-      id: 3,
-      author: 'Lisa Martinez',
-      message: 'This angle shows the detail. Nice work.',
-      timestampLabel: '45m ago',
-      likes: 7,
-    ),
-    _PhotoComment(
-      id: 4,
-      author: 'James Wilson',
-      message: 'Can we get a similar shot from the other side?',
-      timestampLabel: '30m ago',
-      likes: 2,
-    ),
-    _PhotoComment(
-      id: 5,
-      author: 'Rachel Green',
-      message: '@mike I checked. Measurements look good.',
-      timestampLabel: '25m ago',
-      likes: 5,
-    ),
-    _PhotoComment(
-      id: 6,
-      author: 'Tom Anderson',
-      timestampLabel: '20m ago',
-      voiceDurationSeconds: 8,
-      likes: 4,
-    ),
-    _PhotoComment(
-      id: 7,
-      author: 'Jennifer Lee',
-      message: 'Great timing on this capture. Weather looks ideal.',
-      timestampLabel: '15m ago',
-      likes: 9,
-    ),
-    _PhotoComment(
-      id: 8,
-      author: 'David Park',
-      message: 'Adding this to the project documentation.',
-      timestampLabel: '10m ago',
-      likes: 6,
-    ),
-  ],
-  2: [
-    _PhotoComment(
-      id: 9,
-      author: 'Emily Davis',
-      message: 'Excellent tutorial. Very helpful for new team members.',
-      timestampLabel: '3h ago',
-      likes: 8,
-    ),
-    _PhotoComment(
-      id: 10,
-      author: 'Tom Brown',
-      timestampLabel: '2h ago',
-      voiceDurationSeconds: 12,
-      likes: 5,
-    ),
-    _PhotoComment(
-      id: 11,
-      author: 'Amanda White',
-      message: 'Bookmarking this for training sessions.',
-      timestampLabel: '1h ago',
-      likes: 4,
-    ),
-  ],
-  3: [
-    _PhotoComment(
-      id: 12,
-      author: 'David Wilson',
-      message: 'Foundation looks solid. Good work team.',
-      timestampLabel: '1d ago',
-      likes: 15,
-    ),
-    _PhotoComment(
-      id: 13,
-      author: 'Carlos Rodriguez',
-      message: 'Inspector approved this yesterday. Moving to next phase.',
-      timestampLabel: '18h ago',
-      likes: 8,
-    ),
-  ],
-};
-
-List<_PhotoComment> _commentsForPhoto(int photoId) {
-  return _commentStore.putIfAbsent(photoId, () => <_PhotoComment>[]);
-}
-
-void _addPhotoComment(int photoId, _PhotoComment comment) {
-  _commentsForPhoto(photoId).add(comment);
-  _commentStoreVersion.value++;
-}
-
-void _togglePhotoCommentLike(int photoId, int commentId) {
-  final comments = _commentsForPhoto(photoId);
-  final index = comments.indexWhere((comment) => comment.id == commentId);
-  if (index == -1) return;
-  final current = comments[index];
-  final isLiked = !current.isLiked;
-  final likes =
-      isLiked ? current.likes + 1 : (current.likes > 0 ? current.likes - 1 : 0);
-  comments[index] = current.copyWith(isLiked: isLiked, likes: likes);
-  _commentStoreVersion.value++;
-}
+const List<_TeamMember> _uploadTeamMembers = [];
 
 List<TextSpan> _buildMentionSpans(
   String message,
@@ -4443,9 +5246,7 @@ List<TextSpan> _buildMentionSpans(
 }
 
 String _formatSeconds(int seconds) {
-  final minutes = seconds ~/ 60;
-  final remainder = seconds % 60;
-  return '$minutes:${remainder.toString().padLeft(2, '0')}';
+  return '0:${seconds}s';
 }
 
 class _EmptyMediaCard extends StatelessWidget {
@@ -4502,6 +5303,10 @@ List<_MediaItem> _mediaFromProjectPhotos(
           ? _MediaType.video
           : _MediaType.photo;
       final capturedAt = attachment.capturedAt;
+      final attachmentId = attachment.id.isNotEmpty
+          ? attachment.id
+          : '${photo.id}-${items.length + 1}';
+      final itemId = '${photo.id}-$attachmentId';
       final projectName = photo.projectId == null
           ? null
           : projectNames[photo.projectId!];
@@ -4511,7 +5316,9 @@ List<_MediaItem> _mediaFromProjectPhotos(
               '${attachment.location!.longitude.toStringAsFixed(4)} W';
       items.add(
         _MediaItem(
-          id: items.length + 1,
+          id: itemId,
+          photoId: photo.id,
+          attachmentId: attachmentId,
           type: type,
           url: attachment.url,
           title: photo.title ?? 'Project media',
@@ -4528,22 +5335,49 @@ List<_MediaItem> _mediaFromProjectPhotos(
           commentCount: photo.metadata?['comments'] is int
               ? photo.metadata!['comments'] as int
               : 0,
+          capturedAt: capturedAt,
           duration: attachment.metadata?['duration']?.toString(),
         ),
       );
     }
   }
+  items.sort((a, b) => b.capturedAt.compareTo(a.capturedAt));
   return items;
 }
 
 String _relativeTime(DateTime date) {
   final now = DateTime.now();
   final delta = now.difference(date);
-  if (delta.inMinutes < 1) return 'just now';
-  if (delta.inMinutes < 60) return '${delta.inMinutes} min ago';
-  if (delta.inHours < 24) return '${delta.inHours} hours ago';
-  if (delta.inDays < 7) return '${delta.inDays} days ago';
+  if (delta.inMinutes < 1) return 'Just now';
+  if (delta.inMinutes < 60) {
+    final minutes = delta.inMinutes;
+    return '$minutes minute${minutes == 1 ? '' : 's'} ago';
+  }
+  if (delta.inHours < 24) {
+    final hours = delta.inHours;
+    return '$hours hour${hours == 1 ? '' : 's'} ago';
+  }
+  if (delta.inDays < 7) {
+    final days = delta.inDays;
+    return '$days day${days == 1 ? '' : 's'} ago';
+  }
   return DateFormat('MMM d').format(date);
+}
+
+String _relativeTimeShort(DateTime date) {
+  final delta = DateTime.now().difference(date);
+  if (delta.inMinutes < 1) return 'Just now';
+  if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
+  if (delta.inHours < 24) return '${delta.inHours}h ago';
+  return '${delta.inDays}d ago';
+}
+
+String _relativeTimePanel(DateTime date) {
+  final delta = DateTime.now().difference(date);
+  if (delta.inMinutes < 1) return 'Just now';
+  if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
+  if (delta.inHours < 24) return '${delta.inHours}h ago';
+  return DateFormat.yMd().format(date);
 }
 
 class _PhotoImageFallback extends StatelessWidget {
@@ -4564,94 +5398,3 @@ class _PhotoImageFallback extends StatelessWidget {
     );
   }
 }
-
-const List<_MediaItem> _demoMediaItems = [
-  _MediaItem(
-    id: 1,
-    type: _MediaType.photo,
-    url: 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=400',
-    title: 'Building A - Main Entrance',
-    project: 'Building A Construction',
-    location: 'Main Site',
-    dateLabel: '2 hours ago',
-    timestampLabel: 'Dec 22, 2025 10:30 AM',
-    gps: '40.7128 N, 74.0060 W',
-    tags: const ['Safety', 'Inspection', 'Progress'],
-    uploadedBy: 'John Doe',
-    initialLikes: 24,
-    commentCount: 8,
-  ),
-  _MediaItem(
-    id: 2,
-    type: _MediaType.video,
-    url: 'https://images.unsplash.com/photo-1590650516494-0c8e4a4dd67e?w=400',
-    title: 'Equipment Operation Tutorial',
-    project: 'Training Session',
-    location: 'Warehouse',
-    dateLabel: '5 hours ago',
-    timestampLabel: 'Dec 22, 2025 7:15 AM',
-    tags: const ['Training', 'Equipment'],
-    uploadedBy: 'Sarah Johnson',
-    initialLikes: 42,
-    commentCount: 3,
-    duration: '2:45',
-  ),
-  _MediaItem(
-    id: 3,
-    type: _MediaType.photo,
-    url: 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=400',
-    title: 'Foundation Inspection',
-    project: 'Building A Construction',
-    location: 'Site B',
-    dateLabel: '1 day ago',
-    timestampLabel: 'Dec 21, 2025 3:20 PM',
-    gps: '40.7580 N, 73.9855 W',
-    tags: const ['Inspection', 'Foundation'],
-    uploadedBy: 'Mike Chen',
-    initialLikes: 18,
-    commentCount: 2,
-  ),
-  _MediaItem(
-    id: 4,
-    type: _MediaType.photo,
-    url: 'https://images.unsplash.com/photo-1581094271901-8022df4466f9?w=400',
-    title: 'Safety Equipment Check',
-    project: 'Safety Audit',
-    location: 'Main Site',
-    dateLabel: '1 day ago',
-    timestampLabel: 'Dec 21, 2025 9:45 AM',
-    tags: const ['Safety', 'Equipment'],
-    uploadedBy: 'Emily Davis',
-    initialLikes: 31,
-    commentCount: 0,
-  ),
-  _MediaItem(
-    id: 5,
-    type: _MediaType.video,
-    url: 'https://images.unsplash.com/photo-1588853953899-b448f6f43916?w=400',
-    title: 'Site Walkthrough - Week 12',
-    project: 'Building A Construction',
-    location: 'Main Site',
-    dateLabel: '2 days ago',
-    timestampLabel: 'Dec 20, 2025 2:30 PM',
-    tags: const ['Progress', 'Walkthrough'],
-    uploadedBy: 'John Doe',
-    initialLikes: 56,
-    commentCount: 23,
-    duration: '5:12',
-  ),
-  _MediaItem(
-    id: 6,
-    type: _MediaType.photo,
-    url: 'https://images.unsplash.com/photo-1597289357-b8e1b0ac37b2?w=400',
-    title: 'Material Delivery',
-    project: 'Supply Chain',
-    location: 'Storage Yard',
-    dateLabel: '3 days ago',
-    timestampLabel: 'Dec 19, 2025 11:00 AM',
-    tags: const ['Materials', 'Logistics'],
-    uploadedBy: 'Tom Brown',
-    initialLikes: 12,
-    commentCount: 3,
-  ),
-];

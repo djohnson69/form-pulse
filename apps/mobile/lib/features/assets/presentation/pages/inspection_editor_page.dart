@@ -16,10 +16,19 @@ import '../../../ops/data/ops_repository.dart' as ops_repo;
 import '../../data/assets_provider.dart';
 import '../../data/assets_repository.dart';
 
+enum InspectionCaptureType { photo, video }
+
 class InspectionEditorPage extends ConsumerStatefulWidget {
-  const InspectionEditorPage({required this.asset, super.key});
+  const InspectionEditorPage({
+    required this.asset,
+    this.initialCapture,
+    this.titleOverride,
+    super.key,
+  });
 
   final Equipment asset;
+  final InspectionCaptureType? initialCapture;
+  final String? titleOverride;
 
   @override
   ConsumerState<InspectionEditorPage> createState() =>
@@ -38,6 +47,13 @@ class _InspectionEditorPageState extends ConsumerState<InspectionEditorPage> {
   LocationData? _location;
   bool _saving = false;
   bool _recording = false;
+  bool _initialCaptureTriggered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _triggerInitialCapture());
+  }
 
   @override
   void dispose() {
@@ -52,7 +68,7 @@ class _InspectionEditorPageState extends ConsumerState<InspectionEditorPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('New Inspection')),
+      appBar: AppBar(title: Text(widget.titleOverride ?? 'New Inspection')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Form(
@@ -184,6 +200,18 @@ class _InspectionEditorPageState extends ConsumerState<InspectionEditorPage> {
         );
       }).toList(),
     );
+  }
+
+  Future<void> _triggerInitialCapture() async {
+    if (_initialCaptureTriggered || widget.initialCapture == null || kIsWeb) {
+      return;
+    }
+    _initialCaptureTriggered = true;
+    if (widget.initialCapture == InspectionCaptureType.photo) {
+      await _pickPhoto(ImageSource.camera);
+    } else if (widget.initialCapture == InspectionCaptureType.video) {
+      await _pickVideo(ImageSource.camera);
+    }
   }
 
   Future<void> _pickPhoto(ImageSource source) async {

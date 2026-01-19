@@ -9,8 +9,7 @@ PODS:
     - AppAuth/Core
   - barcode_scan2 (0.0.1):
     - Flutter
-    - MTBBarcodeScanner
-    - SwiftProtobuf
+    - SwiftProtobuf (~> 1.33)
   - camera_avfoundation (0.0.1):
     - Flutter
   - connectivity_plus (0.0.1):
@@ -103,7 +102,7 @@ PODS:
   - google_maps_flutter_ios (0.0.1):
     - Flutter
     - Google-Maps-iOS-Utils (< 7.0, >= 5.0)
-    - GoogleMaps (< 10.0, >= 8.4)
+    - GoogleMaps (< 11.0, >= 8.4)
   - GoogleDataTransport (10.1.0):
     - nanopb (~> 3.30910.0)
     - PromisesObjC (~> 2.4)
@@ -142,7 +141,6 @@ PODS:
   - msal_flutter (1.0.2):
     - Flutter
     - MSAL (~> 1.2.0)
-  - MTBBarcodeScanner (5.0.11)
   - nanopb (3.30910.0):
     - nanopb/decode (= 3.30910.0)
     - nanopb/encode (= 3.30910.0)
@@ -152,9 +150,6 @@ PODS:
     - Flutter
   - package_info_plus (0.4.5):
     - Flutter
-  - path_provider_foundation (0.0.1):
-    - Flutter
-    - FlutterMacOS
   - permission_handler_apple (9.3.0):
     - Flutter
   - PromisesObjC (2.4.0)
@@ -224,7 +219,6 @@ DEPENDENCIES:
   - msal_flutter (from `.symlinks/plugins/msal_flutter/ios`)
   - nfc_manager (from `.symlinks/plugins/nfc_manager/ios`)
   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
-  - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
   - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - share_plus (from `.symlinks/plugins/share_plus/ios`)
@@ -251,7 +245,6 @@ SPEC REPOS:
     - GoogleMaps
     - GoogleUtilities
     - MSAL
-    - MTBBarcodeScanner
     - nanopb
     - PromisesObjC
     - SDWebImage
@@ -296,8 +289,6 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/nfc_manager/ios"
   package_info_plus:
     :path: ".symlinks/plugins/package_info_plus/ios"
-  path_provider_foundation:
-    :path: ".symlinks/plugins/path_provider_foundation/darwin"
   permission_handler_apple:
     :path: ".symlinks/plugins/permission_handler_apple/ios"
   record_ios:
@@ -318,7 +309,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   app_links: 3dbc685f76b1693c66a6d9dd1e9ab6f73d97dc0a
   AppAuth: 1c1a8afa7e12f2ec3a294d9882dfa5ab7d3cb063
-  barcode_scan2: f80517f040989095c9b5067be77649bf6114442c
+  barcode_scan2: 4e4b850b112f4e29017833e4715f36161f987966
   camera_avfoundation: 5675ca25298b6f81fa0a325188e7df62cc217741
   connectivity_plus: cb623214f4e1f6ef8fe7403d580fdad517d2f7dd
   CwlCatchException: 7acc161b299a6de7f0a46a6ed741eae2c8b4d75a
@@ -340,18 +331,16 @@ SPEC CHECKSUMS:
   geocoding_ios: 33776c9ebb98d037b5e025bb0e7537f6dd19646e
   geolocator_apple: ab36aa0e8b7d7a2d7639b3b4e48308394e8cef5e
   Google-Maps-iOS-Utils: 0a484b05ed21d88c9f9ebbacb007956edd508a96
-  google_maps_flutter_ios: 0291eb2aa252298a769b04d075e4a9d747ff7264
+  google_maps_flutter_ios: 3213e1e5f5588b6134935cb8fc59acb4e6d88377
   GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7
   GoogleMaps: 0608099d4870cac8754bdba9b6953db543432438
   GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
   image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
   MSAL: 3de2aba30b72e76de794d518225c8f95b9bd6183
   msal_flutter: c2d87b15d5176b31f495fb7ae632c56299dbdc96
-  MTBBarcodeScanner: f453b33c4b7dfe545d8c6484ed744d55671788cb
   nanopb: fad817b59e0457d11a5dfbde799381cd727c1275
   nfc_manager: f6d5609c09b4640b914a3dc67479a2e392965fd0
   package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
-  path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
   record_ios: f75fa1d57f840012775c0e93a38a7f3ceea1a374

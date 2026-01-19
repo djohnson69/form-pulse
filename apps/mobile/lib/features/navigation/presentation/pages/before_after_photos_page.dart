@@ -1,71 +1,92 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:shared/shared.dart';
 
-class BeforeAfterPhotosPage extends StatefulWidget {
+import '../../../ops/data/ops_provider.dart';
+
+class BeforeAfterPhotosPage extends ConsumerStatefulWidget {
   const BeforeAfterPhotosPage({super.key});
 
   @override
-  State<BeforeAfterPhotosPage> createState() => _BeforeAfterPhotosPageState();
+  ConsumerState<BeforeAfterPhotosPage> createState() => _BeforeAfterPhotosPageState();
 }
 
-class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
+class _BeforeAfterPhotosPageState extends ConsumerState<BeforeAfterPhotosPage> {
   int _selectedIndex = 0;
   double _sliderPosition = 0.5;
 
   @override
   Widget build(BuildContext context) {
-    final comparisons = _comparisons;
-    final current = comparisons[_selectedIndex];
+    final photosAsync = ref.watch(projectPhotosProvider(null));
+    final comparisons = _buildComparisons(photosAsync.asData?.value ?? const []);
+    final hasData = comparisons.isNotEmpty;
+    if (_selectedIndex >= comparisons.length) {
+      _selectedIndex = 0;
+    }
+    final current = hasData ? comparisons[_selectedIndex] : null;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
 
     return Scaffold(
+      backgroundColor:
+          isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
       body: LayoutBuilder(
         builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 768;
           final maxWidth =
-              constraints.maxWidth > 1200 ? 1200.0 : constraints.maxWidth;
+              constraints.maxWidth > 1280 ? 1280.0 : constraints.maxWidth;
           return Align(
             alignment: Alignment.topCenter,
             child: SizedBox(
               width: maxWidth,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(isWide ? 24 : 16),
                 children: [
                   _buildHeader(context, isDark),
-                  const SizedBox(height: 16),
-                  LayoutBuilder(
-                    builder: (context, inner) {
-                      final isWide = inner.maxWidth >= 960;
-                      final listSection = _buildComparisonList(
-                        context,
-                        comparisons,
-                        isDark,
-                      );
-                      final viewerSection = _buildComparisonViewer(
-                        context,
-                        current,
-                        borderColor,
-                      );
-                      if (isWide) {
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                  if (photosAsync.isLoading) const LinearProgressIndicator(),
+                  if (photosAsync.hasError)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _ErrorBanner(message: photosAsync.error.toString()),
+                    ),
+                  const SizedBox(height: 24),
+                  if (!hasData && !photosAsync.isLoading)
+                    _buildEmptyState(context, isDark)
+                  else if (hasData)
+                    LayoutBuilder(
+                      builder: (context, inner) {
+                        final isWide = inner.maxWidth >= 960;
+                        final listSection = _buildComparisonList(
+                          context,
+                          comparisons,
+                          isDark,
+                        );
+                        final viewerSection = _buildComparisonViewer(
+                          context,
+                          current!,
+                          borderColor,
+                        );
+                        if (isWide) {
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 1, child: listSection),
+                              const SizedBox(width: 24),
+                              Expanded(flex: 2, child: viewerSection),
+                            ],
+                          );
+                        }
+                        return Column(
                           children: [
-                            SizedBox(width: 320, child: listSection),
-                            const SizedBox(width: 16),
-                            Expanded(child: viewerSection),
+                            listSection,
+                            const SizedBox(height: 24),
+                            viewerSection,
                           ],
                         );
-                      }
-                      return Column(
-                        children: [
-                          listSection,
-                          const SizedBox(height: 16),
-                          viewerSection,
-                        ],
-                      );
-                    },
-                  ),
+                      },
+                    ),
                   const SizedBox(height: 16),
                   _buildTipBanner(context, isDark),
                   const SizedBox(height: 80),
@@ -79,23 +100,73 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isDark) {
+    final isWide = MediaQuery.of(context).size.width >= 768;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Before & After Photos',
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontSize: isWide ? 30 : 24,
                 fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white : const Color(0xFF111827),
               ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           'Visual progress tracking with side-by-side comparisons',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                fontSize: 16,
+                color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
               ),
         ),
       ],
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'No comparisons yet',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF111827),
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Tag project photos with metadata: { comparisonId: <id>, stage: before/after } to see them here.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 14,
+                  color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+                ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: const Text('Add Project Photos'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -104,14 +175,22 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
     List<_ComparisonItem> comparisons,
     bool isDark,
   ) {
+    final theme = Theme.of(context);
     final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final selectedBackground = isDark
+        ? const Color(0xFF3B82F6).withOpacity(0.12)
+        : const Color(0xFFEFF6FF);
+    final hoverColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Comparisons (${comparisons.length})',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontSize: 20,
                 fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : const Color(0xFF111827),
               ),
         ),
         const SizedBox(height: 12),
@@ -119,71 +198,69 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
           final index = entry.key;
           final comparison = entry.value;
           final isSelected = index == _selectedIndex;
-          final background = isSelected
-              ? (isDark ? const Color(0xFF1E3A8A) : const Color(0xFFDBEAFE))
-              : Theme.of(context).colorScheme.surface;
-          final border = isSelected
-              ? const Color(0xFF2563EB)
-              : borderColor;
-          return GestureDetector(
-            onTap: () => setState(() {
-              _selectedIndex = index;
-              _sliderPosition = 0.5;
-            }),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: background,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: border),
+          final background =
+              isSelected
+                  ? selectedBackground
+                  : (isDark ? const Color(0xFF1F2937) : Colors.white);
+          final border =
+              isSelected ? const Color(0xFF3B82F6) : borderColor;
+          final progressLabel =
+              (comparison.progress ?? '').trim().isEmpty ? '--' : comparison.progress!;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Material(
+              color: background,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: border),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    comparison.title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: isSelected
-                              ? (isDark ? Colors.white : Colors.black87)
-                              : null,
+              child: InkWell(
+                onTap: () => setState(() {
+                  _selectedIndex = index;
+                  _sliderPosition = 0.5;
+                }),
+                borderRadius: BorderRadius.circular(12),
+                hoverColor: hoverColor,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        comparison.title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white : const Color(0xFF111827),
                         ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Progress: ${comparison.progress}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: isSelected
-                              ? (isDark
-                                  ? const Color(0xFFBFDBFE)
-                                  : const Color(0xFF1D4ED8))
-                              : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Progress: $progressLabel',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 12,
+                          color: isDark ? Colors.grey[400] : Colors.grey[600],
                         ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'From ${DateFormat.yMd().format(comparison.beforeDate)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: isSelected
-                              ? (isDark
-                                  ? const Color(0xFFBFDBFE)
-                                  : const Color(0xFF1D4ED8))
-                              : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'From ${DateFormat.yMd().format(comparison.before.capturedAt)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 12,
+                          color: isDark ? Colors.grey[400] : Colors.grey[600],
                         ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'To ${DateFormat.yMd().format(comparison.afterDate)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: isSelected
-                              ? (isDark
-                                  ? const Color(0xFFBFDBFE)
-                                  : const Color(0xFF1D4ED8))
-                              : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'To ${DateFormat.yMd().format(comparison.after.capturedAt)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 12,
+                          color: isDark ? Colors.grey[400] : Colors.grey[600],
                         ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           );
@@ -199,10 +276,36 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final progressLabel =
+        (current.progress ?? '').trim().isEmpty ? '--' : current.progress!;
+    final metaStyle = theme.textTheme.bodySmall?.copyWith(
+      fontSize: 14,
+      color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+    );
+    final secondaryButtonStyle = FilledButton.styleFrom(
+      backgroundColor: isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
+      foregroundColor: isDark ? Colors.grey[300] : Colors.grey[700],
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      textStyle: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w500,
+      ),
+    );
+    final primaryButtonStyle = FilledButton.styleFrom(
+      backgroundColor: const Color(0xFF2563EB),
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      textStyle: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w500,
+      ),
+    );
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
       ),
       child: Column(
@@ -216,25 +319,34 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
                 Text(
                   current.title,
                   style: theme.textTheme.titleLarge?.copyWith(
+                    fontSize: 20,
                     fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
                   ),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
-                  spacing: 12,
-                  runSpacing: 6,
+                  spacing: 16,
+                  runSpacing: 8,
                   children: [
-                    Text(
-                      'Location: ${current.location}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: isDark ? Colors.grey[400] : Colors.grey[600],
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.place_outlined,
+                          size: 16,
+                          color: isDark ? Colors.grey[400] : Colors.grey[600],
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          current.location ?? 'Project site',
+                          style: metaStyle,
+                        ),
+                      ],
                     ),
                     Text(
-                      'Progress: ${current.progress}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: isDark ? Colors.grey[400] : Colors.grey[600],
-                      ),
+                      '• Progress: $progressLabel',
+                      style: metaStyle,
                     ),
                   ],
                 ),
@@ -253,85 +365,89 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
               aspectRatio: 16 / 9,
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  return GestureDetector(
-                    onTapDown: (details) {
-                      final position =
-                          details.localPosition.dx / constraints.maxWidth;
-                      setState(
-                        () => _sliderPosition = position.clamp(0.0, 1.0),
-                      );
-                    },
-                    onHorizontalDragUpdate: (details) {
-                      final position =
-                          details.localPosition.dx / constraints.maxWidth;
-                      setState(
-                        () => _sliderPosition = position.clamp(0.0, 1.0),
-                      );
-                    },
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: Image.network(
-                            current.afterUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const _ImageFallback(),
-                          ),
-                        ),
-                        Positioned.fill(
-                          child: ClipRect(
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              widthFactor: _sliderPosition,
-                              child: Image.network(
-                                current.beforeUrl,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) =>
-                                    const _ImageFallback(),
-                              ),
+                  return MouseRegion(
+                    cursor: SystemMouseCursors.resizeLeftRight,
+                    child: GestureDetector(
+                      onTapDown: (details) {
+                        final position =
+                            details.localPosition.dx / constraints.maxWidth;
+                        setState(
+                          () => _sliderPosition = position.clamp(0.0, 1.0),
+                        );
+                      },
+                      onHorizontalDragUpdate: (details) {
+                        final position =
+                            details.localPosition.dx / constraints.maxWidth;
+                        setState(
+                          () => _sliderPosition = position.clamp(0.0, 1.0),
+                        );
+                      },
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: Image.network(
+                              current.after.url,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  const _ComparisonFallback(),
                             ),
                           ),
-                        ),
-                        Positioned(
-                          left: constraints.maxWidth * _sliderPosition - 1,
-                          top: 0,
-                          bottom: 0,
-                          child: Container(
-                            width: 2,
-                            color: Colors.white,
-                            child: Align(
-                              alignment: Alignment.center,
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.2),
-                                      blurRadius: 8,
-                                    ),
-                                  ],
-                                ),
-                                child: const Icon(
-                                  Icons.compare_arrows,
-                                  size: 18,
-                                  color: Colors.black87,
+                          Positioned.fill(
+                            child: ClipRect(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: _sliderPosition,
+                                child: Image.network(
+                                  current.before.url,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      const _ComparisonFallback(),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                        const Positioned(
-                          top: 12,
-                          left: 12,
-                          child: _CornerLabel(label: 'BEFORE'),
-                        ),
-                        const Positioned(
-                          top: 12,
-                          right: 12,
-                          child: _CornerLabel(label: 'AFTER'),
-                        ),
-                      ],
+                          Positioned(
+                            left: constraints.maxWidth * _sliderPosition - 2,
+                            top: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 4,
+                              color: Colors.white,
+                              child: Align(
+                                alignment: Alignment.center,
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.2),
+                                        blurRadius: 8,
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.compare_arrows,
+                                    size: 20,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const Positioned(
+                            top: 16,
+                            left: 16,
+                            child: _CornerLabel(label: 'BEFORE'),
+                          ),
+                          const Positioned(
+                            top: 16,
+                            right: 16,
+                            child: _CornerLabel(label: 'AFTER'),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -347,14 +463,15 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
                     Expanded(
                       child: _DateLabel(
                         label: 'Before Date',
-                        date: current.beforeDate,
+                        date: current.before.capturedAt,
                         iconColor: const Color(0xFF3B82F6),
                       ),
                     ),
+                    const SizedBox(width: 16),
                     Expanded(
                       child: _DateLabel(
                         label: 'After Date',
-                        date: current.afterDate,
+                        date: current.after.capturedAt,
                         iconColor: const Color(0xFF22C55E),
                       ),
                     ),
@@ -364,32 +481,27 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: FilledButton.icon(
+                        style: secondaryButtonStyle,
                         onPressed: () {},
-                        icon: const Icon(Icons.download_outlined, size: 18),
+                        icon: const Icon(Icons.download_outlined, size: 16),
                         label: const Text('Download'),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: FilledButton.icon(
+                        style: secondaryButtonStyle,
                         onPressed: () {},
-                        icon: const Icon(Icons.share_outlined, size: 18),
+                        icon: const Icon(Icons.share_outlined, size: 16),
                         label: const Text('Share Link'),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2563EB),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
-                      ),
+                      style: primaryButtonStyle,
                       onPressed: () {},
-                      icon: const Icon(Icons.zoom_out_map, size: 18),
+                      icon: const Icon(Icons.zoom_in, size: 16),
                       label: const Text('Full Screen'),
                     ),
                   ],
@@ -403,24 +515,50 @@ class _BeforeAfterPhotosPageState extends State<BeforeAfterPhotosPage> {
   }
 
   Widget _buildTipBanner(BuildContext context, bool isDark) {
+    final textColor = isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isDark
-            ? const Color(0xFF1E3A8A).withOpacity(0.2)
-            : const Color(0xFFDBEAFE),
-        borderRadius: BorderRadius.circular(14),
+            ? const Color(0xFF3B82F6).withOpacity(0.12)
+            : const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isDark
-              ? const Color(0xFF1D4ED8).withOpacity(0.4)
+              ? const Color(0xFF3B82F6).withOpacity(0.3)
               : const Color(0xFFBFDBFE),
         ),
       ),
-      child: Text(
-        'Tip: drag the slider left and right to compare before and after photos. All photos include GPS coordinates and timestamps for documentation.',
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: isDark ? const Color(0xFFBFDBFE) : const Color(0xFF1D4ED8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lightbulb_outline, size: 18, color: textColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
+                      color: textColor,
+                    ),
+                children: [
+                  TextSpan(
+                    text: 'Tip: ',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: textColor,
+                    ),
+                  ),
+                  const TextSpan(
+                    text:
+                        'Drag the slider left and right to compare before and after photos. '
+                        'All photos include GPS coordinates and timestamps for documentation.',
+                  ),
+                ],
+              ),
             ),
+          ),
+        ],
       ),
     );
   }
@@ -434,7 +572,7 @@ class _CornerLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.7),
         borderRadius: BorderRadius.circular(8),
@@ -443,7 +581,8 @@ class _CornerLabel extends StatelessWidget {
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: Colors.white,
-              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
       ),
     );
@@ -471,10 +610,12 @@ class _DateLabel extends StatelessWidget {
         Text(
           label,
           style: theme.textTheme.labelSmall?.copyWith(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
             color: isDark ? Colors.grey[400] : Colors.grey[600],
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Row(
           children: [
             Icon(Icons.calendar_today, size: 16, color: iconColor),
@@ -482,6 +623,7 @@ class _DateLabel extends StatelessWidget {
             Text(
               DateFormat.yMd().format(date),
               style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 14,
                 color: isDark ? Colors.grey[100] : Colors.grey[900],
               ),
             ),
@@ -492,30 +634,100 @@ class _DateLabel extends StatelessWidget {
   }
 }
 
+
+
+class _ComparisonSide {
+  const _ComparisonSide({
+    required this.url,
+    required this.capturedAt,
+  });
+
+  final String url;
+  final DateTime capturedAt;
+}
+
 class _ComparisonItem {
   const _ComparisonItem({
     required this.id,
     required this.title,
-    required this.beforeUrl,
-    required this.afterUrl,
-    required this.beforeDate,
-    required this.afterDate,
-    required this.location,
-    required this.progress,
+    required this.before,
+    required this.after,
+    this.location,
+    this.progress,
   });
 
-  final int id;
+  final String id;
   final String title;
-  final String beforeUrl;
-  final String afterUrl;
-  final DateTime beforeDate;
-  final DateTime afterDate;
-  final String location;
-  final String progress;
+  final _ComparisonSide before;
+  final _ComparisonSide after;
+  final String? location;
+  final String? progress;
 }
 
-class _ImageFallback extends StatelessWidget {
-  const _ImageFallback();
+List<_ComparisonItem> _buildComparisons(List<ProjectPhoto> photos) {
+  final pairs = <String, Map<String, ProjectPhoto>>{};
+  for (final photo in photos) {
+    final meta = photo.metadata ?? {};
+    final stageRaw = (meta['stage'] ?? meta['position'] ?? meta['type'])?.toString().toLowerCase();
+    if (stageRaw != 'before' && stageRaw != 'after') continue;
+    final comparisonId = (meta['comparisonId'] ?? meta['pairId'] ?? photo.projectId ?? photo.id).toString();
+    final bucket = pairs.putIfAbsent(comparisonId, () => {});
+    final stage = stageRaw!;
+    bucket[stage] = photo;
+  }
+
+  final items = <_ComparisonItem>[];
+  for (final entry in pairs.entries) {
+    final beforePhoto = entry.value['before'];
+    final afterPhoto = entry.value['after'];
+    if (beforePhoto == null || afterPhoto == null) continue;
+    final beforeAttachment = beforePhoto.attachments?.firstWhere(
+      (a) => a.type == 'photo',
+      orElse: () => beforePhoto.attachments?.first ??
+          MediaAttachment(
+            id: 'temp',
+            type: 'photo',
+            url: '',
+            capturedAt: beforePhoto.createdAt,
+          ),
+    );
+    final afterAttachment = afterPhoto.attachments?.firstWhere(
+      (a) => a.type == 'photo',
+      orElse: () => afterPhoto.attachments?.first ??
+          MediaAttachment(
+            id: 'temp',
+            type: 'photo',
+            url: '',
+            capturedAt: afterPhoto.createdAt,
+          ),
+    );
+    if (beforeAttachment == null || afterAttachment == null) continue;
+    final location = beforePhoto.metadata?['location']?.toString() ??
+        afterPhoto.metadata?['location']?.toString();
+    final progress = afterPhoto.metadata?['progress']?.toString();
+    items.add(
+      _ComparisonItem(
+        id: entry.key,
+        title: afterPhoto.title ?? beforePhoto.title ?? 'Project Comparison',
+        before: _ComparisonSide(
+          url: beforeAttachment.url,
+          capturedAt: beforeAttachment.capturedAt,
+        ),
+        after: _ComparisonSide(
+          url: afterAttachment.url,
+          capturedAt: afterAttachment.capturedAt,
+        ),
+        location: location,
+        progress: progress,
+      ),
+    );
+  }
+  items.sort((a, b) => b.after.capturedAt.compareTo(a.after.capturedAt));
+  return items;
+}
+
+class _ComparisonFallback extends StatelessWidget {
+  const _ComparisonFallback();
 
   @override
   Widget build(BuildContext context) {
@@ -533,41 +745,34 @@ class _ImageFallback extends StatelessWidget {
   }
 }
 
-final List<_ComparisonItem> _comparisons = [
-  _ComparisonItem(
-    id: 1,
-    title: 'Foundation Work - Building A',
-    beforeUrl:
-        'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=800',
-    afterUrl:
-        'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=800',
-    beforeDate: DateTime(2025, 11, 15),
-    afterDate: DateTime(2025, 12, 20),
-    location: 'Main Site - GPS: 40.7128 N, 74.0060 W',
-    progress: '85%',
-  ),
-  _ComparisonItem(
-    id: 2,
-    title: 'Site Cleanup - Zone B',
-    beforeUrl:
-        'https://images.unsplash.com/photo-1581094271901-8022df4466f9?w=800',
-    afterUrl:
-        'https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=800',
-    beforeDate: DateTime(2025, 12, 1),
-    afterDate: DateTime(2025, 12, 22),
-    location: 'Zone B - GPS: 40.7580 N, 73.9855 W',
-    progress: '100%',
-  ),
-  _ComparisonItem(
-    id: 3,
-    title: 'Equipment Installation',
-    beforeUrl:
-        'https://images.unsplash.com/photo-1590650516494-0c8e4a4dd67e?w=800',
-    afterUrl:
-        'https://images.unsplash.com/photo-1597289357-b8e1b0ac37b2?w=800',
-    beforeDate: DateTime(2025, 12, 10),
-    afterDate: DateTime(2025, 12, 23),
-    location: 'Warehouse - GPS: 40.7489 N, 73.9680 W',
-    progress: '95%',
-  ),
-];
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFECACA)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Color(0xFFDC2626)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF991B1B),
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

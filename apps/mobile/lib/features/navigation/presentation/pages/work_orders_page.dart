@@ -19,7 +19,7 @@ class WorkOrdersPage extends ConsumerStatefulWidget {
 enum _WorkOrderViewMode { list, board }
 
 class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
-  _WorkOrderViewMode _viewMode = _WorkOrderViewMode.list;
+  final _WorkOrderViewMode _viewMode = _WorkOrderViewMode.list;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _statusFilter = 'all';
@@ -299,9 +299,9 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         var columns = 2;
-        if (constraints.maxWidth >= 1100) {
+        if (constraints.maxWidth >= 1024) {
           columns = 6;
-        } else if (constraints.maxWidth >= 780) {
+        } else if (constraints.maxWidth >= 768) {
           columns = 3;
         }
         final aspectRatio = columns >= 6
@@ -399,6 +399,19 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
         borderSide: const BorderSide(color: Color(0xFF2563EB), width: 2),
       ),
     );
+
+    Widget searchField() {
+      return TextField(
+        controller: _searchController,
+        decoration: inputDecoration,
+        style: TextStyle(
+          color: isDark ? Colors.white : const Color(0xFF111827),
+        ),
+        onChanged: (value) {
+          setState(() => _searchQuery = value.trim().toLowerCase());
+        },
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -415,23 +428,13 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= 900;
-          if (isWide) {
+          final width = constraints.maxWidth;
+          if (width >= 1024) {
             return Row(
               children: [
                 Expanded(
                   flex: 2,
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: inputDecoration,
-                    style: TextStyle(
-                      color:
-                          isDark ? Colors.white : const Color(0xFF111827),
-                    ),
-                    onChanged: (value) {
-                      setState(() => _searchQuery = value.trim().toLowerCase());
-                    },
-                  ),
+                  child: searchField(),
                 ),
                 const SizedBox(width: 12),
                 Expanded(child: _buildStatusFilter(inputDecoration)),
@@ -442,18 +445,30 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
               ],
             );
           }
+          if (width >= 768) {
+            return Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: searchField()),
+                    const SizedBox(width: 12),
+                    Expanded(child: _buildStatusFilter(inputDecoration)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(child: _buildPriorityFilter(inputDecoration)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _buildTypeFilter(inputDecoration)),
+                  ],
+                ),
+              ],
+            );
+          }
           return Column(
             children: [
-              TextField(
-                controller: _searchController,
-                decoration: inputDecoration,
-                style: TextStyle(
-                  color: isDark ? Colors.white : const Color(0xFF111827),
-                ),
-                onChanged: (value) {
-                  setState(() => _searchQuery = value.trim().toLowerCase());
-                },
-              ),
+              searchField(),
               const SizedBox(height: 12),
               _buildStatusFilter(inputDecoration),
               const SizedBox(height: 12),
@@ -612,6 +627,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final isBoardView = _viewMode == _WorkOrderViewMode.board;
     if (orders.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(32),
@@ -638,7 +654,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Try adjusting your filters or create a new work order.',
+              'Try adjusting your filters or create a new work order',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: isDark ? Colors.grey[500] : Colors.grey[600],
               ),
@@ -652,23 +668,14 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              '${orders.length} Work Order${orders.length == 1 ? '' : 's'}',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            _WorkOrderViewToggle(
-              viewMode: _viewMode,
-              onChanged: (mode) => setState(() => _viewMode = mode),
-            ),
-          ],
+        Text(
+          '${orders.length} Work Order${orders.length == 1 ? '' : 's'}',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 12),
-        if (_viewMode == _WorkOrderViewMode.list)
+        if (!isBoardView)
           ...orders.map(
             (order) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -1096,106 +1103,6 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
       default:
         return WorkOrderType.repair;
     }
-  }
-}
-
-class _WorkOrderViewToggle extends StatelessWidget {
-  const _WorkOrderViewToggle({
-    required this.viewMode,
-    required this.onChanged,
-  });
-
-  final _WorkOrderViewMode viewMode;
-  final ValueChanged<_WorkOrderViewMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6);
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          _ViewToggleButton(
-            label: 'List',
-            icon: Icons.list,
-            selected: viewMode == _WorkOrderViewMode.list,
-            onTap: () => onChanged(_WorkOrderViewMode.list),
-          ),
-          _ViewToggleButton(
-            label: 'Board',
-            icon: Icons.grid_view,
-            selected: viewMode == _WorkOrderViewMode.board,
-            onTap: () => onChanged(_WorkOrderViewMode.board),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ViewToggleButton extends StatelessWidget {
-  const _ViewToggleButton({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final selectedBackground = isDark ? const Color(0xFF374151) : Colors.white;
-    final selectedColor = isDark ? Colors.white : Colors.black;
-    final unselectedColor =
-        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? selectedBackground : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: selected ? selectedColor : unselectedColor,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: selected ? selectedColor : unselectedColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -1784,7 +1691,7 @@ class _WorkOrderCard extends StatelessWidget {
                           _MetaRow(
                             icon: Icons.event_outlined,
                             label:
-                                'Due: ${DateFormat('MMM d, yyyy').format(order.dueDate)}',
+                                'Due: ${DateFormat('M/d/yyyy').format(order.dueDate)}',
                           ),
                         ],
                       ),

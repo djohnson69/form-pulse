@@ -10,6 +10,10 @@ import '../../../../core/utils/file_bytes_loader.dart';
 import '../../data/ops_provider.dart';
 import '../../data/ops_repository.dart';
 
+const _aiPurple500 = Color(0xFFA855F7);
+const _aiPurple600 = Color(0xFF9333EA);
+const _aiPurple400 = Color(0xFFC084FC);
+
 class AiToolsPage extends ConsumerStatefulWidget {
   const AiToolsPage({super.key});
 
@@ -42,8 +46,9 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
     return Scaffold(
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= 1024;
-          final horizontalPadding = isWide ? 24.0 : 16.0;
+          final isLarge = constraints.maxWidth >= 1024;
+          final isMedium = constraints.maxWidth >= 768;
+          final horizontalPadding = isMedium ? 24.0 : 16.0;
           return ListView(
             padding: EdgeInsets.fromLTRB(
               horizontalPadding,
@@ -56,7 +61,7 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
               const SizedBox(height: 16),
               _buildTabs(context),
               const SizedBox(height: 16),
-              if (isWide)
+              if (isLarge)
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -71,7 +76,7 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                 _buildOutputCard(context),
               ],
               const SizedBox(height: 16),
-              _buildFeaturesGrid(context, isWide: isWide),
+              _buildFeaturesGrid(context, isWide: isMedium),
             ],
           );
         },
@@ -87,7 +92,7 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
       children: [
         Row(
           children: [
-            const Icon(Icons.auto_awesome, size: 28, color: Color(0xFF7C3AED)),
+            const Icon(Icons.auto_awesome, size: 28, color: _aiPurple500),
             const SizedBox(width: 10),
             Text(
               'AI-Powered Tools',
@@ -135,7 +140,7 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: selected ? const Color(0xFF7C3AED) : Colors.transparent,
+                color: selected ? _aiPurple600 : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
@@ -169,17 +174,23 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
     final labelColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
     final helperColor = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
     final dashedColor = isDark ? const Color(0xFF4B5563) : const Color(0xFFD1D5DB);
+    final background = isDark ? const Color(0xFF1F2937) : Colors.white;
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.chat_bubble_outline,
-                    color: Color(0xFF7C3AED)),
+                const Icon(Icons.chat_bubble_outline, color: _aiPurple500),
                 const SizedBox(width: 8),
                 Text(
                   'Input Data',
@@ -203,7 +214,7 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                 color: dashedColor,
                 radius: 12,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  padding: const EdgeInsets.all(32),
                   width: double.infinity,
                   child: Column(
                     children: [
@@ -259,6 +270,24 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                 hintStyle: theme.textTheme.bodyMedium?.copyWith(
                   color: helperColor,
                 ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: _aiPurple500),
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -277,9 +306,14 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                   _isGenerating ? 'Generating with AI...' : 'Generate AI Content',
                 ),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  backgroundColor: const Color(0xFF7C3AED),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  backgroundColor: _aiPurple600,
                   foregroundColor: Colors.white,
+                  disabledBackgroundColor: _aiPurple400,
+                  disabledForegroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
@@ -294,16 +328,25 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
     final isDark = theme.brightness == Brightness.dark;
     final background = isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB);
     final helperColor = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    final outputTextColor =
+        isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
+    final cardBackground = isDark ? const Color(0xFF1F2937) : Colors.white;
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: cardBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.auto_awesome, color: Color(0xFF7C3AED)),
+                const Icon(Icons.auto_awesome, color: _aiPurple500),
                 const SizedBox(width: 8),
                 Text(
                   'AI-Generated Output',
@@ -330,7 +373,7 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                       child: SelectableText(
                         _output,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: helperColor,
+                          color: outputTextColor,
                         ),
                       ),
                     ),
@@ -339,8 +382,20 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                   Row(
                     children: [
                       Expanded(
-                        child: OutlinedButton(
+                        child: TextButton(
                           onPressed: () => _copyOutput(context),
+                          style: TextButton.styleFrom(
+                            backgroundColor: isDark
+                                ? const Color(0xFF374151)
+                                : const Color(0xFFF3F4F6),
+                            foregroundColor: isDark
+                                ? const Color(0xFFD1D5DB)
+                                : const Color(0xFF374151),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
                           child: const Text('Copy to Clipboard'),
                         ),
                       ),
@@ -349,8 +404,11 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                         child: ElevatedButton(
                           onPressed: () => _exportOutput(context),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF7C3AED),
+                            backgroundColor: _aiPurple600,
                             foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                           child: const Text('Save & Export'),
                         ),
@@ -372,7 +430,9 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
                     Icon(
                       Icons.auto_awesome,
                       size: 48,
-                      color: helperColor,
+                      color: isDark
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFD1D5DB),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -419,11 +479,11 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: border),
           ),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(feature.icon, color: const Color(0xFF7C3AED)),
+              Icon(feature.icon, color: _aiPurple500),
               const SizedBox(height: 8),
               Text(
                 feature.title,

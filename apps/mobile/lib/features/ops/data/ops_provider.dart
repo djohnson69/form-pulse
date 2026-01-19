@@ -50,6 +50,11 @@ final photoCommentsProvider =
   return ref.read(opsRepositoryProvider).fetchPhotoComments(photoId);
 });
 
+final mentionCandidatesProvider =
+    FutureProvider.autoDispose<List<MentionCandidate>>((ref) {
+  return ref.read(opsRepositoryProvider).fetchMentionCandidates();
+});
+
 final webhookEndpointsProvider =
     FutureProvider.autoDispose<List<WebhookEndpoint>>((ref) {
   return ref.read(opsRepositoryProvider).fetchWebhookEndpoints();

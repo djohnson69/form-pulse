@@ -25,62 +25,41 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
       final orgId = await _resolveOrgId(client, user.id);
       final res = await client
           .from('profiles')
-          .select('role, is_active')
+          .select()
           .eq('id', user.id)
           .maybeSingle();
-      
-      // If no profile exists or no role, default to viewer
-      if (res == null || res['role'] == null) {
-        debugPrint('No profile or role found for user ${user.id}, defaulting to viewer');
+
+      String? rawRole = res?['role']?.toString();
+      if (rawRole == null || rawRole.isEmpty) {
+        try {
+          final member = await client
+              .from('org_members')
+              .select('role')
+              .eq('user_id', user.id)
+              .maybeSingle();
+          rawRole = member?['role']?.toString();
+        } catch (_) {}
+      }
+
+      if (rawRole == null || rawRole.isEmpty) {
+        debugPrint(
+          'No profile or role found for user ${user.id}, defaulting to viewer',
+        );
         return _UserAccess(
           role: UserRole.viewer,
           isActive: true,
           needsOnboarding: orgId == null || orgId.isEmpty,
         );
       }
-      
-      final role = UserRole.fromRaw(res['role']?.toString());
-      final isActive = res['is_active'] as bool? ?? true;
+
+      final role = UserRole.fromRaw(rawRole);
+      final isActive = res?['is_active'] as bool? ?? true;
       return _UserAccess(
         role: role,
         isActive: isActive,
         needsOnboarding: orgId == null || orgId.isEmpty,
       );
     } on PostgrestException catch (e) {
-      if (e.message.contains('is_active') || e.code == '42703') {
-        try {
-          final orgId = await _resolveOrgId(client, user.id);
-          final res = await client
-              .from('profiles')
-              .select('role')
-              .eq('id', user.id)
-              .maybeSingle();
-          if (res == null || res['role'] == null) {
-            debugPrint(
-              'No profile or role found for user ${user.id}, defaulting to viewer',
-            );
-            return _UserAccess(
-              role: UserRole.viewer,
-              isActive: true,
-              needsOnboarding: orgId == null || orgId.isEmpty,
-            );
-          }
-          final role = UserRole.fromRaw(res['role']?.toString());
-          return _UserAccess(
-            role: role,
-            isActive: true,
-            needsOnboarding: orgId == null || orgId.isEmpty,
-          );
-        } catch (inner) {
-          debugPrint('Error fetching user role: $inner, defaulting to viewer');
-          final orgId = await _resolveOrgId(client, user.id);
-          return _UserAccess(
-            role: UserRole.viewer,
-            isActive: true,
-            needsOnboarding: orgId == null || orgId.isEmpty,
-          );
-        }
-      }
       debugPrint('Error fetching user role: $e, defaulting to viewer');
       final orgId = await _resolveOrgId(client, user.id);
       return _UserAccess(

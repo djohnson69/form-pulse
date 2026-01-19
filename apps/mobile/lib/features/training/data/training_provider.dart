@@ -14,6 +14,19 @@ final employeesProvider = FutureProvider.autoDispose<List<Employee>>((ref) async
   return repo.fetchEmployees();
 });
 
+final currentEmployeeIdProvider =
+    FutureProvider.autoDispose<String?>((ref) async {
+  final client = ref.read(supabaseClientProvider);
+  final user = client.auth.currentUser;
+  if (user == null) return null;
+  final res = await client
+      .from('employees')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+  return res?['id']?.toString();
+});
+
 final trainingRecordsProvider =
     FutureProvider.autoDispose.family<List<Training>, String?>((ref, employeeId) async {
   final repo = ref.read(trainingRepositoryProvider);

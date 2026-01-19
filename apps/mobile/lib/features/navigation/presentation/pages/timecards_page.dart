@@ -7,6 +7,30 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+bool _isEmployeeRole(UserRole role) {
+  return role == UserRole.employee || role == UserRole.maintenance;
+}
+
+String _formatHoursValue(double hours) {
+  final rounded = hours.roundToDouble();
+  if ((hours - rounded).abs() < 0.01) {
+    return rounded.toStringAsFixed(0);
+  }
+  return hours.toStringAsFixed(1);
+}
+
+Text _tableHeading(String label, _TimecardColors colors) {
+  return Text(
+    label.toUpperCase(),
+    style: TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.8,
+      color: colors.muted,
+    ),
+  );
+}
+
 class TimecardsPage extends StatefulWidget {
   const TimecardsPage({super.key, this.role = UserRole.employee});
 
@@ -33,7 +57,17 @@ class _TimecardsPageState extends State<TimecardsPage> {
     super.initState();
     _entries = <_TimecardEntry>[];
     _loadEntries();
-    _refreshLocation();
+    if (_isEmployeeRole(widget.role)) {
+      _refreshLocation();
+    }
+  }
+
+  @override
+  void didUpdateWidget(TimecardsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_isEmployeeRole(widget.role) && !_isEmployeeRole(oldWidget.role)) {
+      _refreshLocation();
+    }
   }
 
   @override
@@ -131,10 +165,9 @@ class _TimecardsPageState extends State<TimecardsPage> {
     }
     final theme = Theme.of(context);
     final colors = _TimecardColors.fromTheme(Theme.of(context));
-    final recentEntries = _entries.reversed.take(5).toList();
+    final recentEntries = _entries.take(5).toList();
     return Scaffold(
       backgroundColor: colors.background,
-      appBar: AppBar(title: const Text('Timecards')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -208,7 +241,7 @@ class _TimecardsPageState extends State<TimecardsPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    DateFormat('EEEE, MMM d, yyyy').format(DateTime.now()),
+                    DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now()),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colors.muted,
                     ),
@@ -267,21 +300,21 @@ class _TimecardsPageState extends State<TimecardsPage> {
             stats: [
               _StatItem(
                 label: 'Total Hours This Week',
-                value: _totalHours.toStringAsFixed(1),
+                value: _formatHoursValue(_totalHours),
                 icon: Icons.schedule_outlined,
                 accent: colors.info,
                 surface: colors.infoSurface,
               ),
               _StatItem(
                 label: 'Pending Approval',
-                value: _pendingHours.toStringAsFixed(1),
-                icon: Icons.event_available_outlined,
+                value: _formatHoursValue(_pendingHours),
+                icon: Icons.calendar_today_outlined,
                 accent: colors.warning,
                 surface: colors.warningSurface,
               ),
               _StatItem(
                 label: 'Approved Hours',
-                value: _approvedHours.toStringAsFixed(1),
+                value: _formatHoursValue(_approvedHours),
                 icon: Icons.check_circle_outline,
                 accent: colors.success,
                 surface: colors.successSurface,
@@ -315,7 +348,6 @@ class _TimecardsPageState extends State<TimecardsPage> {
         .toList();
     return Scaffold(
       backgroundColor: colors.background,
-      appBar: AppBar(title: const Text('Timecards')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -338,7 +370,7 @@ class _TimecardsPageState extends State<TimecardsPage> {
               ),
               _StatItem(
                 label: 'Pending Hours',
-                value: _pendingHours.toStringAsFixed(1),
+                value: _formatHoursValue(_pendingHours),
                 icon: Icons.schedule_outlined,
                 accent: colors.info,
                 surface: colors.infoSurface,
@@ -381,7 +413,6 @@ class _TimecardsPageState extends State<TimecardsPage> {
     final colors = _TimecardColors.fromTheme(theme);
     return Scaffold(
       backgroundColor: colors.background,
-      appBar: AppBar(title: const Text('Timecards')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -397,21 +428,21 @@ class _TimecardsPageState extends State<TimecardsPage> {
             stats: [
               _StatItem(
                 label: 'Total Hours This Week',
-                value: _totalHours.toStringAsFixed(1),
+                value: _formatHoursValue(_totalHours),
                 icon: Icons.schedule_outlined,
                 accent: colors.info,
                 surface: colors.infoSurface,
               ),
               _StatItem(
                 label: 'Pending Review',
-                value: _pendingHours.toStringAsFixed(1),
-                icon: Icons.event_available_outlined,
+                value: _formatHoursValue(_pendingHours),
+                icon: Icons.calendar_today_outlined,
                 accent: colors.warning,
                 surface: colors.warningSurface,
               ),
               _StatItem(
                 label: 'Approved Hours',
-                value: _approvedHours.toStringAsFixed(1),
+                value: _formatHoursValue(_approvedHours),
                 icon: Icons.check_circle_outline,
                 accent: colors.success,
                 surface: colors.successSurface,
@@ -426,12 +457,12 @@ class _TimecardsPageState extends State<TimecardsPage> {
           ),
           const SizedBox(height: 16),
           _TableCard(
-            title: 'Timecard Entries',
             colors: colors,
             child: _ManagerEntriesTable(
               entries: _entries,
               colors: colors,
               editingEntryId: _editingEntryId,
+              totalHoursLabel: _formatHoursValue(_totalHours),
               onEdit: (id) => setState(() => _editingEntryId = id),
               onSave: () => setState(() => _editingEntryId = null),
               onDelete: _confirmDelete,
@@ -447,12 +478,17 @@ class _TimecardsPageState extends State<TimecardsPage> {
   Future<void> _handleClockIn() async {
     final now = DateTime.now();
     final time = DateFormat('hh:mm a').format(now);
-    _clockInStartedAt = now;
     final location = await _resolveLocation();
     if (!mounted) return;
+    if (location == 'Location unavailable') {
+      setState(() => _currentLocation = location);
+      _showSnackBar('Unable to get location. Please enable location services.');
+      return;
+    }
     setState(() {
       _isClockedIn = true;
       _clockInTime = time;
+      _clockInStartedAt = now;
       _currentLocation = location;
     });
     _showSnackBar('Clocked in at $time');
@@ -491,7 +527,7 @@ class _TimecardsPageState extends State<TimecardsPage> {
       _isClockedIn = false;
       _clockInTime = null;
       _clockInStartedAt = null;
-      _entries = [..._entries, saved];
+      _entries = [saved, ..._entries];
     });
     _showSnackBar('Clocked out at $time');
   }
@@ -534,8 +570,7 @@ class _TimecardsPageState extends State<TimecardsPage> {
       return;
     }
     final csv = _buildTimecardsCsv(_entries);
-    final filename =
-        'timecards-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv';
+    final filename = 'timecard-$_selectedWeek.csv';
     final file = XFile.fromData(
       utf8.encode(csv),
       mimeType: 'text/csv',
@@ -573,7 +608,7 @@ class _TimecardsPageState extends State<TimecardsPage> {
         entry.clockIn,
         entry.clockOut ?? '-',
         entry.project,
-        entry.hoursWorked.toStringAsFixed(2),
+        _formatHoursValue(entry.hoursWorked),
         entry.status.name,
         location,
         entry.approvedBy ?? '-',
@@ -688,7 +723,7 @@ class _TimecardsPageState extends State<TimecardsPage> {
                       ),
                       _InfoItem(
                         label: 'Total Hours',
-                        value: '${entry.hoursWorked} hours',
+                        value: '${_formatHoursValue(entry.hoursWorked)} hours',
                       ),
                       _InfoItem(
                         label: 'Location',
@@ -910,28 +945,47 @@ class _HeaderWithAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionHeader(title: title, subtitle: subtitle, muted: muted),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: onPressed,
-            icon: const Icon(Icons.download_outlined),
-            label: Text(actionLabel),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2563EB),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 640;
+        final header = _SectionHeader(
+          title: title,
+          subtitle: subtitle,
+          muted: muted,
+        );
+        final actionButton = ElevatedButton.icon(
+          onPressed: onPressed,
+          icon: const Icon(Icons.download_outlined),
+          label: Text(actionLabel),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF2563EB),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
-        ),
-      ],
+        );
+
+        if (isWide) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: header),
+              actionButton,
+            ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            header,
+            const SizedBox(height: 12),
+            actionButton,
+          ],
+        );
+      },
     );
   }
 }
@@ -945,7 +999,7 @@ class _StatsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 900 ? 3 : 1;
+        final columns = constraints.maxWidth >= 768 ? 3 : 1;
         final childAspectRatio = columns == 1 ? 3.0 : 2.6;
         return GridView.count(
           crossAxisCount: columns,
@@ -1034,30 +1088,45 @@ class _FiltersCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: colors.border),
       ),
-      child: DropdownButtonFormField<String>(
-        value: selectedWeek,
-        decoration: const InputDecoration(
-          labelText: 'Week Period',
-          border: OutlineInputBorder(),
-        ),
-        items: const [
-          DropdownMenuItem(
-            value: 'current',
-            child: Text('Current Week (Dec 23-27, 2024)'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Week Period',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.muted,
+                ),
           ),
-          DropdownMenuItem(
-            value: 'last',
-            child: Text('Last Week (Dec 16-20, 2024)'),
-          ),
-          DropdownMenuItem(
-            value: 'twoweeks',
-            child: Text('Two Weeks Ago (Dec 9-13, 2024)'),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: selectedWeek,
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              filled: true,
+              fillColor: colors.subtleSurface,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: 'current',
+                child: Text('Current Week (Dec 23-27, 2024)'),
+              ),
+              DropdownMenuItem(
+                value: 'last',
+                child: Text('Last Week (Dec 16-20, 2024)'),
+              ),
+              DropdownMenuItem(
+                value: 'twoweeks',
+                child: Text('Two Weeks Ago (Dec 9-13, 2024)'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              onChanged(value);
+            },
           ),
         ],
-        onChanged: (value) {
-          if (value == null) return;
-          onChanged(value);
-        },
       ),
     );
   }
@@ -1065,12 +1134,12 @@ class _FiltersCard extends StatelessWidget {
 
 class _TableCard extends StatelessWidget {
   const _TableCard({
-    required this.title,
     required this.colors,
     required this.child,
+    this.title,
   });
 
-  final String title;
+  final String? title;
   final _TimecardColors colors;
   final Widget child;
 
@@ -1085,17 +1154,19 @@ class _TableCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: colors.title,
-                  ),
+          if (title != null) ...[
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                title!,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: colors.title,
+                    ),
+              ),
             ),
-          ),
-          const Divider(height: 1),
+            const Divider(height: 1),
+          ],
           child,
         ],
       ),
@@ -1118,12 +1189,12 @@ class _EmployeeEntriesTable extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       child: DataTable(
         headingRowColor: MaterialStateProperty.all(colors.tableHeader),
-        columns: const [
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('Clock In')),
-          DataColumn(label: Text('Clock Out')),
-          DataColumn(label: Text('Hours')),
-          DataColumn(label: Text('Status')),
+        columns: [
+          DataColumn(label: _tableHeading('Date', colors)),
+          DataColumn(label: _tableHeading('Clock In', colors)),
+          DataColumn(label: _tableHeading('Clock Out', colors)),
+          DataColumn(label: _tableHeading('Hours', colors)),
+          DataColumn(label: _tableHeading('Status', colors)),
         ],
         rows: entries.map((entry) {
           return DataRow(cells: [
@@ -1139,7 +1210,7 @@ class _EmployeeEntriesTable extends StatelessWidget {
             ),
             DataCell(Text(entry.clockIn)),
             DataCell(Text(entry.clockOut ?? '-')),
-            DataCell(Text('${entry.hoursWorked} hrs')),
+            DataCell(Text('${_formatHoursValue(entry.hoursWorked)} hrs')),
             DataCell(_StatusChip(status: entry.status, colors: colors)),
           ]);
         }).toList(),
@@ -1161,19 +1232,36 @@ class _SupervisorEntriesTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
         headingRowColor: MaterialStateProperty.all(colors.tableHeader),
-        columns: const [
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('Clock In/Out')),
-          DataColumn(label: Text('Project')),
-          DataColumn(label: Text('Hours')),
-          DataColumn(label: Text('Location')),
-          DataColumn(label: Text('Actions')),
+        columns: [
+          DataColumn(label: _tableHeading('Date', colors)),
+          DataColumn(label: _tableHeading('Clock In/Out', colors)),
+          DataColumn(label: _tableHeading('Project', colors)),
+          DataColumn(label: _tableHeading('Hours', colors)),
+          DataColumn(label: _tableHeading('Location', colors)),
+          DataColumn(label: _tableHeading('Actions', colors)),
         ],
         rows: entries.map((entry) {
+          final locationWidget = entry.location == null
+              ? const Text('-')
+              : Row(
+                  children: [
+                    Icon(Icons.location_on_outlined, size: 14, color: colors.muted),
+                    const SizedBox(width: 4),
+                    SizedBox(
+                      width: 150,
+                      child: Text(
+                        entry.location!.address,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: colors.muted),
+                      ),
+                    ),
+                  ],
+                );
           return DataRow(cells: [
             DataCell(
               Column(
@@ -1196,19 +1284,22 @@ class _SupervisorEntriesTable extends StatelessWidget {
               ),
             ),
             DataCell(Text(entry.project)),
-            DataCell(Text('${entry.hoursWorked} hrs')),
+            DataCell(Text('${_formatHoursValue(entry.hoursWorked)} hrs')),
+            DataCell(locationWidget),
             DataCell(
-              Row(
-                children: [
-                  Icon(Icons.location_on_outlined, size: 14, color: colors.muted),
-                  const SizedBox(width: 4),
-                  Text(entry.location?.address ?? '-'),
-                ],
-              ),
-            ),
-            DataCell(
-              TextButton(
+              ElevatedButton(
                 onPressed: () => onReview(entry),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colors.info,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  textStyle: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
                 child: const Text('Review'),
               ),
             ),
@@ -1224,6 +1315,7 @@ class _ManagerEntriesTable extends StatelessWidget {
     required this.entries,
     required this.colors,
     required this.editingEntryId,
+    required this.totalHoursLabel,
     required this.onEdit,
     required this.onSave,
     required this.onDelete,
@@ -1233,6 +1325,7 @@ class _ManagerEntriesTable extends StatelessWidget {
   final List<_TimecardEntry> entries;
   final _TimecardColors colors;
   final String? editingEntryId;
+  final String totalHoursLabel;
   final ValueChanged<String> onEdit;
   final VoidCallback onSave;
   final ValueChanged<_TimecardEntry> onDelete;
@@ -1240,146 +1333,187 @@ class _ManagerEntriesTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        headingRowColor: MaterialStateProperty.all(colors.tableHeader),
-        columns: const [
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('Clock In/Out')),
-          DataColumn(label: Text('Project/Task')),
-          DataColumn(label: Text('Hours')),
-          DataColumn(label: Text('Status')),
-          DataColumn(label: Text('Location')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: entries.map((entry) {
-          final isEditing = editingEntryId == entry.id;
-          return DataRow(cells: [
-            DataCell(
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(entry.date),
-                  Text(entry.day, style: TextStyle(color: colors.muted)),
-                ],
-              ),
-            ),
-            DataCell(
-              isEditing
-                  ? Column(
-                      children: [
-                        SizedBox(
-                          width: 100,
-                          child: TextFormField(
-                            initialValue: entry.clockIn,
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
-                            onChanged: (value) => onUpdate(
-                              entry.id,
-                              entry.copyWith(clockIn: value),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        SizedBox(
-                          width: 100,
-                          child: TextFormField(
-                            initialValue: entry.clockOut ?? '',
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                            ),
-                            onChanged: (value) => onUpdate(
-                              entry.id,
-                              entry.copyWith(clockOut: value),
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(entry.clockIn),
-                        Text(entry.clockOut ?? 'In Progress'),
-                      ],
-                    ),
-            ),
-            DataCell(
-              isEditing
-                  ? SizedBox(
-                      width: 160,
+    final rows = entries.map((entry) {
+      final isEditing = editingEntryId == entry.id;
+      final locationWidget = entry.location == null
+          ? const Text('-')
+          : Row(
+              children: [
+                Icon(Icons.location_on_outlined, size: 14, color: colors.muted),
+                const SizedBox(width: 4),
+                SizedBox(
+                  width: 120,
+                  child: Text(
+                    entry.location!.address,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: colors.muted),
+                  ),
+                ),
+              ],
+            );
+      return DataRow(cells: [
+        DataCell(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(entry.date),
+              Text(entry.day, style: TextStyle(color: colors.muted)),
+            ],
+          ),
+        ),
+        DataCell(
+          isEditing
+              ? Column(
+                  children: [
+                    SizedBox(
+                      width: 100,
                       child: TextFormField(
-                        initialValue: entry.project,
+                        initialValue: entry.clockIn,
                         decoration: const InputDecoration(
                           isDense: true,
                           border: OutlineInputBorder(),
                         ),
                         onChanged: (value) => onUpdate(
                           entry.id,
-                          entry.copyWith(project: value),
+                          entry.copyWith(clockIn: value),
                         ),
                       ),
-                    )
-                  : Text(entry.project),
-            ),
-            DataCell(
-              isEditing
-                  ? SizedBox(
-                      width: 80,
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: 100,
                       child: TextFormField(
-                        initialValue: entry.hoursWorked.toString(),
-                        keyboardType: TextInputType.number,
+                        initialValue: entry.clockOut ?? '',
                         decoration: const InputDecoration(
                           isDense: true,
                           border: OutlineInputBorder(),
                         ),
-                        onChanged: (value) {
-                          final parsed = double.tryParse(value);
-                          if (parsed == null) return;
-                          onUpdate(
-                            entry.id,
-                            entry.copyWith(hoursWorked: parsed),
-                          );
-                        },
+                        onChanged: (value) => onUpdate(
+                          entry.id,
+                          entry.copyWith(clockOut: value),
+                        ),
                       ),
-                    )
-                  : Text('${entry.hoursWorked} hrs'),
-            ),
-            DataCell(_StatusChip(status: entry.status, colors: colors)),
-            DataCell(
-              Row(
-                children: [
-                  Icon(Icons.location_on_outlined, size: 14, color: colors.muted),
-                  const SizedBox(width: 4),
-                  Text(entry.location?.address ?? '-'),
-                ],
-              ),
-            ),
-            DataCell(
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: isEditing ? onSave : () => onEdit(entry.id),
-                    icon: Icon(
-                      isEditing ? Icons.save_outlined : Icons.edit_outlined,
-                      color: isEditing ? colors.success : colors.muted,
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(entry.clockIn),
+                    Text(entry.clockOut ?? 'In Progress'),
+                  ],
+                ),
+        ),
+        DataCell(
+          isEditing
+              ? SizedBox(
+                  width: 160,
+                  child: TextFormField(
+                    initialValue: entry.project,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) => onUpdate(
+                      entry.id,
+                      entry.copyWith(project: value),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => onDelete(entry),
-                    icon: Icon(Icons.delete_outline, color: colors.danger),
+                )
+              : Text(entry.project),
+        ),
+        DataCell(
+          isEditing
+              ? SizedBox(
+                  width: 80,
+                  child: TextFormField(
+                    initialValue: entry.hoursWorked.toString(),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) {
+                      final parsed = double.tryParse(value);
+                      if (parsed == null) return;
+                      onUpdate(
+                        entry.id,
+                        entry.copyWith(hoursWorked: parsed),
+                      );
+                    },
                   ),
-                ],
+                )
+              : Text('${_formatHoursValue(entry.hoursWorked)} hrs'),
+        ),
+        DataCell(_StatusChip(status: entry.status, colors: colors)),
+        DataCell(locationWidget),
+        DataCell(
+          Row(
+            children: [
+              IconButton(
+                onPressed: isEditing ? onSave : () => onEdit(entry.id),
+                icon: Icon(
+                  isEditing ? Icons.save_outlined : Icons.edit_outlined,
+                  color: isEditing ? colors.success : colors.muted,
+                ),
+              ),
+              IconButton(
+                onPressed: () => onDelete(entry),
+                icon: Icon(Icons.delete_outline, color: colors.danger),
+              ),
+            ],
+          ),
+        ),
+      ]);
+    }).toList();
+    rows.add(
+      DataRow(
+        color: MaterialStateProperty.all(colors.tableHeader),
+        cells: [
+          DataCell(
+            Text(
+              'Total',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: colors.title,
               ),
             ),
-          ]);
-        }).toList(),
+          ),
+          const DataCell(Text('')),
+          const DataCell(Text('')),
+          DataCell(
+            Text(
+              '$totalHoursLabel hrs',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: colors.title,
+              ),
+            ),
+          ),
+          const DataCell(Text('')),
+          const DataCell(Text('')),
+          const DataCell(Text('')),
+        ],
+      ),
+    );
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        headingRowColor: MaterialStateProperty.all(colors.tableHeader),
+        columns: [
+          DataColumn(label: _tableHeading('Date', colors)),
+          DataColumn(label: _tableHeading('Clock In/Out', colors)),
+          DataColumn(label: _tableHeading('Project/Task', colors)),
+          DataColumn(label: _tableHeading('Hours', colors)),
+          DataColumn(label: _tableHeading('Status', colors)),
+          DataColumn(label: _tableHeading('Location', colors)),
+          DataColumn(label: _tableHeading('Actions', colors)),
+        ],
+        rows: rows,
       ),
     );
   }

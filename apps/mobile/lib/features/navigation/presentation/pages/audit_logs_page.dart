@@ -27,8 +27,7 @@ class _AuditLogsPageState extends ConsumerState<AuditLogsPage> {
   Widget build(BuildContext context) {
     final auditAsync = ref.watch(adminAuditProvider);
     final auditEvents = auditAsync.asData?.value ?? const <AdminAuditEvent>[];
-    final logs =
-        auditEvents.isNotEmpty ? _logsFromAudit(auditEvents) : _demoLogs;
+    final logs = _logsFromAudit(auditEvents);
     final filteredLogs = _filterLogs(logs);
     final stats = _AuditStats.fromLogs(logs);
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -67,16 +66,17 @@ class _AuditLogsPageState extends ConsumerState<AuditLogsPage> {
             isDark: isDark,
           ),
           const SizedBox(height: 16),
-          if (filteredLogs.isEmpty)
-            _EmptyState(muted: muted)
-          else
-            _LogsTable(
-              logs: filteredLogs,
-              surface: surface,
-              border: border,
-              muted: muted,
-              isDark: isDark,
-            ),
+          _LogsTable(
+            logs: filteredLogs,
+            surface: surface,
+            border: border,
+            muted: muted,
+            isDark: isDark,
+          ),
+          if (filteredLogs.isEmpty) ...[
+            const SizedBox(height: 12),
+            _EmptyState(muted: muted),
+          ],
           const SizedBox(height: 80),
         ],
       ),
@@ -136,41 +136,65 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Audit Logs',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : const Color(0xFF111827),
-              ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Track all administrative actions and system changes',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: muted,
-              ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: onExport,
-            icon: const Icon(Icons.download_rounded),
-            label: const Text('Export Report'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              backgroundColor: const Color(0xFF2563EB),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 720;
+        final text = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Audit Logs',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
+                  ),
             ),
+            const SizedBox(height: 6),
+            Text(
+              'Track all administrative actions and system changes',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: muted,
+                  ),
+            ),
+          ],
+        );
+        final button = ElevatedButton.icon(
+          onPressed: onExport,
+          icon: const Icon(Icons.download_rounded),
+          label: const Text('Export Report'),
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            backgroundColor: const Color(0xFF2563EB),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            elevation: 3,
+            shadowColor: const Color(0x332563EB),
           ),
-        ),
-      ],
+        );
+
+        if (isWide) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: text),
+              const SizedBox(width: 16),
+              button,
+            ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            text,
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: button),
+          ],
+        );
+      },
     );
   }
 }
@@ -312,6 +336,66 @@ class _FiltersCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final filters = ['all', 'user', 'security', 'forms', 'settings', 'system'];
+    final searchDecoration = InputDecoration(
+      hintText: 'Search audit logs...',
+      prefixIcon: Icon(Icons.search, color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280)),
+      filled: true,
+      fillColor: isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: const Color(0xFF2563EB),
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    );
+
+    final filterButtons = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: filters.map((filter) {
+        final selected = selectedFilter == filter;
+        final label =
+            filter.substring(0, 1).toUpperCase() + filter.substring(1);
+        return TextButton(
+          onPressed: () => onFilterChanged(filter),
+          style: TextButton.styleFrom(
+            backgroundColor: selected
+                ? const Color(0xFF2563EB)
+                : (isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6)),
+            foregroundColor:
+                selected ? Colors.white : (isDark ? Colors.white : const Color(0xFF374151)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        );
+      }).toList(),
+    );
+
+    final searchField = TextField(
+      controller: searchController,
+      decoration: searchDecoration,
+      onChanged: onSearchChanged,
+    );
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -319,62 +403,27 @@ class _FiltersCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: border),
       ),
-      child: Column(
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: filters.map((filter) {
-              final selected = selectedFilter == filter;
-              final label =
-                  filter.substring(0, 1).toUpperCase() + filter.substring(1);
-              return ChoiceChip(
-                label: Text(label),
-                selected: selected,
-                onSelected: (_) => onFilterChanged(filter),
-                selectedColor: const Color(0xFF2563EB),
-                backgroundColor: isDark
-                    ? const Color(0xFF374151)
-                    : const Color(0xFFE5E7EB),
-                labelStyle: TextStyle(
-                  color: selected
-                      ? Colors.white
-                      : (isDark
-                          ? const Color(0xFFD1D5DB)
-                          : const Color(0xFF374151)),
-                  fontWeight: FontWeight.w600,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: searchController,
-            decoration: InputDecoration(
-              hintText: 'Search audit logs...',
-              prefixIcon: const Icon(Icons.search),
-              filled: true,
-              fillColor:
-                  isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                  color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
-                ),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                  color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
-                ),
-              ),
-            ),
-            onChanged: onSearchChanged,
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 820;
+          if (isWide) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 3, child: filterButtons),
+                const SizedBox(width: 12),
+                Expanded(flex: 2, child: searchField),
+              ],
+            );
+          }
+          return Column(
+            children: [
+              filterButtons,
+              const SizedBox(height: 12),
+              searchField,
+            ],
+          );
+        },
       ),
     );
   }
@@ -680,66 +729,3 @@ class _AuditLogEntry {
   final String details;
   final String ipAddress;
 }
-
-const _demoLogs = [
-  _AuditLogEntry(
-    id: '1',
-    timestamp: '2024-12-24 14:32:15',
-    user: 'Admin User',
-    userEmail: 'admin@company.com',
-    action: 'User Created',
-    category: 'user',
-    details: 'Created new user: sarah.johnson@company.com',
-    ipAddress: '192.168.1.100',
-  ),
-  _AuditLogEntry(
-    id: '2',
-    timestamp: '2024-12-24 14:15:30',
-    user: 'John Doe',
-    userEmail: 'john.doe@company.com',
-    action: 'Role Changed',
-    category: 'security',
-    details: 'Changed role for mike.chen@company.com from Employee to Supervisor',
-    ipAddress: '192.168.1.101',
-  ),
-  _AuditLogEntry(
-    id: '3',
-    timestamp: '2024-12-24 13:45:22',
-    user: 'Admin User',
-    userEmail: 'admin@company.com',
-    action: 'Form Builder Access',
-    category: 'forms',
-    details: 'Created new form: Safety Inspection Checklist',
-    ipAddress: '192.168.1.100',
-  ),
-  _AuditLogEntry(
-    id: '4',
-    timestamp: '2024-12-24 12:30:10',
-    user: 'System',
-    userEmail: 'system@company.com',
-    action: 'Database Backup',
-    category: 'system',
-    details: 'Automated database backup completed successfully',
-    ipAddress: '127.0.0.1',
-  ),
-  _AuditLogEntry(
-    id: '5',
-    timestamp: '2024-12-24 11:15:45',
-    user: 'Manager User',
-    userEmail: 'manager@company.com',
-    action: 'Settings Modified',
-    category: 'settings',
-    details: 'Updated company notification preferences',
-    ipAddress: '192.168.1.102',
-  ),
-  _AuditLogEntry(
-    id: '6',
-    timestamp: '2024-12-24 10:00:33',
-    user: 'Admin User',
-    userEmail: 'admin@company.com',
-    action: 'Permission Updated',
-    category: 'security',
-    details: 'Modified permissions for Supervisor role',
-    ipAddress: '192.168.1.100',
-  ),
-];

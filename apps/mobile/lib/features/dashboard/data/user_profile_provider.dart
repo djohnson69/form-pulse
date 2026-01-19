@@ -6,12 +6,16 @@ class UserProfile {
     required this.id,
     this.orgId,
     this.email,
+    this.firstName,
+    this.lastName,
     this.isActive = true,
   });
 
   final String id;
   final String? orgId;
   final String? email;
+  final String? firstName;
+  final String? lastName;
   final bool isActive;
 }
 
@@ -25,34 +29,18 @@ final userProfileProvider = FutureProvider<UserProfile>((ref) async {
   try {
     final res = await client
         .from('profiles')
-        .select('id, org_id, email, is_active')
+        .select()
         .eq('id', user.id)
         .maybeSingle();
     if (res != null) {
       return UserProfile(
-        id: res['id'] as String,
+        id: res['id'] as String? ?? user.id,
         orgId: res['org_id'] as String?,
         email: res['email'] as String?,
+        firstName: res['first_name']?.toString(),
+        lastName: res['last_name']?.toString(),
         isActive: res['is_active'] as bool? ?? true,
       );
-    }
-  } on PostgrestException catch (e) {
-    if (e.message.contains('is_active') || e.code == '42703') {
-      try {
-        final res = await client
-            .from('profiles')
-            .select('id, org_id, email')
-            .eq('id', user.id)
-            .maybeSingle();
-        if (res != null) {
-          return UserProfile(
-            id: res['id'] as String,
-            orgId: res['org_id'] as String?,
-            email: res['email'] as String?,
-            isActive: true,
-          );
-        }
-      } catch (_) {}
     }
   } catch (_) {}
 

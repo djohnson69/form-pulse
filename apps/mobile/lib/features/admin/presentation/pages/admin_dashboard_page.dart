@@ -2819,31 +2819,37 @@ class _UsersSection extends ConsumerWidget {
                             ? Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Switch(
-                                    value: user.isActive,
-                                    onChanged: (value) async {
-                                      await ref
-                                          .read(adminRepositoryProvider)
-                                          .updateUserActive(
-                                            userId: user.id,
-                                            isActive: value,
-                                          );
-                                      if (!context.mounted) return;
-                                      ref.invalidate(adminUsersProvider);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            value
-                                                ? 'Activated ${user.displayName}'
-                                                : 'Deactivated ${user.displayName}',
+                                  Transform.scale(
+                                    scale: 0.9,
+                                    child: Switch(
+                                      value: user.isActive,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      onChanged: (value) async {
+                                        await ref
+                                            .read(adminRepositoryProvider)
+                                            .updateUserActive(
+                                              userId: user.id,
+                                              isActive: value,
+                                            );
+                                        if (!context.mounted) return;
+                                        ref.invalidate(adminUsersProvider);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              value
+                                                  ? 'Activated ${user.displayName}'
+                                                  : 'Deactivated ${user.displayName}',
+                                            ),
                                           ),
-                                        ),
-                                      );
-                                    },
+                                        );
+                                      },
+                                    ),
                                   ),
                                   if (roleOptions.contains(user.role))
                                     DropdownButton<UserRole>(
                                       value: user.role,
+                                      isDense: true,
                                       items: roleOptions
                                           .map(
                                             (role) => DropdownMenuItem(

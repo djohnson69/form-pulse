@@ -16,6 +16,8 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
   final TextEditingController _descriptionController = TextEditingController();
   _PaymentMethod _paymentMethod = _PaymentMethod.card;
   bool _isSubmitting = false;
+  String _searchQuery = '';
+  _PaymentStatusFilter _statusFilter = _PaymentStatusFilter.all;
 
   @override
   void dispose() {
@@ -30,7 +32,9 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
     final colors = _PaymentColors.fromTheme(Theme.of(context));
     final payments = paymentsAsync.asData?.value ?? const <PaymentRequest>[];
     final entries = _entriesFromRequests(payments);
-    final totals = _PaymentTotals.fromEntries(entries);
+    final stats = _PaymentStats.fromEntries(entries);
+    final filtered = _applyFilters(entries);
+    final totals = _PaymentTotals.fromEntries(filtered);
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -44,6 +48,18 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
               child: _ErrorBanner(message: paymentsAsync.error.toString()),
             ),
           _Header(muted: colors.muted),
+          const SizedBox(height: 16),
+          _PaymentStatsGrid(colors: colors, stats: stats),
+          const SizedBox(height: 16),
+          _FilterBar(
+            colors: colors,
+            searchQuery: _searchQuery,
+            onSearchChanged: (value) =>
+                setState(() => _searchQuery = value.toLowerCase()),
+            status: _statusFilter,
+            onStatusChanged: (value) =>
+                setState(() => _statusFilter = value),
+          ),
           const SizedBox(height: 16),
           if (entries.isEmpty && !paymentsAsync.isLoading) ...[
             _EmptyState(
@@ -67,7 +83,7 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
               );
               final right = _RecentPaymentsCard(
                 colors: colors,
-                entries: entries,
+                entries: filtered,
                 totals: totals,
               );
               if (isWide) {
@@ -148,6 +164,17 @@ class _PaymentRequestsPageState extends ConsumerState<PaymentRequestsPage> {
       );
     }).toList();
   }
+
+  List<_PaymentEntry> _applyFilters(List<_PaymentEntry> entries) {
+    return entries.where((entry) {
+      final matchesStatus = _matchesFilter(entry.status, _statusFilter);
+      final query = _searchQuery.toLowerCase();
+      final matchesSearch = query.isEmpty ||
+          entry.project.toLowerCase().contains(query) ||
+          entry.method.toLowerCase().contains(query);
+      return matchesStatus && matchesSearch;
+    }).toList();
+  }
 }
 
 class _Header extends StatelessWidget {
@@ -157,29 +184,275 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final titleColor = Theme.of(context).brightness == Brightness.dark
-        ? Colors.white
-        : const Color(0xFF111827);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Payment Requests',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: titleColor,
-              ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Request payment from the job site and get paid before leaving',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: muted),
-        ),
-      ],
+    final theme = Theme.of(context);
+    final titleColor =
+        theme.brightness == Brightness.dark ? Colors.white : const Color(0xFF111827);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 720;
+        final title = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Payment Requests',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: titleColor,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Request payment from the job site and get paid before leaving',
+              style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+            ),
+          ],
+        );
+        final actions = FilledButton.icon(
+          onPressed: () {},
+          icon: const Icon(Icons.download_outlined, size: 18),
+          label: const Text('Export CSV'),
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            backgroundColor: const Color(0xFF2563EB),
+            foregroundColor: Colors.white,
+            elevation: 2,
+            shadowColor: const Color(0x332563EB),
+          ),
+        );
+        if (isWide) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: title),
+              actions,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            title,
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: actions),
+          ],
+        );
+      },
     );
   }
 }
 
+class _PaymentStatsGrid extends StatelessWidget {
+  const _PaymentStatsGrid({required this.colors, required this.stats});
+
+  final _PaymentColors colors;
+  final _PaymentStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final isWide = MediaQuery.sizeOf(context).width >= 900;
+    final cards = [
+      _StatCard(
+        label: 'Total Requests',
+        value: stats.total.toString(),
+        color: colors.primary,
+        note: 'Across all statuses',
+      ),
+      _StatCard(
+        label: 'Paid',
+        value: stats.paid.toString(),
+        color: colors.success,
+        note: 'Completed payouts',
+      ),
+      _StatCard(
+        label: 'Approved',
+        value: stats.approved.toString(),
+        color: colors.primary,
+        note: 'Ready to pay',
+      ),
+      _StatCard(
+        label: 'Pending',
+        value: stats.pending.toString(),
+        color: colors.warning,
+        note: 'Awaiting approval',
+      ),
+      _StatCard(
+        label: 'Total Amount',
+        value: _formatCurrency(stats.totalAmount),
+        color: Colors.indigo,
+        note: 'Sum of all requests',
+      ),
+    ];
+    final crossAxisCount = isWide ? 5 : 2;
+    return GridView.count(
+      crossAxisCount: crossAxisCount,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: crossAxisCount > 2 ? 1.6 : 1.2,
+      children: cards,
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.note,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final String note;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final border = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    final background = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final noteColor = isDark ? color.withValues(alpha: 0.8) : color;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            note,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: noteColor,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.colors,
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.status,
+    required this.onStatusChanged,
+  });
+
+  final _PaymentColors colors;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final _PaymentStatusFilter status;
+  final ValueChanged<_PaymentStatusFilter> onStatusChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final searchField = SizedBox(
+      width: 320,
+      child: TextField(
+        decoration: InputDecoration(
+          prefixIcon: const Icon(Icons.search),
+          hintText: 'Search payments...',
+          filled: true,
+          fillColor: colors.subtleSurface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: colors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: colors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: colors.primary),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+        onChanged: onSearchChanged,
+        controller: TextEditingController.fromValue(
+          TextEditingValue(
+            text: searchQuery,
+            selection: TextSelection.collapsed(offset: searchQuery.length),
+          ),
+        ),
+      ),
+    );
+    final filters = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _PaymentStatusFilter.values.map((value) {
+        final selected = status == value;
+        return TextButton(
+          onPressed: () => onStatusChanged(value),
+          style: TextButton.styleFrom(
+            backgroundColor:
+                selected ? colors.primary : colors.subtleSurface,
+            foregroundColor: selected ? Colors.white : colors.muted,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: Text(_statusFilterLabel(value)),
+        );
+      }).toList(),
+    );
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 820;
+          if (isWide) {
+            return Row(
+              children: [
+                Expanded(child: filters),
+                const SizedBox(width: 12),
+                searchField,
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              filters,
+              const SizedBox(height: 12),
+              searchField,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
 class _NewPaymentCard extends StatelessWidget {
   const _NewPaymentCard({
     required this.colors,
@@ -359,6 +632,30 @@ class _RecentPaymentsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (entries.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.inbox_outlined, color: colors.muted),
+            const SizedBox(width: 8),
+            Text(
+              'No payment requests match your filters',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -640,6 +937,50 @@ class _PaymentEntry {
   final String method;
 }
 
+class _PaymentStats {
+  const _PaymentStats({
+    required this.total,
+    required this.paid,
+    required this.approved,
+    required this.pending,
+    required this.totalAmount,
+  });
+
+  final int total;
+  final int paid;
+  final int approved;
+  final int pending;
+  final double totalAmount;
+
+  factory _PaymentStats.fromEntries(List<_PaymentEntry> entries) {
+    int paid = 0;
+    int approved = 0;
+    int pending = 0;
+    double totalAmount = 0;
+    for (final entry in entries) {
+      totalAmount += entry.amount;
+      switch (entry.status) {
+        case _PaymentStatus.paid:
+          paid++;
+          break;
+        case _PaymentStatus.approved:
+          approved++;
+          break;
+        case _PaymentStatus.pending:
+          pending++;
+          break;
+      }
+    }
+    return _PaymentStats(
+      total: entries.length,
+      paid: paid,
+      approved: approved,
+      pending: pending,
+      totalAmount: totalAmount,
+    );
+  }
+}
+
 class _PaymentTotals {
   const _PaymentTotals({
     required this.paid,
@@ -673,6 +1014,20 @@ class _PaymentTotals {
 }
 
 enum _PaymentStatus { paid, approved, pending }
+enum _PaymentStatusFilter { all, paid, approved, pending }
+
+String _statusFilterLabel(_PaymentStatusFilter filter) {
+  switch (filter) {
+    case _PaymentStatusFilter.paid:
+      return 'Paid';
+    case _PaymentStatusFilter.approved:
+      return 'Approved';
+    case _PaymentStatusFilter.pending:
+      return 'Pending';
+    case _PaymentStatusFilter.all:
+      return 'All';
+  }
+}
 
 class _StatusStyle {
   const _StatusStyle({
@@ -808,6 +1163,19 @@ _PaymentStatus _normalizeStatus(String raw) {
   if (value.contains('paid')) return _PaymentStatus.paid;
   if (value.contains('approved')) return _PaymentStatus.approved;
   return _PaymentStatus.pending;
+}
+
+bool _matchesFilter(_PaymentStatus status, _PaymentStatusFilter filter) {
+  switch (filter) {
+    case _PaymentStatusFilter.paid:
+      return status == _PaymentStatus.paid;
+    case _PaymentStatusFilter.approved:
+      return status == _PaymentStatus.approved;
+    case _PaymentStatusFilter.pending:
+      return status == _PaymentStatus.pending;
+    case _PaymentStatusFilter.all:
+      return true;
+  }
 }
 
 String _formatCurrency(double amount) {

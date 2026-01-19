@@ -1,26 +1,27 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared/shared.dart';
 
-class ProjectFeedPage extends StatefulWidget {
+import '../../../ops/data/ops_provider.dart';
+import '../../../tasks/data/tasks_provider.dart';
+
+class ProjectFeedPage extends ConsumerStatefulWidget {
   const ProjectFeedPage({super.key});
 
   @override
-  State<ProjectFeedPage> createState() => _ProjectFeedPageState();
+  ConsumerState<ProjectFeedPage> createState() => _ProjectFeedPageState();
 }
 
-class _ProjectFeedPageState extends State<ProjectFeedPage> {
-  final _random = Random();
+class _ProjectFeedPageState extends ConsumerState<ProjectFeedPage> {
   _FeedFilter _filter = _FeedFilter.all;
   bool _autoRefresh = true;
   Timer? _timer;
-  late List<_FeedItem> _items;
 
   @override
   void initState() {
     super.initState();
-    _items = List<_FeedItem>.from(_seedFeedItems);
     _startTimerIfNeeded();
   }
 
@@ -34,9 +35,8 @@ class _ProjectFeedPageState extends State<ProjectFeedPage> {
     _timer?.cancel();
     if (!_autoRefresh) return;
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      setState(() {
-        _items = [_randomItem(), ..._items];
-      });
+      ref.invalidate(projectPhotosProvider(null));
+      ref.invalidate(tasksProvider);
     });
   }
 
@@ -46,7 +46,13 @@ class _ProjectFeedPageState extends State<ProjectFeedPage> {
     final isDark = theme.brightness == Brightness.dark;
     final background = isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB);
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    final filtered = _filterItems(_items);
+    final photosAsync = ref.watch(projectPhotosProvider(null));
+    final tasksAsync = ref.watch(tasksProvider);
+    final items = _buildFeedItems(
+      photosAsync.asData?.value ?? const <ProjectPhoto>[],
+      tasksAsync.asData?.value ?? const <Task>[],
+    );
+    final filtered = _filterItems(items);
 
     return Scaffold(
       backgroundColor: background,
@@ -56,7 +62,17 @@ class _ProjectFeedPageState extends State<ProjectFeedPage> {
         children: [
           _buildHeader(context),
           const SizedBox(height: 16),
-          _buildFilters(context, filtered.length, _items.length),
+          if (photosAsync.isLoading || tasksAsync.isLoading)
+            const LinearProgressIndicator(),
+          if (photosAsync.hasError || tasksAsync.hasError)
+            _InlineError(
+              message: photosAsync.error?.toString() ??
+                  tasksAsync.error?.toString() ??
+                  'Failed to load updates.',
+              border: border,
+            ),
+          const SizedBox(height: 16),
+          _buildFilters(context, filtered.length, items.length),
           const SizedBox(height: 16),
           if (filtered.isEmpty)
             _EmptyFeedCard(border: border)
@@ -166,38 +182,73 @@ class _ProjectFeedPageState extends State<ProjectFeedPage> {
     return items.where((item) => item.type == _filter.type).toList();
   }
 
-  _FeedItem _randomItem() {
-    final samples = [
-      _FeedItem(
-        id: 'rnd-${DateTime.now().millisecondsSinceEpoch}',
-        type: _FeedType.task,
-        title: 'New Update Available',
-        description: 'Real-time update from the field',
-        user: 'Field Worker',
-        avatar: 'FW',
-        time: DateTime.now(),
-        project: 'Live Project',
-        location: 'Various',
-        status: _FeedStatus.pending,
-        likes: 0,
-        comments: 0,
-      ),
-      _FeedItem(
-        id: 'rnd-${DateTime.now().millisecondsSinceEpoch}-p',
-        type: _FeedType.photo,
-        title: 'Photo uploaded',
-        description: 'New photo evidence captured on-site',
-        user: 'Emily Davis',
-        avatar: 'ED',
-        time: DateTime.now(),
-        project: 'Site Update',
-        location: 'Main Site',
-        status: _FeedStatus.completed,
-        likes: 1,
-        comments: 0,
-      ),
-    ];
-    return samples[_random.nextInt(samples.length)];
+  List<_FeedItem> _buildFeedItems(
+    List<ProjectPhoto> photos,
+    List<Task> tasks,
+  ) {
+    final items = <_FeedItem>[];
+    for (final photo in photos) {
+      final attachments = photo.attachments ?? const <MediaAttachment>[];
+      if (attachments.isEmpty) continue;
+      final attachment = attachments.first;
+      final type = attachment.type == 'video' ? _FeedType.video : _FeedType.photo;
+      final likes = photo.metadata?['likes'] is int ? photo.metadata!['likes'] as int : 0;
+      final comments = photo.metadata?['comments'] is int
+          ? photo.metadata!['comments'] as int
+          : 0;
+      final user = photo.createdBy ?? 'Team';
+      final location = photo.metadata?['location']?.toString() ?? 'Project site';
+      items.add(
+        _FeedItem(
+          id: '${photo.id}-${attachment.id}',
+          type: type,
+          title: photo.title ?? 'Project media update',
+          description: photo.description ?? 'Media added to project feed',
+          user: user,
+          avatar: _initials(user),
+          time: attachment.capturedAt,
+          project: photo.projectId ?? 'Project',
+          location: location,
+          status: _FeedStatus.completed,
+          likes: likes,
+          comments: comments,
+        ),
+      );
+    }
+
+    for (final task in tasks) {
+      final status = task.status == TaskStatus.blocked
+          ? _FeedStatus.issue
+          : (task.isComplete ? _FeedStatus.completed : _FeedStatus.pending);
+      final user = task.assignedToName ?? task.createdBy ?? 'Team';
+      items.add(
+        _FeedItem(
+          id: 'task-${task.id}',
+          type: _FeedType.task,
+          title: task.title,
+          description: task.description ?? task.instructions ?? 'Task update',
+          user: user,
+          avatar: _initials(user),
+          time: task.updatedAt ?? task.createdAt,
+          project: task.metadata?['projectName']?.toString() ?? 'General',
+          location: task.metadata?['location']?.toString() ?? '—',
+          status: status,
+          likes: 0,
+          comments: 0,
+        ),
+      );
+    }
+
+    items.sort((a, b) => b.time.compareTo(a.time));
+    return items;
+  }
+
+  String _initials(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '?';
+    final parts = trimmed.split(RegExp(r'\s+'));
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
   }
 }
 
@@ -429,6 +480,39 @@ class _EmptyFeedCard extends StatelessWidget {
   }
 }
 
+class _InlineError extends StatelessWidget {
+  const _InlineError({required this.message, required this.border});
+
+  final String message;
+  final Color border;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Color(0xFFDC2626)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF991B1B),
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 enum _FeedFilter { all, photo, video, task, inspection }
 
 enum _FeedType { photo, video, task, inspection }
@@ -534,81 +618,3 @@ String _formatRelative(DateTime timestamp) {
   return '${days}d ago';
 }
 
-List<_FeedItem> get _seedFeedItems {
-  final now = DateTime.now();
-  return [
-    _FeedItem(
-      id: '1',
-      type: _FeedType.photo,
-      title: 'Foundation Inspection Completed',
-      description:
-          'All structural elements verified and documented with GPS coordinates',
-      user: 'John Doe',
-      avatar: 'JD',
-      time: now.subtract(const Duration(minutes: 15)),
-      project: 'Building A Construction',
-      location: 'Main Site',
-      status: _FeedStatus.completed,
-      likes: 12,
-      comments: 3,
-    ),
-    _FeedItem(
-      id: '2',
-      type: _FeedType.video,
-      title: 'Equipment Operation Training',
-      description:
-          'Safety briefing and crane operation demonstration for new team members',
-      user: 'Sarah Johnson',
-      avatar: 'SJ',
-      time: now.subtract(const Duration(minutes: 45)),
-      project: 'Training Session',
-      location: 'Warehouse',
-      status: _FeedStatus.pending,
-      likes: 8,
-      comments: 5,
-    ),
-    _FeedItem(
-      id: '3',
-      type: _FeedType.inspection,
-      title: 'Safety Audit - Zone B',
-      description: 'Minor issues found and flagged for immediate attention',
-      user: 'Mike Chen',
-      avatar: 'MC',
-      time: now.subtract(const Duration(hours: 1, minutes: 30)),
-      project: 'Safety Audit',
-      location: 'Zone B',
-      status: _FeedStatus.issue,
-      likes: 15,
-      comments: 7,
-    ),
-    _FeedItem(
-      id: '4',
-      type: _FeedType.task,
-      title: 'Material Delivery Confirmed',
-      description: 'Steel beams and concrete supplies received and inventoried',
-      user: 'Emily Davis',
-      avatar: 'ED',
-      time: now.subtract(const Duration(hours: 2)),
-      project: 'Supply Chain',
-      location: 'Storage Yard',
-      status: _FeedStatus.completed,
-      likes: 6,
-      comments: 2,
-    ),
-    _FeedItem(
-      id: '5',
-      type: _FeedType.photo,
-      title: 'Site Progress Update - Week 12',
-      description:
-          'Major milestones achieved this week with detailed photographic evidence',
-      user: 'Tom Brown',
-      avatar: 'TB',
-      time: now.subtract(const Duration(hours: 3)),
-      project: 'Building A Construction',
-      location: 'Main Site',
-      status: _FeedStatus.completed,
-      likes: 24,
-      comments: 9,
-    ),
-  ];
-}

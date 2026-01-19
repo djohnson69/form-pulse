@@ -37,6 +37,7 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
           final stats = _NewsStats.fromPosts(items);
           final categorySummaries = _buildCategorySummaries(items);
           final trending = _buildTrending(items);
+          final upcomingEvents = _buildUpcomingEvents(posts);
           if (items.isEmpty) {
             return ListView(
               padding: const EdgeInsets.all(16),
@@ -86,6 +87,7 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
                             stats: stats,
                             categories: categorySummaries,
                             trending: trending,
+                            upcomingEvents: upcomingEvents,
                           ),
                         ),
                       ],
@@ -106,6 +108,7 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
                           stats: stats,
                           categories: categorySummaries,
                           trending: trending,
+                          upcomingEvents: upcomingEvents,
                         ),
                       ],
                     ),
@@ -127,12 +130,14 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
       return _NewsItem(
         id: post.id,
         title: post.title,
-        body: post.body ?? 'No message provided.',
+        body: (post.body ?? '').trim(),
         category: category,
+        tags: post.tags,
         priority: _priorityForPost(post),
         isPinned: _isPinned(post),
         author: post.metadata?['author']?.toString() ?? 'Company',
         dateLabel: _formatDate(post.publishedAt),
+        publishedAt: post.publishedAt,
         views: _viewsForPost(post),
       );
     }).toList();
@@ -192,32 +197,89 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
   }
 
   List<_Announcement> _buildAnnouncements(List<_NewsItem> items) {
-    return items
+    final announcements = <_Announcement>[];
+    final usedIds = <String>{};
+    final primary = items
         .where((item) => item.isPinned || item.priority == _NewsPriority.high)
-        .take(3)
-        .map(
-          (item) => _Announcement(
-            text: item.title,
-            type: item.priority == _NewsPriority.high
-                ? _AnnouncementType.alert
-                : _AnnouncementType.info,
-          ),
-        )
         .toList();
+    for (final item in primary) {
+      if (announcements.length >= 3) break;
+      usedIds.add(item.id);
+      announcements.add(
+        _Announcement(
+          text: item.body.isNotEmpty ? item.body : item.title,
+          type: item.priority == _NewsPriority.high
+              ? _AnnouncementType.alert
+              : item.isPinned
+                  ? _AnnouncementType.warning
+                  : _AnnouncementType.info,
+        ),
+      );
+    }
+    if (announcements.length < 3) {
+      for (final item in items) {
+        if (announcements.length >= 3) break;
+        if (usedIds.contains(item.id)) continue;
+        announcements.add(
+          _Announcement(
+            text: item.body.isNotEmpty ? item.body : item.title,
+            type: _AnnouncementType.info,
+          ),
+        );
+      }
+    }
+    return announcements;
   }
 
   List<_TrendingItem> _buildTrending(List<_NewsItem> items) {
     final counts = <String, int>{};
-    for (final item in items) {
-      final key = _normalizeCategory(item.category);
+    final labels = <String, String>{};
+
+    void addTag(String raw) {
+      final key = _normalizeTagKey(raw);
+      if (key.isEmpty) return;
       counts[key] = (counts[key] ?? 0) + 1;
+      labels[key] = _formatHashtag(raw);
     }
+
+    for (final item in items) {
+      for (final tag in item.tags) {
+        addTag(tag);
+      }
+    }
+
+    if (counts.isEmpty) {
+      for (final item in items) {
+        addTag(item.category);
+      }
+    }
+
     final sorted = counts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     return sorted
-        .take(5)
-        .map((e) => _TrendingItem(e.key, e.value))
+        .take(3)
+        .map((e) => _TrendingItem(labels[e.key] ?? '#${e.key}', e.value))
         .toList();
+  }
+
+  List<_UpcomingEvent> _buildUpcomingEvents(List<NewsPost> posts) {
+    final events = <_UpcomingEvent>[];
+    for (final post in posts) {
+      final metadata = post.metadata;
+      if (metadata == null || metadata.isEmpty) continue;
+      final startsAt = _parseEventDateTime(metadata);
+      if (startsAt == null) continue;
+      events.add(
+        _UpcomingEvent(
+          title: post.title,
+          dateLabel: _formatEventDate(startsAt),
+          timeLabel: _eventTimeLabel(metadata, startsAt),
+          startsAt: startsAt,
+        ),
+      );
+    }
+    events.sort((a, b) => a.startsAt.compareTo(b.startsAt));
+    return events.take(3).toList();
   }
 
   Future<void> _openCreateSheet(BuildContext context, WidgetRef ref) async {
@@ -257,6 +319,179 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
       return weeks == 1 ? '1 week ago' : '$weeks weeks ago';
     }
     return '${local.month}/${local.day}/${local.year}';
+  }
+
+  String _normalizeTagKey(String tag) {
+    final trimmed = tag.trim();
+    if (trimmed.isEmpty) return '';
+    final withoutHash =
+        trimmed.startsWith('#') ? trimmed.substring(1) : trimmed;
+    return withoutHash.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+  }
+
+  String _formatHashtag(String tag) {
+    final trimmed = tag.trim();
+    if (trimmed.isEmpty) return '';
+    final withoutHash =
+        trimmed.startsWith('#') ? trimmed.substring(1) : trimmed;
+    final cleaned = withoutHash.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+    return cleaned.isEmpty ? '' : '#$cleaned';
+  }
+
+  DateTime? _parseEventDateTime(Map<String, dynamic> metadata) {
+    Map<String, dynamic>? eventMap;
+    final rawEvent = metadata['event'];
+    if (rawEvent is Map) {
+      eventMap = Map<String, dynamic>.from(rawEvent);
+    }
+    final rawDateTime = metadata['event_datetime'] ??
+        metadata['eventDateTime'] ??
+        metadata['event_date_time'] ??
+        eventMap?['dateTime'] ??
+        eventMap?['date_time'];
+    final rawDate =
+        metadata['event_date'] ?? metadata['eventDate'] ?? eventMap?['date'];
+    final rawTime =
+        metadata['event_time'] ?? metadata['eventTime'] ?? eventMap?['time'];
+
+    var dateTime = _parseDateValue(rawDateTime) ?? _parseDateValue(rawDate);
+    if (dateTime == null) return null;
+    final timeOfDay = _parseTimeOfDay(rawTime);
+    if (timeOfDay != null) {
+      dateTime = DateTime(
+        dateTime.year,
+        dateTime.month,
+        dateTime.day,
+        timeOfDay.hour,
+        timeOfDay.minute,
+      );
+    }
+    return dateTime;
+  }
+
+  DateTime? _parseDateValue(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is DateTime) return raw;
+    if (raw is int) {
+      return DateTime.fromMillisecondsSinceEpoch(raw);
+    }
+    if (raw is double) {
+      return DateTime.fromMillisecondsSinceEpoch(raw.toInt());
+    }
+    if (raw is String) {
+      return DateTime.tryParse(raw);
+    }
+    return null;
+  }
+
+  TimeOfDay? _parseTimeOfDay(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is TimeOfDay) return raw;
+    if (raw is DateTime) {
+      return TimeOfDay(hour: raw.hour, minute: raw.minute);
+    }
+    if (raw is int) {
+      final hour = raw ~/ 60;
+      final minute = raw % 60;
+      return TimeOfDay(hour: hour, minute: minute);
+    }
+    if (raw is double) {
+      final totalMinutes = raw.toInt();
+      final hour = totalMinutes ~/ 60;
+      final minute = totalMinutes % 60;
+      return TimeOfDay(hour: hour, minute: minute);
+    }
+    if (raw is! String) return null;
+
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+    final upper = value.toUpperCase();
+    final match =
+        RegExp(r'^(\\d{1,2})(?::(\\d{2}))?\\s*(AM|PM)$').firstMatch(upper);
+    if (match != null) {
+      var hour = int.parse(match.group(1)!);
+      final minute = int.parse(match.group(2) ?? '0');
+      final period = match.group(3);
+      if (period == 'PM' && hour != 12) {
+        hour += 12;
+      } else if (period == 'AM' && hour == 12) {
+        hour = 0;
+      }
+      return TimeOfDay(hour: hour, minute: minute);
+    }
+    if (value.contains(':')) {
+      final parts = value.split(':');
+      if (parts.length >= 2) {
+        final hour = int.tryParse(parts[0]) ?? 0;
+        final minute = int.tryParse(parts[1]) ?? 0;
+        return TimeOfDay(hour: hour, minute: minute);
+      }
+    }
+    final hour = int.tryParse(value);
+    if (hour != null) {
+      return TimeOfDay(hour: hour, minute: 0);
+    }
+    return null;
+  }
+
+  String _eventTimeLabel(Map<String, dynamic> metadata, DateTime dateTime) {
+    final rawTime = metadata['event_time'] ?? metadata['eventTime'];
+    if (rawTime is String && rawTime.trim().isNotEmpty) {
+      return rawTime.trim();
+    }
+    if (rawTime is DateTime) {
+      return _formatEventTime(rawTime);
+    }
+    if (rawTime is num) {
+      final time = _parseTimeOfDay(rawTime);
+      if (time != null) {
+        final resolved = DateTime(
+          dateTime.year,
+          dateTime.month,
+          dateTime.day,
+          time.hour,
+          time.minute,
+        );
+        return _formatEventTime(resolved);
+      }
+    }
+    if (dateTime.hour != 0 || dateTime.minute != 0) {
+      return _formatEventTime(dateTime);
+    }
+    return 'All day';
+  }
+
+  String _formatEventDate(DateTime date) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final local = date.toLocal();
+    final month = months[local.month - 1];
+    return '$month ${local.day}';
+  }
+
+  String _formatEventTime(DateTime date) {
+    var hour = date.hour;
+    final minute = date.minute.toString().padLeft(2, '0');
+    final isAm = hour < 12;
+    if (hour == 0) {
+      hour = 12;
+    } else if (hour > 12) {
+      hour -= 12;
+    }
+    final period = isAm ? 'AM' : 'PM';
+    return '$hour:$minute $period';
   }
 }
 
@@ -754,13 +989,16 @@ class _NewsCard extends StatelessWidget {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          item.body,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: colors.body,
-                              ),
-                        ),
+                        if (item.body.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            item.body,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: colors.body,
+                                    ),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: isWide ? 16 : 8,
@@ -847,12 +1085,14 @@ class _NewsSidebar extends StatelessWidget {
     required this.stats,
     required this.categories,
     required this.trending,
+    required this.upcomingEvents,
   });
 
   final List<_NewsItem> posts;
   final _NewsStats stats;
   final List<_CategorySummary> categories;
   final List<_TrendingItem> trending;
+  final List<_UpcomingEvent> upcomingEvents;
 
   @override
   Widget build(BuildContext context) {
@@ -861,10 +1101,10 @@ class _NewsSidebar extends StatelessWidget {
         _StatsCard(stats: stats),
         const SizedBox(height: 24),
         _CategoriesCard(posts: posts, categoriesOverride: categories),
-        if (trending.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          _TrendingCard(topics: trending),
-        ],
+        const SizedBox(height: 24),
+        _UpcomingEventsCard(events: upcomingEvents),
+        const SizedBox(height: 24),
+        _TrendingCard(topics: trending),
       ],
     );
   }
@@ -1042,6 +1282,111 @@ class _CategoriesCard extends StatelessWidget {
   }
 }
 
+class _UpcomingEventsCard extends StatelessWidget {
+  const _UpcomingEventsCard({required this.events});
+
+  final List<_UpcomingEvent> events;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = _NewsColors.fromTheme(Theme.of(context));
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+        boxShadow: colors.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Upcoming Events',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: colors.title,
+                    ),
+              ),
+              const Spacer(),
+              Icon(Icons.calendar_today_outlined,
+                  size: 18, color: colors.muted),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (events.isEmpty)
+            Text(
+              'No upcoming events.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colors.muted),
+            )
+          else
+            ...events.map(
+              (event) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colors.filterSurface,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        event.title,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              color: colors.title,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.calendar_today_outlined,
+                              size: 12, color: colors.muted),
+                          const SizedBox(width: 6),
+                          Text(
+                            event.dateLabel,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(color: colors.muted),
+                          ),
+                          const SizedBox(width: 6),
+                          Text('•',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(color: colors.muted)),
+                          const SizedBox(width: 6),
+                          Text(
+                            event.timeLabel,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(color: colors.muted),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TrendingCard extends StatelessWidget {
   const _TrendingCard({required this.topics});
 
@@ -1075,30 +1420,39 @@ class _TrendingCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          ...topics.map(
-            (topic) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    topic.tag,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  Text(
-                    '${topic.mentions} mentions',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: colors.muted),
-                  ),
-                ],
+          if (topics.isEmpty)
+            Text(
+              'No trending topics yet.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colors.muted),
+            )
+          else
+            ...topics.map(
+              (topic) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      topic.tag,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colors.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    Text(
+                      '${topic.mentions} mentions',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: colors.muted),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -1363,10 +1717,12 @@ class _NewsItem {
     required this.title,
     required this.body,
     required this.category,
+    required this.tags,
     required this.priority,
     required this.isPinned,
     required this.author,
     required this.dateLabel,
+    required this.publishedAt,
     required this.views,
   });
 
@@ -1374,11 +1730,27 @@ class _NewsItem {
   final String title;
   final String body;
   final String category;
+  final List<String> tags;
   final _NewsPriority priority;
   final bool isPinned;
   final String author;
   final String dateLabel;
+  final DateTime publishedAt;
   final int views;
+}
+
+class _UpcomingEvent {
+  const _UpcomingEvent({
+    required this.title,
+    required this.dateLabel,
+    required this.timeLabel,
+    required this.startsAt,
+  });
+
+  final String title;
+  final String dateLabel;
+  final String timeLabel;
+  final DateTime startsAt;
 }
 
 enum _NewsPriority { high, medium, low }
@@ -1408,12 +1780,18 @@ class _NewsStats {
   final int activeAlerts;
 
   factory _NewsStats.fromPosts(List<_NewsItem> posts) {
-    final totalViews = posts.fold<int>(0, (sum, post) => sum + post.views);
-    final activeAlerts = posts
+    final now = DateTime.now();
+    final cutoff = now.subtract(const Duration(days: 7));
+    final recentPosts = posts
+        .where((post) => post.publishedAt.toLocal().isAfter(cutoff))
+        .toList();
+    final totalViews =
+        recentPosts.fold<int>(0, (sum, post) => sum + post.views);
+    final activeAlerts = recentPosts
         .where((post) => post.priority == _NewsPriority.high)
         .length;
     return _NewsStats(
-      newPosts: posts.length,
+      newPosts: recentPosts.length,
       totalViews: totalViews,
       activeAlerts: activeAlerts,
     );

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -96,6 +97,8 @@ class _FormsPageState extends ConsumerState<FormsPage> {
   }
 
   Widget _buildHeader(BuildContext context, bool canManageForms) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 768;
@@ -104,20 +107,22 @@ class _FormsPageState extends ConsumerState<FormsPage> {
           children: [
             Text(
               'Forms Management',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
             ),
             const SizedBox(height: 4),
             Text(
               'Create and manage forms for data collection',
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: isDark ? Colors.grey[400] : Colors.grey[600],
+              ),
             ),
           ],
         );
 
         final controls = Wrap(
-          spacing: 8,
+          spacing: 12,
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
@@ -128,7 +133,18 @@ class _FormsPageState extends ConsumerState<FormsPage> {
             if (canManageForms)
               FilledButton.icon(
                 onPressed: () => _openFormEditor(context),
-                icon: const Icon(Icons.add),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  elevation: 2,
+                  shadowColor: const Color(0xFF2563EB).withValues(alpha: 0.2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                icon: const Icon(Icons.add, size: 16),
                 label: Text(isWide ? 'Create New Form' : 'New Form'),
               ),
           ],
@@ -160,70 +176,130 @@ class _FormsPageState extends ConsumerState<FormsPage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final inputBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(
+        color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+      ),
+    );
+    InputDecoration inputDecoration({IconData? prefixIcon, String? hintText}) {
+      return InputDecoration(
+        prefixIcon: prefixIcon == null
+            ? null
+            : Icon(
+                prefixIcon,
+                size: 20,
+                color: isDark
+                    ? const Color(0xFF6B7280)
+                    : const Color(0xFF9CA3AF),
+              ),
+        hintText: hintText,
+        hintStyle: TextStyle(
+          color: isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+        ),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: inputBorder,
+        enabledBorder: inputBorder,
+        focusedBorder: inputBorder.copyWith(
+          borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 768;
-          final children = [
-            Expanded(
-              flex: isWide ? 2 : 0,
-              child: TextField(
-                controller: _searchController,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Search forms...',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (value) {
-                  setState(() => _searchQuery = value.trim().toLowerCase());
-                },
+          Widget searchField() {
+            return TextField(
+              controller: _searchController,
+              decoration: inputDecoration(
+                prefixIcon: Icons.search,
+                hintText: 'Search forms...',
               ),
-            ),
-            SizedBox(width: isWide ? 12 : 0, height: isWide ? 0 : 12),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                value: _filterCategory,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                ),
-                items: categories
-                    .map(
-                      (category) => DropdownMenuItem(
-                        value: category,
-                        child: Text(
-                          category == 'all' ? 'All Categories' : category,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+              onChanged: (value) {
+                setState(() => _searchQuery = value.trim().toLowerCase());
+              },
+            );
+          }
+
+          Widget categoryField() {
+            return DropdownButtonFormField<String>(
+              value: _filterCategory,
+              isExpanded: true,
+              decoration: inputDecoration(),
+              dropdownColor:
+                  isDark ? const Color(0xFF111827) : Colors.white,
+              items: categories
+                  .map(
+                    (category) => DropdownMenuItem(
+                      value: category,
+                      child: Text(
+                        category == 'all' ? 'All Categories' : category,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  setState(() => _filterCategory = value ?? 'all');
-                },
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() => _filterCategory = value ?? 'all');
+              },
+            );
+          }
+
+          final filterButton = OutlinedButton.icon(
+            onPressed: () {},
+            icon: const Icon(Icons.filter_list, size: 20),
+            label: const Text('More Filters'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor:
+                  isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+              side: BorderSide(
+                color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
-            SizedBox(width: isWide ? 12 : 0, height: isWide ? 0 : 12),
-            OutlinedButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.filter_list),
-              label: const Text('More Filters'),
-            ),
-          ];
+          );
 
           if (isWide) {
-            return Row(children: children);
+            return Row(
+              children: [
+                Expanded(child: searchField()),
+                const SizedBox(width: 12),
+                Expanded(child: categoryField()),
+                const SizedBox(width: 12),
+                Expanded(child: filterButton),
+              ],
+            );
           }
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
+            children: [
+              searchField(),
+              const SizedBox(height: 12),
+              categoryField(),
+              const SizedBox(height: 12),
+              SizedBox(width: double.infinity, child: filterButton),
+            ],
           );
         },
       ),
@@ -239,14 +315,14 @@ class _FormsPageState extends ConsumerState<FormsPage> {
       return LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          final crossAxisCount = width >= 1100 ? 3 : (width >= 720 ? 2 : 1);
+          final crossAxisCount = width >= 1024 ? 3 : (width >= 768 ? 2 : 1);
           return GridView.count(
             crossAxisCount: crossAxisCount,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 16,
             crossAxisSpacing: 16,
-            childAspectRatio: crossAxisCount > 1 ? 0.9 : 0.85,
+            childAspectRatio: crossAxisCount > 1 ? 0.95 : 0.85,
             children: forms
                 .map(
                   (form) => _FormGridCard(
@@ -320,12 +396,14 @@ class _FormsPageState extends ConsumerState<FormsPage> {
   }
 
   List<String> _buildCategories(List<_FormViewModel> forms) {
-    final set = <String>{};
+    final seen = <String>{};
+    final categories = <String>[];
     for (final form in forms) {
       if (form.category.trim().isEmpty) continue;
-      set.add(form.category);
+      if (seen.add(form.category)) {
+        categories.add(form.category);
+      }
     }
-    final categories = set.toList()..sort();
     return ['all', ...categories];
   }
 
@@ -333,13 +411,11 @@ class _FormsPageState extends ConsumerState<FormsPage> {
     return forms.where((form) {
       final matchesSearch = _searchQuery.isEmpty ||
           form.title.toLowerCase().contains(_searchQuery) ||
-          form.category.toLowerCase().contains(_searchQuery) ||
-          form.tags.any((tag) => tag.toLowerCase().contains(_searchQuery));
+          form.category.toLowerCase().contains(_searchQuery);
       final matchesCategory =
           _filterCategory == 'all' || form.category == _filterCategory;
       return matchesSearch && matchesCategory;
-    }).toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    }).toList();
   }
 
   Map<String, int> _buildSubmissionCounts(List<FormSubmission> submissions) {
@@ -425,7 +501,7 @@ class _FormStatsGrid extends StatelessWidget {
         isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 900 ? 4 : 2;
+        final crossAxisCount = constraints.maxWidth >= 768 ? 4 : 2;
         return GridView.count(
           crossAxisCount: crossAxisCount,
           shrinkWrap: true,
@@ -494,16 +570,16 @@ class _FormStatCard extends StatelessWidget {
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final resolvedNoteColor = noteColor ?? const Color(0xFF6B7280);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -517,14 +593,17 @@ class _FormStatCard extends StatelessWidget {
                 child: Text(
                   label,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: isDark
+                        ? const Color(0xFF9CA3AF)
+                        : const Color(0xFF6B7280),
+                    fontWeight: FontWeight.w600,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   softWrap: false,
                 ),
               ),
-              Icon(icon, color: color),
+              Icon(icon, color: color, size: 20),
             ],
           ),
           const SizedBox(height: 6),
@@ -539,7 +618,7 @@ class _FormStatCard extends StatelessWidget {
             note,
             style: theme.textTheme.labelSmall?.copyWith(
               color: resolvedNoteColor,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -548,7 +627,7 @@ class _FormStatCard extends StatelessWidget {
   }
 }
 
-class _FormGridCard extends StatelessWidget {
+class _FormGridCard extends StatefulWidget {
   const _FormGridCard({
     required this.model,
     required this.canManageForms,
@@ -566,162 +645,197 @@ class _FormGridCard extends StatelessWidget {
   final VoidCallback onDuplicate;
 
   @override
+  State<_FormGridCard> createState() => _FormGridCardState();
+}
+
+class _FormGridCardState extends State<_FormGridCard> {
+  bool _isHovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final formatter = NumberFormat.decimalPattern();
-    final menuItems = <PopupMenuEntry<String>>[
-      const PopupMenuItem(value: 'view', child: Text('View details')),
-      if (canManageForms)
-        const PopupMenuItem(value: 'edit', child: Text('Edit form')),
-      if (canManageForms)
-        const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
-    ];
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
+    final supportsHover = kIsWeb ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux;
+    final showHoverShadow = supportsHover && _isHovered;
+    final showMenuButton = !supportsHover || _isHovered;
+    final moreIconColor =
+        isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF);
+    final fillButtonStyle = FilledButton.styleFrom(
+      backgroundColor: const Color(0xFF2563EB),
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      textStyle: theme.textTheme.bodySmall?.copyWith(
+        fontWeight: FontWeight.w600,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _FormIconBadge(isDark: isDark),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (model.starred)
-                          const Icon(
-                            Icons.star,
-                            size: 16,
-                            color: Color(0xFFFBBF24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+    );
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+          boxShadow: showHoverShadow
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+              : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _FormIconBadge(isDark: isDark),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (widget.model.starred)
+                            const Icon(
+                              Icons.star,
+                              size: 16,
+                              color: Color(0xFFFBBF24),
+                            ),
+                          if (widget.model.starred) const SizedBox(width: 6),
+                          _StatusPill(status: widget.model.status),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.model.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.model.category,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: isDark
+                              ? const Color(0xFF9CA3AF)
+                              : const Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 150),
+                  opacity: showMenuButton ? 1 : 0,
+                  child: IgnorePointer(
+                    ignoring: !showMenuButton,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () {},
+                        borderRadius: BorderRadius.circular(6),
+                        hoverColor: isDark
+                            ? const Color(0xFF374151)
+                            : const Color(0xFFF3F4F6),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.more_horiz,
+                            size: 20,
+                            color: moreIconColor,
                           ),
-                        if (model.starred) const SizedBox(width: 6),
-                        _StatusPill(status: model.status),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      model.title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      model.category,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuButton<String>(
-                icon: Icon(
-                  Icons.more_horiz,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                onSelected: (value) {
-                  switch (value) {
-                    case 'view':
-                      onView();
-                      break;
-                    case 'edit':
-                      onEdit();
-                      break;
-                    case 'duplicate':
-                      onDuplicate();
-                      break;
-                  }
-                },
-                itemBuilder: (context) => menuItems,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(height: 1, color: border),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _FormStatTile(
-                  label: 'Submissions',
-                  value: formatter.format(model.submissions),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _FormStatTile(
-                  label: 'Fields',
-                  value: '${model.fields}',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _FormStatTile(
-                  label: 'Author',
-                  value: model.authorShort,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _FormStatTile(
-                  label: 'Updated',
-                  value: model.updatedLabel,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton(
-                  onPressed: onFill,
-                  child: const Text('Fill Form'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _IconActionButton(
-                icon: Icons.visibility_outlined,
-                onPressed: onView,
-              ),
-              if (canManageForms) ...[
-                const SizedBox(width: 8),
-                _IconActionButton(
-                  icon: Icons.edit_outlined,
-                  onPressed: onEdit,
-                ),
-                const SizedBox(width: 8),
-                _IconActionButton(
-                  icon: Icons.copy_outlined,
-                  onPressed: onDuplicate,
+                  ),
                 ),
               ],
-            ],
-          ),
-        ],
+            ),
+            const SizedBox(height: 12),
+            Container(height: 1, color: border),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _FormStatTile(
+                    label: 'Submissions',
+                    value: formatter.format(widget.model.submissions),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _FormStatTile(
+                    label: 'Fields',
+                    value: '${widget.model.fields}',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _FormStatTile(
+                    label: 'Author',
+                    value: widget.model.authorShort,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _FormStatTile(
+                    label: 'Updated',
+                    value: widget.model.updatedLabel,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    onPressed: widget.onFill,
+                    style: fillButtonStyle,
+                    child: const Text('Fill Form'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _IconActionButton(
+                  icon: Icons.visibility_outlined,
+                  onPressed: widget.onView,
+                ),
+                if (widget.canManageForms) ...[
+                  const SizedBox(width: 8),
+                  _IconActionButton(
+                    icon: Icons.edit_outlined,
+                    onPressed: widget.onEdit,
+                  ),
+                  const SizedBox(width: 8),
+                  _IconActionButton(
+                    icon: Icons.copy_outlined,
+                    onPressed: widget.onDuplicate,
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -756,13 +870,20 @@ class _FormListTable extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 1000),
+          constraints: const BoxConstraints(minWidth: 800),
           child: Column(
             children: [
               Container(
@@ -770,7 +891,7 @@ class _FormListTable extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: headerBackground,
                   borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(16)),
+                      const BorderRadius.vertical(top: Radius.circular(12)),
                   border: Border(bottom: BorderSide(color: border)),
                 ),
                 child: Row(
@@ -787,88 +908,18 @@ class _FormListTable extends StatelessWidget {
                 ),
               ),
               ...forms.map(
-                (form) => Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    border: Border(bottom: BorderSide(color: border)),
-                  ),
-                  child: Row(
-                    children: [
-                      _TableCell(
-                        flex: 3,
-                        child: Row(
-                          children: [
-                            if (form.starred)
-                              const Padding(
-                                padding: EdgeInsets.only(right: 6),
-                                child: Icon(
-                                  Icons.star,
-                                  size: 16,
-                                  color: Color(0xFFFBBF24),
-                                ),
-                              ),
-                            Expanded(
-                              child: Text(
-                                form.title,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      _TableCell(flex: 2, child: Text(form.category)),
-                      _TableCell(
-                        flex: 2,
-                        child: Text(
-                          formatter.format(form.submissions),
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      _TableCell(flex: 1, child: Text('${form.fields}')),
-                      _TableCell(flex: 2, child: Text(form.author)),
-                      _TableCell(flex: 1, child: Text(form.updatedLabel)),
-                      _TableCell(
-                        flex: 1,
-                        child: _StatusPill(status: form.status),
-                      ),
-                      _TableCell(
-                        flex: 2,
-                        child: Row(
-                          children: [
-                            TextButton(
-                              onPressed: () => onFill(form.form),
-                              style: TextButton.styleFrom(
-                                foregroundColor: fillColor,
-                                padding: EdgeInsets.zero,
-                                minimumSize: const Size(0, 0),
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: const Text('Fill'),
-                            ),
-                            if (canManageForms) ...[
-                              const SizedBox(width: 8),
-                              TextButton(
-                                onPressed: () => onEdit(form.form),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: editColor,
-                                  padding: EdgeInsets.zero,
-                                  minimumSize: const Size(0, 0),
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                child: const Text('Edit'),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                (form) => _FormTableRow(
+                  form: form,
+                  formatter: formatter,
+                  canManageForms: canManageForms,
+                  onFill: onFill,
+                  onEdit: onEdit,
+                  border: border,
+                  fillColor: fillColor,
+                  editColor: editColor,
+                  hoverBackground: isDark
+                      ? const Color(0xFF374151).withValues(alpha: 0.5)
+                      : const Color(0xFFF9FAFB),
                 ),
               ),
             ],
@@ -893,6 +944,7 @@ class _FormViewModel {
     required this.authorShort,
     required this.updatedAt,
     required this.tags,
+    required this.hiddenFromEmployee,
   });
 
   final FormDefinition form;
@@ -907,6 +959,7 @@ class _FormViewModel {
   final String authorShort;
   final DateTime updatedAt;
   final List<String> tags;
+  final bool hiddenFromEmployee;
 
   String get updatedLabel => DateFormat('MMM d').format(updatedAt);
 
@@ -925,6 +978,9 @@ class _FormViewModel {
     final category = (form.category ?? 'Other').trim();
     final author = _readAuthor(form, metadata);
     final authorShort = author.split(' ').first.isEmpty ? 'Team' : author.split(' ').first;
+    final hidden = metadata['hiddenFromEmployee'] == true ||
+        metadata['hideFromEmployee'] == true ||
+        metadata['employeeHidden'] == true;
     return _FormViewModel(
       form: form,
       id: form.id,
@@ -938,6 +994,7 @@ class _FormViewModel {
       authorShort: authorShort,
       updatedAt: form.updatedAt ?? form.createdAt,
       tags: form.tags ?? const <String>[],
+      hiddenFromEmployee: hidden,
     );
   }
 
@@ -981,7 +1038,8 @@ class _FormStatTile extends StatelessWidget {
         Text(
           label,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+            color: const Color(0xFF6B7280),
+            fontWeight: FontWeight.w500,
           ),
         ),
         const SizedBox(height: 4),
@@ -989,6 +1047,9 @@ class _FormStatTile extends StatelessWidget {
           value,
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: FontWeight.w600,
+            color: theme.brightness == Brightness.dark
+                ? Colors.white
+                : const Color(0xFF111827),
           ),
         ),
       ],
@@ -1034,11 +1095,17 @@ class _IconActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: const Size(0, 40),
+        minimumSize: const Size(0, 36),
+        foregroundColor:
+            isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563),
+        side: BorderSide(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -1065,7 +1132,7 @@ class _StatusPill extends StatelessWidget {
         ? const Color(0xFF4ADE80)
         : (isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151));
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(999),
@@ -1091,12 +1158,12 @@ class _ViewToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6);
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1136,7 +1203,7 @@ class _ToggleButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected
               ? (isDark ? const Color(0xFF374151) : Colors.white)
@@ -1146,15 +1213,15 @@ class _ToggleButton extends StatelessWidget {
               ? [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 6,
-                    offset: const Offset(0, 3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
                   ),
                 ]
               : null,
         ),
         child: Icon(
           icon,
-          size: 18,
+          size: 16,
           color: isSelected
               ? (isDark ? Colors.white : const Color(0xFF111827))
               : (isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280)),
@@ -1179,7 +1246,138 @@ class _TableHeader extends StatelessWidget {
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
               fontWeight: FontWeight.w700,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
+              letterSpacing: 0.6,
             ),
+      ),
+    );
+  }
+}
+
+class _FormTableRow extends StatefulWidget {
+  const _FormTableRow({
+    required this.form,
+    required this.formatter,
+    required this.canManageForms,
+    required this.onFill,
+    required this.onEdit,
+    required this.border,
+    required this.fillColor,
+    required this.editColor,
+    required this.hoverBackground,
+  });
+
+  final _FormViewModel form;
+  final NumberFormat formatter;
+  final bool canManageForms;
+  final ValueChanged<FormDefinition> onFill;
+  final ValueChanged<FormDefinition> onEdit;
+  final Color border;
+  final Color fillColor;
+  final Color editColor;
+  final Color hoverBackground;
+
+  @override
+  State<_FormTableRow> createState() => _FormTableRowState();
+}
+
+class _FormTableRowState extends State<_FormTableRow> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: _isHovered ? widget.hoverBackground : Colors.transparent,
+          border: Border(bottom: BorderSide(color: widget.border)),
+        ),
+        child: Row(
+          children: [
+            _TableCell(
+              flex: 3,
+              child: Row(
+                children: [
+                  if (widget.form.starred)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 6),
+                      child: Icon(
+                        Icons.star,
+                        size: 16,
+                        color: Color(0xFFFBBF24),
+                      ),
+                    ),
+                  Expanded(
+                    child: Text(
+                      widget.form.title,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _TableCell(flex: 2, child: Text(widget.form.category)),
+            _TableCell(
+              flex: 2,
+              child: Text(
+                widget.formatter.format(widget.form.submissions),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            _TableCell(flex: 1, child: Text('${widget.form.fields}')),
+            _TableCell(flex: 2, child: Text(widget.form.author)),
+            _TableCell(flex: 1, child: Text(widget.form.updatedLabel)),
+            _TableCell(
+              flex: 1,
+              child: _StatusPill(status: widget.form.status),
+            ),
+            _TableCell(
+              flex: 2,
+              child: Row(
+                children: [
+                  TextButton(
+                    onPressed: () => widget.onFill(widget.form.form),
+                    style: TextButton.styleFrom(
+                      foregroundColor: widget.fillColor,
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 0),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    child: const Text('Fill'),
+                  ),
+                  if (widget.canManageForms) ...[
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => widget.onEdit(widget.form.form),
+                      style: TextButton.styleFrom(
+                        foregroundColor: widget.editColor,
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 0),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      child: const Text('Edit'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

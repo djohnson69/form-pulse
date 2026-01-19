@@ -17,9 +17,9 @@ import '../../data/assets_provider.dart';
 import '../../data/assets_repository.dart';
 
 class IncidentEditorPage extends ConsumerStatefulWidget {
-  const IncidentEditorPage({required this.asset, super.key});
+  const IncidentEditorPage({this.asset, super.key});
 
-  final Equipment asset;
+  final Equipment? asset;
 
   @override
   ConsumerState<IncidentEditorPage> createState() => _IncidentEditorPageState();
@@ -353,7 +353,7 @@ class _IncidentEditorPageState extends ConsumerState<IncidentEditorPage> {
             inputMedia: attachments,
             metadata: {
               'source': 'incident_report',
-              'equipmentId': widget.asset.id,
+              if (widget.asset != null) 'equipmentId': widget.asset!.id,
               'severity': _severity,
               'occurredAt': _occurredAt.toIso8601String(),
               'hasLocation': _location != null,
@@ -433,7 +433,7 @@ class _IncidentEditorPageState extends ConsumerState<IncidentEditorPage> {
             ? null
             : _categoryController.text.trim(),
         severity: _severity,
-        equipmentId: widget.asset.id,
+        equipmentId: widget.asset?.id,
         occurredAt: _occurredAt,
         location: _location,
         attachments: _attachments.map((e) => e.draft).toList(),

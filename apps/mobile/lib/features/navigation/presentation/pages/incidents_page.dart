@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:shared/shared.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../assets/data/assets_provider.dart';
 import '../../../assets/presentation/pages/incident_editor_page.dart';
+import '../../../dashboard/data/active_role_provider.dart';
 
 class IncidentsPage extends ConsumerStatefulWidget {
   const IncidentsPage({super.key});
@@ -32,6 +34,8 @@ class _IncidentsPageState extends ConsumerState<IncidentsPage> {
     final equipmentNames = {
       for (final asset in equipment) asset.id: asset.name,
     };
+    final role = ref.watch(activeRoleProvider);
+    final canManageIncidents = _canManageIncidents(role);
 
     return Scaffold(
       body: incidentsAsync.when(
@@ -72,8 +76,15 @@ class _IncidentsPageState extends ConsumerState<IncidentsPage> {
                   ...filtered.map(
                     (incident) => _IncidentCard(
                       incident: incident,
-                      onReport: () => _openCreateSheet(context),
+                      canManage: canManageIncidents,
+                      onApprove: () =>
+                          _updateIncidentStatus(context, incident, 'resolved'),
+                      onReview: () =>
+                          _updateIncidentStatus(context, incident, 'under-review'),
                       onView: () => _showDetails(context, incident),
+                      onViewMap: () => _openMap(context, incident),
+                      onViewPhoto: (attachment) =>
+                          _openAttachment(context, attachment),
                     ),
                   ),
                 const SizedBox(height: 80),
@@ -115,11 +126,23 @@ class _IncidentsPageState extends ConsumerState<IncidentsPage> {
               onPressed: () {},
               icon: const Icon(Icons.download_outlined),
               label: const Text('Export Report'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFDC2626),
                 foregroundColor: Colors.white,
+                elevation: 6,
+                shadowColor: const Color(0xFFDC2626).withValues(alpha: 0.3),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               onPressed: () => _openCreateSheet(context),
               icon: const Icon(Icons.add),
@@ -246,6 +269,16 @@ class _IncidentsPageState extends ConsumerState<IncidentsPage> {
       ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
   }
 
+  bool _canManageIncidents(UserRole role) {
+    return role == UserRole.supervisor ||
+        role == UserRole.manager ||
+        role == UserRole.maintenance ||
+        role == UserRole.techSupport ||
+        role == UserRole.admin ||
+        role == UserRole.superAdmin ||
+        role == UserRole.developer;
+  }
+
   void _clearFilters() {
     setState(() {
       _searchController.clear();
@@ -255,68 +288,86 @@ class _IncidentsPageState extends ConsumerState<IncidentsPage> {
     });
   }
 
-  Future<void> _openCreateSheet(BuildContext context) async {
-    final equipment = await ref.read(equipmentProvider.future);
-    if (!context.mounted) return;
-    if (equipment.isEmpty) {
+  Future<void> _updateIncidentStatus(
+    BuildContext context,
+    _IncidentViewModel incident,
+    String status,
+  ) async {
+    final repo = ref.read(assetsRepositoryProvider);
+    try {
+      await repo.updateIncidentStatus(
+        incidentId: incident.id,
+        status: status,
+      );
+      if (!context.mounted) return;
+      ref.invalidate(incidentReportsProvider(null));
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add equipment before logging incidents.')),
+        SnackBar(
+          content: Text(
+            status == 'resolved'
+                ? 'Incident approved and marked resolved.'
+                : 'Incident moved to under review.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Update failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _openMap(BuildContext context, _IncidentViewModel incident) async {
+    final address = incident.geoAddress?.trim();
+    String? query;
+    if (incident.geoLat != null && incident.geoLng != null) {
+      query = '${incident.geoLat},${incident.geoLng}';
+    } else if (address != null && address.isNotEmpty) {
+      query = address;
+    }
+    if (query == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location is not available.')),
       );
       return;
     }
-    Equipment? selected = equipment.first;
-    final result = await showModalBottomSheet<Equipment?>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-          ),
-          child: StatefulBuilder(
-            builder: (context, setState) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Select asset',
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<Equipment>(
-                    value: selected,
-                    decoration: const InputDecoration(
-                      labelText: 'Asset',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: equipment
-                        .map(
-                          (asset) => DropdownMenuItem(
-                            value: asset,
-                            child: Text(asset.name),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setState(() => selected = value),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () => Navigator.of(context).pop(selected),
-                    child: const Text('Continue'),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      },
-    );
+    final uri =
+        Uri.parse('https://www.google.com/maps/search/?api=1&query=$query');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
     if (!context.mounted) return;
-    if (result == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to open map.')),
+    );
+  }
+
+  Future<void> _openAttachment(
+    BuildContext context,
+    MediaAttachment attachment,
+  ) async {
+    final uri = Uri.tryParse(attachment.url);
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Attachment link is invalid.')),
+      );
+      return;
+    }
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to open attachment.')),
+    );
+  }
+
+  Future<void> _openCreateSheet(BuildContext context) async {
     await Navigator.of(context).push<IncidentReport?>(
-      MaterialPageRoute(builder: (_) => IncidentEditorPage(asset: result)),
+      MaterialPageRoute(builder: (_) => const IncidentEditorPage()),
     );
     ref.invalidate(incidentReportsProvider(null));
   }
@@ -371,6 +422,9 @@ class _IncidentStatsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final formatter = NumberFormat.decimalPattern();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedNote =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = constraints.maxWidth >= 900 ? 4 : 2;
@@ -386,8 +440,9 @@ class _IncidentStatsGrid extends StatelessWidget {
               label: 'Total Incidents',
               value: formatter.format(stats.total),
               note: 'This month',
-              icon: Icons.report_outlined,
+              icon: Icons.warning_amber_outlined,
               color: const Color(0xFF3B82F6),
+              noteColor: mutedNote,
             ),
             _IncidentStatCard(
               label: 'Pending Review',
@@ -424,6 +479,7 @@ class _IncidentStatCard extends StatelessWidget {
     required this.note,
     required this.icon,
     required this.color,
+    this.noteColor,
   });
 
   final String label;
@@ -431,6 +487,7 @@ class _IncidentStatCard extends StatelessWidget {
   final String note;
   final IconData icon;
   final Color color;
+  final Color? noteColor;
 
   @override
   Widget build(BuildContext context) {
@@ -477,7 +534,7 @@ class _IncidentStatCard extends StatelessWidget {
           Text(
             note,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
+              color: noteColor ?? color,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -504,6 +561,7 @@ class _IncidentViewModel {
     required this.videoCount,
     required this.audioCount,
     required this.witnesses,
+    required this.photoTimeline,
     required this.geoAddress,
     required this.geoLat,
     required this.geoLng,
@@ -524,11 +582,12 @@ class _IncidentViewModel {
   final int videoCount;
   final int audioCount;
   final int witnesses;
+  final List<_PhotoTimelineItem> photoTimeline;
   final String? geoAddress;
   final double? geoLat;
   final double? geoLng;
 
-  String get dateLabel => DateFormat('MMM d, y').format(occurredAt);
+  String get dateLabel => DateFormat.yMd().format(occurredAt);
 
   factory _IncidentViewModel.fromIncident(
     IncidentReport incident, {
@@ -547,8 +606,9 @@ class _IncidentViewModel {
         'Unassigned';
     final category = _readString(incident.category, 'General') ?? 'General';
     final attachments = incident.attachments ?? const <MediaAttachment>[];
-    final photoCount =
-        attachments.where((a) => _isType(a, 'photo', 'image')).length;
+    final photoAttachments =
+        attachments.where((a) => _isType(a, 'photo', 'image')).toList();
+    final photoCount = photoAttachments.length;
     final videoCount =
         attachments.where((a) => _isType(a, 'video', 'video')).length;
     final audioCount =
@@ -560,6 +620,23 @@ class _IncidentViewModel {
     final geoAddress = locationData?.address;
     final geoLat = locationData?.latitude;
     final geoLng = locationData?.longitude;
+    final photoTimeline = photoAttachments
+        .map(
+          (attachment) => _PhotoTimelineItem(
+            attachment: attachment,
+            timeLabel: DateFormat.jm().format(
+              attachment.capturedAt.toLocal(),
+            ),
+            description: _readString(
+                  attachment.metadata?['description'],
+                  null,
+                ) ??
+                _readString(attachment.metadata?['caption'], null) ??
+                'Photo captured',
+          ),
+        )
+        .toList()
+      ..sort((a, b) => a.attachment.capturedAt.compareTo(b.attachment.capturedAt));
 
     return _IncidentViewModel(
       incident: incident,
@@ -577,6 +654,7 @@ class _IncidentViewModel {
       videoCount: videoCount,
       audioCount: audioCount,
       witnesses: witnesses,
+      photoTimeline: photoTimeline,
       geoAddress: geoAddress,
       geoLat: geoLat,
       geoLng: geoLng,
@@ -635,16 +713,36 @@ class _IncidentViewModel {
   }
 }
 
+class _PhotoTimelineItem {
+  const _PhotoTimelineItem({
+    required this.attachment,
+    required this.timeLabel,
+    required this.description,
+  });
+
+  final MediaAttachment attachment;
+  final String timeLabel;
+  final String description;
+}
+
 class _IncidentCard extends StatelessWidget {
   const _IncidentCard({
     required this.incident,
-    required this.onReport,
+    required this.canManage,
+    required this.onApprove,
+    required this.onReview,
     required this.onView,
+    required this.onViewMap,
+    required this.onViewPhoto,
   });
 
   final _IncidentViewModel incident;
-  final VoidCallback onReport;
+  final bool canManage;
+  final VoidCallback onApprove;
+  final VoidCallback onReview;
   final VoidCallback onView;
+  final VoidCallback onViewMap;
+  final ValueChanged<MediaAttachment> onViewPhoto;
 
   @override
   Widget build(BuildContext context) {
@@ -721,17 +819,38 @@ class _IncidentCard extends StatelessWidget {
                 _IncidentMetaRow(incident: incident),
                 if (incident.geoAddress != null ||
                     (incident.geoLat != null && incident.geoLng != null))
-                  _GeoLocationCard(incident: incident),
+                  _GeoLocationCard(
+                    incident: incident,
+                    onViewMap: onViewMap,
+                  ),
+                if (incident.photoTimeline.isNotEmpty)
+                  _PhotoTimelineCard(
+                    incident: incident,
+                    onViewPhoto: onViewPhoto,
+                  ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    if (incident.status == 'pending')
+                    if (canManage && incident.status == 'pending') ...[
                       FilledButton(
-                        onPressed: onReport,
+                        onPressed: onApprove,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF16A34A),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Approve'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: onReview,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF2563EB),
+                          foregroundColor: Colors.white,
+                        ),
                         child: const Text('Review'),
                       ),
-                    if (incident.status == 'pending')
                       const SizedBox(width: 8),
+                    ],
                     OutlinedButton.icon(
                       onPressed: onView,
                       icon: const Icon(Icons.visibility_outlined),
@@ -870,12 +989,14 @@ class _IncidentMetaRow extends StatelessWidget {
             icon: Icons.videocam_outlined,
             label: '${incident.videoCount} videos',
             style: metaStyle,
+            iconColor: const Color(0xFF8B5CF6),
           ),
         if (incident.audioCount > 0)
           _MetaItem(
             icon: Icons.mic_none,
             label: '${incident.audioCount} audio',
             style: metaStyle,
+            iconColor: const Color(0xFF3B82F6),
           ),
         _MetaItem(
           icon: Icons.visibility_outlined,
@@ -893,18 +1014,20 @@ class _MetaItem extends StatelessWidget {
     required this.icon,
     required this.label,
     this.style,
+    this.iconColor,
   });
 
   final IconData icon;
   final String label;
   final TextStyle? style;
+  final Color? iconColor;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 16, color: style?.color),
+        Icon(icon, size: 16, color: iconColor ?? style?.color),
         const SizedBox(width: 4),
         Text(label, style: style),
       ],
@@ -935,9 +1058,13 @@ class _CategoryPill extends StatelessWidget {
 }
 
 class _GeoLocationCard extends StatelessWidget {
-  const _GeoLocationCard({required this.incident});
+  const _GeoLocationCard({
+    required this.incident,
+    required this.onViewMap,
+  });
 
   final _IncidentViewModel incident;
+  final VoidCallback onViewMap;
 
   @override
   Widget build(BuildContext context) {
@@ -988,8 +1115,163 @@ class _GeoLocationCard extends StatelessWidget {
             ),
           ),
           TextButton(
-            onPressed: () {},
+            onPressed: onViewMap,
+            style: TextButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              textStyle: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
             child: const Text('View Map'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotoTimelineCard extends StatelessWidget {
+  const _PhotoTimelineCard({
+    required this.incident,
+    required this.onViewPhoto,
+  });
+
+  final _IncidentViewModel incident;
+  final ValueChanged<MediaAttachment> onViewPhoto;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.schedule,
+                  size: 16,
+                  color:
+                      isDark ? const Color(0xFFC084FC) : const Color(0xFF7C3AED)),
+              const SizedBox(width: 8),
+              Text(
+                'Time-Stamped Photo Evidence',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF111827),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF5B21B6).withOpacity(0.2)
+                      : const Color(0xFFEDE9FE),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '${incident.photoTimeline.length} photos',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color:
+                        isDark ? const Color(0xFFC084FC) : const Color(0xFF6D28D9),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...incident.photoTimeline.map(
+            (item) => Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1F2937) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color:
+                          isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.photo_camera_outlined,
+                      color: isDark
+                          ? const Color(0xFF9CA3AF)
+                          : const Color(0xFF6B7280),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.timeLabel,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: isDark
+                                ? const Color(0xFFC084FC)
+                                : const Color(0xFF6D28D9),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          item.description,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: isDark
+                                ? const Color(0xFF9CA3AF)
+                                : const Color(0xFF6B7280),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => onViewPhoto(item.attachment),
+                    style: TextButton.styleFrom(
+                      backgroundColor: isDark
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFF3F4F6),
+                      foregroundColor: isDark
+                          ? const Color(0xFFD1D5DB)
+                          : const Color(0xFF374151),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      textStyle: theme.textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text('View'),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

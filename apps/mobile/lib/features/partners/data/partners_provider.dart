@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 
 import '../../dashboard/data/dashboard_provider.dart';
+import 'message_models.dart';
 import 'partners_repository.dart';
 
 final partnersRepositoryProvider = Provider<PartnersRepositoryBase>((ref) {
@@ -25,8 +26,14 @@ final messageThreadsProvider =
   return repo.fetchThreadPreviews();
 });
 
-final threadMessagesProvider =
-    FutureProvider.autoDispose.family<List<Message>, String>((ref, threadId) async {
+final threadMessagesProvider = FutureProvider.autoDispose
+    .family<ThreadMessagesBundle, String>((ref, threadId) async {
   final repo = ref.read(partnersRepositoryProvider);
-  return repo.fetchMessages(threadId);
+  return repo.fetchThreadDetails(threadId);
+});
+
+final threadParticipantsProvider = FutureProvider.autoDispose
+    .family<List<MessageParticipantEntry>, String>((ref, threadId) async {
+  final repo = ref.read(partnersRepositoryProvider);
+  return repo.fetchThreadParticipants(threadId);
 });

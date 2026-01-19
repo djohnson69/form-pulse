@@ -41,6 +41,20 @@ class AutomationRunSummary {
   final Map<String, int> breakdown;
 }
 
+class MentionCandidate {
+  MentionCandidate({
+    required this.id,
+    required this.name,
+    required this.handle,
+    this.email,
+  });
+
+  final String id;
+  final String name;
+  final String handle;
+  final String? email;
+}
+
 abstract class OpsRepositoryBase {
   Future<List<NewsPost>> fetchNewsPosts();
   Future<NewsPost> createNewsPost({
@@ -121,6 +135,7 @@ abstract class OpsRepositoryBase {
     List<String> mentions,
     AttachmentDraft? voiceNote,
   });
+  Future<List<MentionCandidate>> fetchMentionCandidates();
 
   Future<List<WebhookEndpoint>> fetchWebhookEndpoints();
   Future<WebhookEndpoint> createWebhookEndpoint({
@@ -775,6 +790,50 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
       }
     }
     return _mapPhotoComment(Map<String, dynamic>.from(res as Map));
+  }
+
+  @override
+  Future<List<MentionCandidate>> fetchMentionCandidates() async {
+    final orgId = await _getOrgId();
+    if (orgId == null) return const [];
+    try {
+      final rows = await _client
+          .from('profiles')
+          .select('id, email, first_name, last_name, is_active')
+          .eq('org_id', orgId)
+          .eq('is_active', true);
+      return _mapMentionCandidates(rows);
+    } on PostgrestException catch (e, st) {
+      if (e.message.contains('is_active') || e.code == '42703') {
+        try {
+          final rows = await _client
+              .from('profiles')
+              .select('id, email, first_name, last_name')
+              .eq('org_id', orgId);
+          return _mapMentionCandidates(rows);
+        } catch (err, stack) {
+          developer.log(
+            'Supabase fetchMentionCandidates failed',
+            error: err,
+            stackTrace: stack,
+          );
+          return const [];
+        }
+      }
+      developer.log(
+        'Supabase fetchMentionCandidates failed',
+        error: e,
+        stackTrace: st,
+      );
+      return const [];
+    } catch (e, st) {
+      developer.log(
+        'Supabase fetchMentionCandidates failed',
+        error: e,
+        stackTrace: st,
+      );
+      return const [];
+    }
   }
 
   @override
@@ -1482,6 +1541,51 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
     } catch (_) {
       return const [];
     }
+  }
+
+  List<MentionCandidate> _mapMentionCandidates(List<dynamic> rows) {
+    final candidates = <MentionCandidate>[];
+    for (final row in rows) {
+      final data = Map<String, dynamic>.from(row as Map);
+      final id = data['id']?.toString();
+      if (id == null || id.isEmpty) continue;
+      final email = data['email']?.toString();
+      final first = data['first_name']?.toString().trim();
+      final last = data['last_name']?.toString().trim();
+      final fullName = [
+        if (first != null && first.isNotEmpty) first,
+        if (last != null && last.isNotEmpty) last,
+      ].join(' ');
+      final handle = _primaryHandleForProfile(data);
+      final name = fullName.isNotEmpty
+          ? fullName
+          : (email?.isNotEmpty == true ? email! : handle);
+      candidates.add(
+        MentionCandidate(
+          id: id,
+          name: name,
+          handle: handle,
+          email: email,
+        ),
+      );
+    }
+    candidates.sort((a, b) => a.name.compareTo(b.name));
+    return candidates;
+  }
+
+  String _primaryHandleForProfile(Map<String, dynamic> row) {
+    final email = row['email']?.toString().toLowerCase() ?? '';
+    if (email.isNotEmpty) {
+      final prefix = email.split('@').first;
+      if (prefix.isNotEmpty) return prefix;
+      return email;
+    }
+    final first = row['first_name']?.toString().toLowerCase().trim() ?? '';
+    final last = row['last_name']?.toString().toLowerCase().trim() ?? '';
+    if (first.isNotEmpty && last.isNotEmpty) return '$first$last';
+    if (first.isNotEmpty) return first;
+    if (last.isNotEmpty) return last;
+    return row['id']?.toString() ?? 'user';
   }
 
   Set<String> _profileHandles(Map<String, dynamic> row) {

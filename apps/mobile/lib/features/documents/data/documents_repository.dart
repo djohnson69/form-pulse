@@ -12,37 +12,54 @@ class DocumentSignature {
     required this.url,
     required this.signedAt,
     this.signerName,
+    this.signerEmail,
+    this.signerRole,
     this.signerId,
     this.storagePath,
     this.bucket,
+    this.location,
   });
 
   final String url;
   final DateTime signedAt;
   final String? signerName;
+  final String? signerEmail;
+  final String? signerRole;
   final String? signerId;
   final String? storagePath;
   final String? bucket;
+  final Map<String, dynamic>? location;
 
   Map<String, dynamic> toJson() {
     return {
       'url': url,
       'signedAt': signedAt.toIso8601String(),
       'signerName': signerName,
+      'signerEmail': signerEmail,
+      'signerRole': signerRole,
       'signerId': signerId,
       'storagePath': storagePath,
       'bucket': bucket,
+      'location': location,
     };
   }
 
   factory DocumentSignature.fromJson(Map<String, dynamic> json) {
+    final rawLocation = json['location'];
+    Map<String, dynamic>? location;
+    if (rawLocation is Map) {
+      location = Map<String, dynamic>.from(rawLocation);
+    }
     return DocumentSignature(
       url: json['url'] as String,
       signedAt: DateTime.parse(json['signedAt'] as String),
       signerName: json['signerName'] as String?,
+      signerEmail: json['signerEmail'] as String?,
+      signerRole: json['signerRole'] as String?,
       signerId: json['signerId'] as String?,
       storagePath: json['storagePath'] as String? ?? json['path'] as String?,
       bucket: json['bucket'] as String?,
+      location: location,
     );
   }
 }
@@ -98,6 +115,9 @@ abstract class DocumentsRepositoryBase {
     required Document document,
     required Uint8List bytes,
     String? signerName,
+    String? signerEmail,
+    String? signerRole,
+    Map<String, dynamic>? location,
   });
   Future<void> deleteDocument({required Document document});
 }
@@ -379,6 +399,9 @@ class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
     required Document document,
     required Uint8List bytes,
     String? signerName,
+    String? signerEmail,
+    String? signerRole,
+    Map<String, dynamic>? location,
   }) async {
     final orgId = await _getOrgId();
     if (orgId == null) {
@@ -399,9 +422,12 @@ class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
       url: path,
       signedAt: DateTime.now(),
       signerName: signerName,
+      signerEmail: signerEmail,
+      signerRole: signerRole,
       signerId: _client.auth.currentUser?.id,
       storagePath: path,
       bucket: _bucketName,
+      location: location,
     );
     signatures.add(signature);
     final updatedMetadata = {

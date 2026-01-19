@@ -27,9 +27,7 @@ class _SystemLogsPageState extends ConsumerState<SystemLogsPage> {
   Widget build(BuildContext context) {
     final auditAsync = ref.watch(adminAuditProvider);
     final auditEvents = auditAsync.asData?.value ?? const <AdminAuditEvent>[];
-    final logs = auditEvents.isNotEmpty
-        ? _logsFromAudit(auditEvents)
-        : _demoLogs;
+    final logs = _logsFromAudit(auditEvents);
     final filteredLogs = logs.where((log) {
       final matchesSearch = log.message
               .toLowerCase()
@@ -181,8 +179,59 @@ class _SystemLogsPageState extends ConsumerState<SystemLogsPage> {
   Widget _buildFilters(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final borderColor =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final filters = const ['all', 'error', 'warning', 'info', 'success'];
+    final searchDecoration = InputDecoration(
+      prefixIcon: Icon(Icons.search, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+      hintText: 'Search logs...',
+      filled: true,
+      fillColor: isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF2563EB)),
+      ),
+    );
+    final filterButtons = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: filters.map((filter) {
+        final isSelected = _selectedFilter == filter;
+        return TextButton(
+          onPressed: () => setState(() => _selectedFilter = filter),
+          style: TextButton.styleFrom(
+            backgroundColor: isSelected
+                ? const Color(0xFF2563EB)
+                : (isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6)),
+            foregroundColor:
+                isSelected ? Colors.white : (isDark ? Colors.white : const Color(0xFF374151)),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: Text(
+            _capitalize(filter),
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        );
+      }).toList(),
+    );
+    final searchField = TextField(
+      controller: _searchController,
+      decoration: searchDecoration,
+      onChanged: (value) => setState(() => _searchTerm = value.trim()),
+    );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -190,56 +239,27 @@ class _SystemLogsPageState extends ConsumerState<SystemLogsPage> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: borderColor),
       ),
-      child: Column(
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: filters.map((filter) {
-              final isSelected = _selectedFilter == filter;
-              return GestureDetector(
-                onTap: () => setState(() => _selectedFilter = filter),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color:
-                        isSelected ? const Color(0xFF2563EB) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected
-                          ? const Color(0xFF2563EB)
-                          : (isDark
-                              ? const Color(0xFF4B5563)
-                              : const Color(0xFFD1D5DB)),
-                    ),
-                  ),
-                  child: Text(
-                    _capitalize(filter),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: isSelected
-                          ? Colors.white
-                          : (isDark ? Colors.grey[300] : Colors.grey[700]),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _searchController,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Search logs...',
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (value) {
-              setState(() => _searchTerm = value.trim());
-            },
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 820;
+          if (isWide) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 3, child: filterButtons),
+                const SizedBox(width: 12),
+                Expanded(flex: 2, child: searchField),
+              ],
+            );
+          }
+          return Column(
+            children: [
+              filterButtons,
+              const SizedBox(height: 12),
+              searchField,
+            ],
+          );
+        },
       ),
     );
   }
@@ -254,14 +274,16 @@ class _LogCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final colors = _levelColors(log.level, isDark);
+    final cardColor = isDark
+        ? colors.background.withValues(alpha: 0.5)
+        : colors.background;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor),
+        border: Border.all(color: colors.border),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -272,6 +294,26 @@ class _LogCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _MetaTag(
+                      label: log.timestampLabel,
+                      muted: isDark ? Colors.grey[400]! : Colors.grey[700]!,
+                    ),
+                    _MetaTag(
+                      label: log.source,
+                      muted: colors.foreground,
+                      border: colors.border,
+                      background: isDark
+                          ? Colors.black.withValues(alpha: 0.1)
+                          : Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
@@ -294,23 +336,8 @@ class _LogCard extends StatelessWidget {
                 Text(
                   log.details,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                    color: isDark ? Colors.grey[300] : Colors.grey[700],
                   ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 8,
-                  children: [
-                    _InlineMeta(
-                      icon: Icons.memory_outlined,
-                      label: log.source,
-                    ),
-                    _InlineMeta(
-                      icon: Icons.schedule_outlined,
-                      label: log.timestampLabel,
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -321,27 +348,36 @@ class _LogCard extends StatelessWidget {
   }
 }
 
-class _InlineMeta extends StatelessWidget {
-  const _InlineMeta({required this.icon, required this.label});
+class _MetaTag extends StatelessWidget {
+  const _MetaTag({
+    required this.label,
+    required this.muted,
+    this.background,
+    this.border,
+  });
 
-  final IconData icon;
   final String label;
+  final Color muted;
+  final Color? background;
+  final Color? border;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: isDark ? Colors.grey[500] : Colors.grey[400]),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-              ),
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: background ?? Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border ?? Colors.transparent),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: muted,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              fontWeight: FontWeight.w600,
+            ),
+      ),
     );
   }
 }
@@ -669,54 +705,3 @@ String _capitalize(String value) {
   if (value.isEmpty) return value;
   return value[0].toUpperCase() + value.substring(1);
 }
-
-final List<_LogEntry> _demoLogs = [
-  _LogEntry(
-    id: '1',
-    timestamp: DateTime(2024, 12, 24, 14, 32, 15),
-    level: 'error',
-    source: 'API Gateway',
-    message: 'Failed to connect to database: Connection timeout',
-    details: 'Error code: ETIMEDOUT',
-  ),
-  _LogEntry(
-    id: '2',
-    timestamp: DateTime(2024, 12, 24, 14, 31, 45),
-    level: 'warning',
-    source: 'Auth Service',
-    message: 'Multiple failed login attempts detected',
-    details: 'User: mike.chen@company.com, Attempts: 3',
-  ),
-  _LogEntry(
-    id: '3',
-    timestamp: DateTime(2024, 12, 24, 14, 30, 22),
-    level: 'info',
-    source: 'Form Service',
-    message: 'Form submission processed successfully',
-    details: 'Form ID: FRM-1234, User: sarah.j@company.com',
-  ),
-  _LogEntry(
-    id: '4',
-    timestamp: DateTime(2024, 12, 24, 14, 29, 10),
-    level: 'success',
-    source: 'Training Module',
-    message: 'Training session completed',
-    details: 'Module: Safety Training 101, User: tom.b@company.com',
-  ),
-  _LogEntry(
-    id: '5',
-    timestamp: DateTime(2024, 12, 24, 14, 28, 33),
-    level: 'error',
-    source: 'Asset Service',
-    message: 'QR code scan failed: Invalid format',
-    details: 'Scanner ID: SCN-456, Asset: Unknown',
-  ),
-  _LogEntry(
-    id: '6',
-    timestamp: DateTime(2024, 12, 24, 14, 27, 55),
-    level: 'info',
-    source: 'User Service',
-    message: 'New user registered',
-    details: 'User: emily.davis@company.com, Role: Employee',
-  ),
-];

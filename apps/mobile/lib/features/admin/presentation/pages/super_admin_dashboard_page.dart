@@ -145,11 +145,33 @@ class _SuperAdminDashboardBody extends ConsumerStatefulWidget {
 class _SuperAdminDashboardBodyState
     extends ConsumerState<_SuperAdminDashboardBody> {
   late List<NotificationItem> _notifications;
+  late List<_SystemAlert> _criticalAlerts;
+  bool _didWarnStartDay = false;
 
   @override
   void initState() {
     super.initState();
     _notifications = _superAdminNotifications();
+    _criticalAlerts = const [
+      _SystemAlert(
+        title: 'CRITICAL: System Outage',
+        detail: 'Database server is down - immediate action required',
+        severity: _AlertSeverity.high,
+        time: 'Just now',
+      ),
+      _SystemAlert(
+        title: 'Security Alert',
+        detail: 'Multiple failed login attempts detected from IP 192.168.1.45',
+        severity: _AlertSeverity.high,
+        time: '2 min ago',
+      ),
+      _SystemAlert(
+        title: 'License Renewal',
+        detail: 'Premium license expires in 7 days',
+        severity: _AlertSeverity.medium,
+        time: '5 hours ago',
+      ),
+    ];
   }
 
   void _dismissNotification(NotificationItem item) {
@@ -160,12 +182,23 @@ class _SuperAdminDashboardBodyState
     });
   }
 
+  void _dismissAlert(_SystemAlert alert) {
+    setState(() {
+      _criticalAlerts = _criticalAlerts
+          .where((existing) => existing.title != alert.title)
+          .toList();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final stats = ref.watch(adminStatsProvider);
     final users = ref.watch(adminUsersProvider);
+    final orgs = ref.watch(adminOrganizationsProvider);
     final totalUsers = users.asData?.value.length ?? 0;
     final totalUsersLabel = NumberFormat.decimalPattern().format(totalUsers);
+    final totalOrgs = orgs.asData?.value.length ?? 12;
+    final totalOrgsLabel = NumberFormat.decimalPattern().format(totalOrgs);
     final dayStarted = ref.watch(_superAdminDayStartedProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -197,6 +230,7 @@ class _SuperAdminDashboardBodyState
       );
       if (approved == true) {
         ref.read(_superAdminDayStartedProvider.notifier).state = true;
+        _didWarnStartDay = true;
       }
     }
     void handleCreateForm() {
@@ -355,6 +389,13 @@ class _SuperAdminDashboardBodyState
               },
             ),
             SizedBox(height: sectionSpacing),
+            if (_criticalAlerts.isNotEmpty) ...[
+              _CriticalAlertsBanner(
+                alerts: _criticalAlerts,
+                onDismiss: _dismissAlert,
+              ),
+              SizedBox(height: sectionSpacing),
+            ],
             NotificationsPanel(
               notifications: _notifications,
               onDismiss: _dismissNotification,
@@ -365,41 +406,56 @@ class _SuperAdminDashboardBodyState
             SizedBox(height: sectionSpacing),
             _StatsGrid(items: [
               _StatTile(
+                label: 'Total Organizations',
+                value: totalOrgsLabel,
+                icon: Icons.apartment,
+                color: Colors.blue,
+                trend: '+2 this week',
+              ),
+              _StatTile(
                 label: 'Total Users',
                 value: totalUsersLabel,
                 icon: Icons.people_outline,
-                color: Colors.blue,
+                color: Colors.indigo,
                 trend: '+12% this month',
               ),
               const _StatTile(
-                label: 'System Health',
-                value: '98.5%',
+                label: 'Active Sessions',
+                value: '892',
                 icon: Icons.monitor_heart_outlined,
                 color: Colors.green,
-                trend: 'Optimal',
-              ),
-              const _StatTile(
-                label: 'Servers Online',
-                value: '24/24',
-                icon: Icons.storage_outlined,
-                color: Colors.purple,
-                trend: 'All operational',
+                trend: 'System-wide',
               ),
               const _StatTile(
                 label: 'Storage Used',
-                value: '847GB',
+                value: '2.4 TB',
                 icon: Icons.cloud_outlined,
                 color: Colors.orange,
                 trend: '32% of total',
               ),
               const _StatTile(
-                label: 'API Calls',
-                value: '15.2K',
+                label: 'Daily Active Users',
+                value: '1,089',
                 icon: Icons.trending_up,
                 color: Colors.pink,
                 trend: '+8% from yesterday',
               ),
+              const _StatTile(
+                label: 'Tasks Completed Today',
+                value: '3,847',
+                icon: Icons.check_circle_outline,
+                color: Colors.teal,
+                trend: 'All orgs',
+              ),
             ]),
+            SizedBox(height: sectionSpacing),
+            _CriticalActionsPanel(
+              dayStarted: dayStarted,
+              onStartDay: handleStartDay,
+              onNavigate: widget.onNavigate,
+              onCreateForm: handleCreateForm,
+              showStartDayWarning: !_didWarnStartDay,
+            ),
             SizedBox(height: sectionSpacing),
             _QuickActions(
               onNavigate: widget.onNavigate,
@@ -572,8 +628,8 @@ class _StatsGrid extends StatelessWidget {
       builder: (context, constraints) {
         final isCompact = constraints.maxWidth < 640;
         final isWide = constraints.maxWidth >= 1024;
-        final crossAxisCount = isWide ? 5 : 2;
-        final ratio = isWide ? 1.2 : (isCompact ? 1.05 : 1.15);
+        final crossAxisCount = isWide ? 3 : 2;
+        final ratio = isWide ? 1.15 : (isCompact ? 1.05 : 1.1);
         return GridView.count(
           crossAxisCount: crossAxisCount,
           shrinkWrap: true,
@@ -732,6 +788,129 @@ class _QuickActions extends StatelessWidget {
                 tone: _QuickActionTone.gray,
                 onTap: () => onNavigate(SideMenuRoute.settings),
               ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CriticalActionsPanel extends StatelessWidget {
+  const _CriticalActionsPanel({
+    required this.dayStarted,
+    required this.onStartDay,
+    required this.onNavigate,
+    required this.onCreateForm,
+    this.showStartDayWarning = false,
+  });
+
+  final bool dayStarted;
+  final VoidCallback onStartDay;
+  final ValueChanged<SideMenuRoute> onNavigate;
+  final VoidCallback onCreateForm;
+  final bool showStartDayWarning;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final border = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    final background = isDark ? const Color(0xFF111827) : Colors.white;
+    final warningColor = showStartDayWarning ? const Color(0xFFEA580C) : null;
+    Widget buildAction({
+      required IconData icon,
+      required String label,
+      required VoidCallback onTap,
+      Color? color,
+      bool disabled = false,
+    }) {
+      final tone = color ?? const Color(0xFF2563EB);
+      return ElevatedButton.icon(
+        onPressed: disabled ? null : onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor:
+              disabled ? theme.colorScheme.surfaceVariant : tone.withValues(alpha: 0.12),
+          foregroundColor: disabled ? theme.colorScheme.outline : tone,
+          elevation: 0,
+          side: BorderSide(color: tone.withValues(alpha: 0.35)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        ),
+        icon: Icon(icon, size: 18),
+        label: Text(
+          label,
+          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 900;
+          final actions = [
+            buildAction(
+              icon: Icons.play_arrow,
+              label: dayStarted ? 'Day Started ✓' : 'Start Day',
+              onTap: onStartDay,
+              color: warningColor ?? const Color(0xFF16A34A),
+              disabled: dayStarted,
+            ),
+            buildAction(
+              icon: Icons.person_add_alt_1,
+              label: 'Add User',
+              onTap: () => onNavigate(SideMenuRoute.users),
+            ),
+            buildAction(
+              icon: Icons.admin_panel_settings_outlined,
+              label: 'Manage Roles',
+              onTap: () => onNavigate(SideMenuRoute.rolesPermissions),
+            ),
+            buildAction(
+              icon: Icons.assessment_outlined,
+              label: 'View Reports',
+              onTap: () => onNavigate(SideMenuRoute.reports),
+            ),
+            buildAction(
+              icon: Icons.description_outlined,
+              label: 'Create Form',
+              onTap: onCreateForm,
+              color: const Color(0xFF7C3AED),
+            ),
+            buildAction(
+              icon: Icons.settings_outlined,
+              label: 'System Settings',
+              onTap: () => onNavigate(SideMenuRoute.settings),
+              color: const Color(0xFF4B5563),
+            ),
+          ];
+
+          if (isWide) {
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: actions
+                  .map((action) => SizedBox(
+                        width: (constraints.maxWidth - 36) / 3,
+                        child: action,
+                      ))
+                  .toList(),
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < actions.length; i++) ...[
+                actions[i],
+                if (i != actions.length - 1) const SizedBox(height: 10),
+              ],
             ],
           );
         },
@@ -2501,6 +2680,104 @@ class _SystemAlert {
 }
 
 enum _AlertSeverity { high, medium, low }
+
+class _CriticalAlertsBanner extends StatelessWidget {
+  const _CriticalAlertsBanner({
+    required this.alerts,
+    required this.onDismiss,
+  });
+
+  final List<_SystemAlert> alerts;
+  final ValueChanged<_SystemAlert> onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark
+        ? const Color(0xFF7F1D1D).withValues(alpha: 0.25)
+        : const Color(0xFFFEF2F2);
+    final border =
+        isDark ? const Color(0xFFB91C1C).withValues(alpha: 0.6) : const Color(0xFFFCA5A5);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber, color: Color(0xFFDC2626)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Critical Alerts',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...alerts.map(
+            (alert) {
+              final palette = _alertPalette(alert.severity, isDark);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.error_outline, color: palette.icon),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            alert.title,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: palette.title,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            alert.detail,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: palette.detail,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            alert.time,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: palette.time,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      color: palette.icon,
+                      tooltip: 'Dismiss',
+                      onPressed: () => onDismiss(alert),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _AlertCard extends StatelessWidget {
   const _AlertCard({required this.alert});

@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared/shared.dart';
+
+import '../../../dashboard/data/dashboard_layout_provider.dart';
 
 class RolesPermissionsPage extends StatefulWidget {
   const RolesPermissionsPage({super.key});
@@ -7,11 +11,163 @@ class RolesPermissionsPage extends StatefulWidget {
   State<RolesPermissionsPage> createState() => _RolesPermissionsPageState();
 }
 
+class _RoleSearchBar extends StatelessWidget {
+  const _RoleSearchBar({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return TextField(
+      decoration: InputDecoration(
+        prefixIcon: const Icon(Icons.search),
+        hintText: 'Search roles…',
+        filled: true,
+        fillColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB),
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? const Color(0xFF2563EB) : const Color(0xFF3B82F6),
+          ),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+      onChanged: onChanged,
+      controller: TextEditingController.fromValue(
+        TextEditingValue(
+          text: value,
+          selection: TextSelection.collapsed(offset: value.length),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleStatsBar extends StatelessWidget {
+  const _RoleStatsBar({
+    required this.totalRoles,
+    required this.customRoles,
+    required this.totalUsers,
+  });
+
+  final int totalRoles;
+  final int customRoles;
+  final int totalUsers;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final border = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    final background = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final items = [
+      _StatItem(label: 'Total Roles', value: '$totalRoles'),
+      _StatItem(label: 'Custom Roles', value: '$customRoles'),
+      _StatItem(label: 'Total Users', value: '$totalUsers'),
+    ];
+    return Container(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 720;
+          final spacing = isWide ? 24.0 : 12.0;
+          return Wrap(
+            alignment: WrapAlignment.start,
+            spacing: spacing,
+            runSpacing: 12,
+            children: items
+                .map(
+                  (item) => _StatPill(
+                    label: item.label,
+                    value: item.value,
+                  ),
+                )
+                .toList(),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _StatItem {
+  const _StatItem({required this.label, required this.value});
+  final String label;
+  final String value;
+}
+
+class _StatPill extends StatelessWidget {
+  const _StatPill({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final background =
+        isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6);
+    final border = isDark ? const Color(0xFF27303F) : const Color(0xFFE5E7EB);
+    final labelColor = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: labelColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
   late final List<_PermissionCategory> _categories;
   late List<_RoleDefinition> _roles;
   final Set<String> _expandedCategories = {'time-tracking'};
   String? _editingRoleId;
+  UserRole _selectedDashboardRole = UserRole.employee;
+  String _roleSearch = '';
 
   @override
   void initState() {
@@ -66,8 +222,23 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
                       fontSize: isWide ? 16 : 14,
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  _RoleStatsBar(
+                    totalRoles: _roles.length,
+                    customRoles:
+                        _roles.where((role) => role.isCustom).length,
+                    totalUsers:
+                        _roles.fold<int>(0, (sum, role) => sum + role.userCount),
+                  ),
+                  const SizedBox(height: 16),
+                  _RoleSearchBar(
+                    value: _roleSearch,
+                    onChanged: (value) => setState(() => _roleSearch = value),
+                  ),
                   const SizedBox(height: 24),
                   _buildRolesGrid(context),
+                  const SizedBox(height: 32),
+                  _buildDashboardControls(context),
                   const SizedBox(height: 32),
                   _buildPermissionMatrix(context),
                 ],
@@ -83,8 +254,12 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isTwoColumn = constraints.maxWidth >= 1024;
+        final filtered = _roles
+            .where((role) =>
+                role.name.toLowerCase().contains(_roleSearch.toLowerCase()))
+            .toList();
         final cards = [
-          ..._roles.map(
+          ...filtered.map(
             (role) => _RoleCard(
               role: role,
               isEditing: _editingRoleId == role.id,
@@ -137,6 +312,138 @@ class _RolesPermissionsPageState extends State<RolesPermissionsPage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: rows,
+        );
+      },
+    );
+  }
+
+  Widget _buildDashboardControls(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor =
+        isDark ? const Color(0xFF0F172A) : const Color(0xFFFFFFFF);
+    final borderColor =
+        isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
+    final roleOptions = UserRole.values;
+    return Consumer(
+      builder: (context, ref, _) {
+        final layoutMap = ref.watch(dashboardLayoutProvider);
+        final layout = layoutMap[_selectedDashboardRole] ??
+            DashboardLayoutConfig.defaultsFor(_selectedDashboardRole);
+        void toggle(DashboardLayoutField field, bool value) {
+          ref
+              .read(dashboardLayoutProvider.notifier)
+              .toggle(_selectedDashboardRole, field, value);
+        }
+
+        Widget buildToggle({
+          required String label,
+          required DashboardLayoutField field,
+          required bool value,
+        }) {
+          return SwitchListTile.adaptive(
+            value: value,
+            onChanged: (next) => toggle(field, next),
+            title: Text(label),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.dashboard_customize,
+                      color: scheme.primary, size: 22),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Dashboard Controls',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Toggle which sections are visible on each role dashboard.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButton<UserRole>(
+                value: _selectedDashboardRole,
+                onChanged: (role) {
+                  if (role == null) return;
+                  setState(() => _selectedDashboardRole = role);
+                },
+                items: roleOptions
+                    .map(
+                      (role) => DropdownMenuItem(
+                        value: role,
+                        child: Text(role.displayName),
+                      ),
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: 12),
+              buildToggle(
+                label: 'Action bar / clock-in',
+                field: DashboardLayoutField.actionBar,
+                value: layout.showActionBar,
+              ),
+              buildToggle(
+                label: 'Notifications panel',
+                field: DashboardLayoutField.notifications,
+                value: layout.showNotifications,
+              ),
+              buildToggle(
+                label: 'Quick actions',
+                field: DashboardLayoutField.quickActions,
+                value: layout.showQuickActions,
+              ),
+              buildToggle(
+                label: 'Performance & metrics',
+                field: DashboardLayoutField.performance,
+                value: layout.showPerformance,
+              ),
+              buildToggle(
+                label: 'Training / upcoming',
+                field: DashboardLayoutField.training,
+                value: layout.showTraining,
+              ),
+              buildToggle(
+                label: 'Activity feeds',
+                field: DashboardLayoutField.activity,
+                value: layout.showActivity,
+              ),
+              buildToggle(
+                label: 'Approvals',
+                field: DashboardLayoutField.approvals,
+                value: layout.showApprovals,
+              ),
+              buildToggle(
+                label: 'Resource allocation',
+                field: DashboardLayoutField.resourceAllocation,
+                value: layout.showResourceAllocation,
+              ),
+              buildToggle(
+                label: 'System diagnostics',
+                field: DashboardLayoutField.diagnostics,
+                value: layout.showDiagnostics,
+              ),
+            ],
+          ),
         );
       },
     );

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -13,8 +14,44 @@ import '../../../navigation/presentation/pages/qr_scanner_page.dart';
 import 'asset_detail_page.dart';
 import 'asset_editor_page.dart';
 import 'inspection_editor_page.dart';
+import '../widgets/asset_history_sheet.dart';
+import '../widgets/inspection_schedule_sheet.dart';
 
 enum _AssetsViewMode { grid, list }
+
+const _categoryFilterOptions = <String>[
+  'Heavy Machinery',
+  'Transportation',
+  'Power Tools',
+  'Safety Equipment',
+];
+
+const _locationFilterOptions = <String>[
+  'Warehouse A',
+  'Site B',
+  'Site C',
+  'Workshop',
+  'Storage Yard',
+  'Maintenance Bay',
+];
+
+const _categorySpecs = <_CategorySpec>[
+  _CategorySpec(
+    name: 'Heavy Machinery',
+    slug: 'heavy-machinery',
+    emoji: '🏗️',
+  ),
+  _CategorySpec(
+    name: 'Transportation',
+    slug: 'transportation',
+    emoji: '🚚',
+  ),
+  _CategorySpec(
+    name: 'Power Tools',
+    slug: 'power-tools',
+    emoji: '⚙️',
+  ),
+];
 
 class AssetsPage extends ConsumerStatefulWidget {
   const AssetsPage({super.key});
@@ -31,7 +68,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
   String _categoryFilter = 'all';
   String _locationFilter = 'all';
   String _contactFilter = '';
-  _AssetsViewMode _viewMode = _AssetsViewMode.grid;
+  final _AssetsViewMode _viewMode = _AssetsViewMode.grid;
   RealtimeChannel? _assetsChannel;
 
   @override
@@ -68,7 +105,11 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     final equipmentAsync = ref.watch(equipmentProvider);
     final role = ref.watch(activeRoleProvider);
     final canManageAssets = _canManageAssets(role);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isWide = MediaQuery.of(context).size.width >= 768;
     return Scaffold(
+      backgroundColor:
+          isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB),
       body: equipmentAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, st) => _AssetsErrorView(error: e.toString()),
@@ -77,7 +118,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               assets.map((asset) => _AssetViewModel.fromEquipment(asset)).toList();
           final scopedModels = _applyRoleFilter(models, role);
           final categories = _buildCategorySummaries(scopedModels);
-          final locations = _buildLocations(scopedModels);
+          final locations = _buildLocations();
           final filtered = _applyFilters(scopedModels);
           final stats = _AssetStats.fromModels(scopedModels);
           final maintenanceSchedule = _buildMaintenanceSchedule(scopedModels);
@@ -91,7 +132,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               await ref.read(equipmentProvider.future);
             },
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(isWide ? 24 : 16),
               children: [
                 _buildHeader(
                   context,
@@ -100,16 +141,16 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                   roleIndicator: roleIndicator,
                   exportAssets: filtered,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 _AssetStatsGrid(stats: stats, totalAssetsNote: totalNote),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 _CategorySection(
                   categories: categories,
                   selected: _categoryFilter,
                   onSelected: (value) =>
                       setState(() => _categoryFilter = value),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 _MaintenanceScheduleCard(
                   schedule: maintenancePreview,
                   onViewAll: () => _showMaintenanceSheet(
@@ -117,23 +158,40 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                     maintenanceSchedule,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 _InspectionToolsCard(
                   onScan: () => _openQrScanner(context),
-                  onInspection: () => _openInspectionTool(context, models),
-                  onPhoto: () => _openInspectionTool(context, models),
+                  onInspection: () => _openInspectionTool(
+                    context,
+                    models,
+                    titleOverride: 'Video Inspection',
+                    captureType: InspectionCaptureType.video,
+                    useFirstAsset: true,
+                  ),
+                  onPhoto: () => _openInspectionTool(
+                    context,
+                    models,
+                    titleOverride: 'Photo Documentation',
+                    captureType: InspectionCaptureType.photo,
+                    useFirstAsset: true,
+                  ),
                   onSchedule: () => _openScheduleTool(context, models),
                 ),
-                const SizedBox(height: 16),
-                _buildAdvancedFilters(context, categories, locations),
-                const SizedBox(height: 16),
-                _buildFilters(context),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
+                _buildAdvancedFilters(
+                  context,
+                  _categoryFilterOptions,
+                  locations,
+                ),
+                const SizedBox(height: 24),
+                _buildFilters(
+                  context,
+                  filteredCount: filtered.length,
+                  totalCount: scopedModels.length,
+                ),
+                const SizedBox(height: 24),
                 if (filtered.isEmpty)
-                  _EmptyAssetsCard(
-                    onClear: _clearFilters,
-                    onCreate: () => _openEditor(context),
-                  )
+                  const _EmptyAssetsCard()
                 else
                   _buildAssetsBody(context, filtered),
                 const SizedBox(height: 80),
@@ -154,37 +212,80 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 720;
+        final isWide = constraints.maxWidth >= 768;
+        final showLabel = constraints.maxWidth >= 640;
         final subtitle = _roleSubtitle(role);
-        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark;
         final indicatorBackground =
-            isDark ? const Color(0xFF1E3A8A) : const Color(0xFFDBEAFE);
+            isDark ? const Color(0xFF1E3A8A).withOpacity(0.3) : const Color(0xFFEFF6FF);
         final indicatorBorder =
-            isDark ? const Color(0xFF1D4ED8) : const Color(0xFFBFDBFE);
+            isDark ? const Color(0xFF3B82F6).withOpacity(0.3) : const Color(0xFFBFDBFE);
         final indicatorText =
-            isDark ? const Color(0xFFBFDBFE) : const Color(0xFF1D4ED8);
+            isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8);
+        final subtitleStyle = theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 16,
+          color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+        );
+        final exportButtonStyle = OutlinedButton.styleFrom(
+          backgroundColor: isDark ? const Color(0xFF1F2937) : Colors.white,
+          foregroundColor: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+          padding: EdgeInsets.symmetric(
+            horizontal: showLabel ? 16 : 12,
+            vertical: 10,
+          ),
+          side: BorderSide(
+            color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        );
+        final addButtonStyle = ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF2563EB),
+          foregroundColor: Colors.white,
+          elevation: 6,
+          shadowColor: const Color(0xFF2563EB).withOpacity(0.2),
+          padding: EdgeInsets.symmetric(
+            horizontal: showLabel ? 16 : 12,
+            vertical: 10,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        );
         final titleBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Asset Management',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              style: theme.textTheme.headlineSmall?.copyWith(
+                    fontSize: isWide ? 30 : 24,
                     fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
                   ),
             ),
             const SizedBox(height: 4),
             Text(
               subtitle,
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: subtitleStyle,
             ),
             if (roleIndicator != null) ...[
               const SizedBox(height: 8),
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: indicatorBackground,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: indicatorBorder),
                 ),
                 child: Row(
@@ -195,10 +296,11 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                     Flexible(
                       child: Text(
                         roleIndicator,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: indicatorText,
-                              fontWeight: FontWeight.w600,
-                            ),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 12,
+                          color: indicatorText,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ],
@@ -209,25 +311,37 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         );
 
         final controls = Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: 12,
+          runSpacing: 12,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            _ViewToggle(
-              selected: _viewMode,
-              onChanged: (mode) => setState(() => _viewMode = mode),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => _exportAssets(context, exportAssets),
-              icon: const Icon(Icons.download_outlined),
-              label: const Text('Export'),
-            ),
-            if (canManageAssets)
-              FilledButton.icon(
-                onPressed: () => _openEditor(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Asset'),
+            if (showLabel)
+              OutlinedButton.icon(
+                style: exportButtonStyle,
+                onPressed: () => _exportAssets(context, exportAssets),
+                icon: const Icon(Icons.download_outlined, size: 20),
+                label: const Text('Export'),
+              )
+            else
+              OutlinedButton(
+                style: exportButtonStyle,
+                onPressed: () => _exportAssets(context, exportAssets),
+                child: const Icon(Icons.download_outlined, size: 20),
               ),
+            if (canManageAssets)
+              if (showLabel)
+                ElevatedButton.icon(
+                  style: addButtonStyle,
+                  onPressed: () => _openEditor(context),
+                  icon: const Icon(Icons.add, size: 20),
+                  label: const Text('Add Asset'),
+                )
+              else
+                ElevatedButton(
+                  style: addButtonStyle,
+                  onPressed: () => _openEditor(context),
+                  child: const Icon(Icons.add, size: 20),
+                ),
           ],
         );
 
@@ -245,7 +359,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             titleBlock,
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             controls,
           ],
         );
@@ -282,8 +396,6 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         return 'Assigned to you';
       case UserRole.supervisor:
         return 'Team assets';
-      case UserRole.manager:
-        return 'Department assets';
       default:
         return 'Across all locations';
     }
@@ -309,7 +421,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
       return models;
     }
     final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return models;
+    if (user == null) return const <_AssetViewModel>[];
     final userId = user.id.toLowerCase();
     final email = user.email?.toLowerCase();
     final filtered = models.where((model) {
@@ -319,39 +431,47 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
       if (email != null && contactEmail == email) return true;
       return false;
     }).toList();
-    return filtered.isEmpty ? models : filtered;
+    return filtered;
   }
 
   Widget _buildAdvancedFilters(
     BuildContext context,
-    List<_CategorySummary> categories,
+    List<String> categoryOptions,
     List<String> locations,
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    final categoryNames = categories.map((c) => c.name).toList();
     final activeCount = [
       if (_categoryFilter != 'all') true,
       if (_locationFilter != 'all') true,
       if (_contactFilter.isNotEmpty) true,
     ].length;
     final titleStyle = theme.textTheme.titleSmall?.copyWith(
+      fontSize: 16,
       fontWeight: FontWeight.w600,
+      color: isDark ? Colors.white : const Color(0xFF111827),
     );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.search, color: theme.colorScheme.primary),
+              const Icon(Icons.search, color: Color(0xFF2563EB), size: 20),
               const SizedBox(width: 8),
               Text('Advanced Search & Filters', style: titleStyle),
               if (activeCount > 0) ...[
@@ -360,14 +480,15 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primary,
+                    color: const Color(0xFF2563EB),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     '$activeCount active',
                     style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 12,
                       color: Colors.white,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -377,14 +498,46 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           const SizedBox(height: 16),
           LayoutBuilder(
             builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 900;
+              final maxWidth = constraints.maxWidth;
+              final columns =
+                  maxWidth >= 1024 ? 4 : (maxWidth >= 768 ? 2 : 1);
+              const spacing = 16.0;
+              final itemWidth = columns == 1
+                  ? maxWidth
+                  : (maxWidth - spacing * (columns - 1)) / columns;
+              final fieldBorder = OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: isDark
+                      ? const Color(0xFF374151)
+                      : const Color(0xFFD1D5DB),
+                ),
+              );
+              final fieldDecoration = InputDecoration(
+                filled: true,
+                fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: fieldBorder,
+                enabledBorder: fieldBorder,
+                focusedBorder: fieldBorder.copyWith(
+                  borderSide: const BorderSide(
+                    color: Color(0xFF2563EB),
+                    width: 1.5,
+                  ),
+                ),
+              );
               final categoryField = _FilterField(
                 label: 'Category',
                 child: DropdownButtonFormField<String>(
                   value: _categoryFilter,
                   isExpanded: true,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
+                  decoration: fieldDecoration,
+                  dropdownColor:
+                      isDark ? const Color(0xFF111827) : Colors.white,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
                   ),
                   items: [
                     const DropdownMenuItem(
@@ -395,9 +548,9 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    ...categoryNames.map(
+                    ...categoryOptions.map(
                       (category) => DropdownMenuItem(
-                        value: category,
+                        value: _slugify(category),
                         child: Text(
                           category,
                           maxLines: 1,
@@ -416,8 +569,12 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 child: DropdownButtonFormField<String>(
                   value: _locationFilter,
                   isExpanded: true,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
+                  decoration: fieldDecoration,
+                  dropdownColor:
+                      isDark ? const Color(0xFF111827) : Colors.white,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
                   ),
                   items: [
                     const DropdownMenuItem(
@@ -430,7 +587,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                     ),
                     ...locations.map(
                       (location) => DropdownMenuItem(
-                        value: location,
+                        value: _slugify(location),
                         child: Text(
                           location,
                           maxLines: 1,
@@ -448,10 +605,25 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 label: 'Contact Person',
                 child: TextField(
                   controller: _contactController,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.person_outline),
+                  decoration: fieldDecoration.copyWith(
+                    prefixIcon: Icon(
+                      Icons.person_outline,
+                      size: 16,
+                      color: isDark
+                          ? const Color(0xFF6B7280)
+                          : const Color(0xFF9CA3AF),
+                    ),
                     hintText: 'Search by name...',
-                    border: OutlineInputBorder(),
+                    hintStyle: TextStyle(
+                      fontSize: 16,
+                      color: isDark
+                          ? const Color(0xFF6B7280)
+                          : const Color(0xFF9CA3AF),
+                    ),
+                  ),
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
                   ),
                   onChanged: (value) {
                     setState(
@@ -463,40 +635,46 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               final actionField = _FilterField(
                 label: 'Actions',
                 child: SizedBox(
-                  height: 48,
+                  height: 40,
                   child: OutlinedButton(
                     onPressed: _clearFilters,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      side: BorderSide(
+                        color: isDark
+                            ? const Color(0xFF374151)
+                            : const Color(0xFFD1D5DB),
+                      ),
+                      foregroundColor: isDark
+                          ? const Color(0xFFD1D5DB)
+                          : const Color(0xFF374151),
+                      textStyle: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                     child: const Text('Clear'),
                   ),
                 ),
               );
 
-              if (isWide) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: categoryField),
-                    const SizedBox(width: 12),
-                    Expanded(child: locationField),
-                    const SizedBox(width: 12),
-                    Expanded(child: contactField),
-                    const SizedBox(width: 12),
-                    Expanded(child: actionField),
-                  ],
-                );
-              }
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
                 children: [
                   categoryField,
-                  const SizedBox(height: 12),
                   locationField,
-                  const SizedBox(height: 12),
                   contactField,
-                  const SizedBox(height: 12),
                   actionField,
-                ],
+                ].map((field) {
+                  return SizedBox(width: itemWidth, child: field);
+                }).toList(),
               );
             },
           ),
@@ -505,63 +683,131 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     );
   }
 
-  Widget _buildFilters(BuildContext context) {
+  Widget _buildFilters(
+    BuildContext context, {
+    required int filteredCount,
+    required int totalCount,
+  }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= 900;
-          final children = [
-            Expanded(
-              flex: isWide ? 2 : 0,
-              child: TextField(
-                controller: _searchController,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Search assets by name or serial number...',
-                  border: OutlineInputBorder(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 768;
+              final fieldBorder = OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark
+                      ? const Color(0xFF374151)
+                      : const Color(0xFFD1D5DB),
                 ),
-                onChanged: (value) {
-                  setState(() => _searchQuery = value.trim().toLowerCase());
-                },
-              ),
-            ),
-            SizedBox(width: isWide ? 12 : 0, height: isWide ? 0 : 12),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                value: _statusFilter,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
+              );
+              final fieldDecoration = InputDecoration(
+                filled: true,
+                fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                border: fieldBorder,
+                enabledBorder: fieldBorder,
+                focusedBorder: fieldBorder.copyWith(
+                  borderSide: const BorderSide(
+                    color: Color(0xFF2563EB),
+                    width: 1.5,
+                  ),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'all', child: Text('All Status')),
-                  DropdownMenuItem(value: 'active', child: Text('Active')),
-                  DropdownMenuItem(value: 'maintenance', child: Text('Maintenance')),
-                  DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
-                ],
-                onChanged: (value) {
-                  setState(() => _statusFilter = value ?? 'all');
-                },
-              ),
-            ),
-          ];
+              );
+              final children = [
+                Expanded(
+                  flex: isWide ? 2 : 0,
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: fieldDecoration.copyWith(
+                      prefixIcon: Icon(
+                        Icons.search,
+                        size: 20,
+                        color: isDark
+                            ? const Color(0xFF6B7280)
+                            : const Color(0xFF9CA3AF),
+                      ),
+                      hintText: 'Search assets by name or serial number...',
+                      hintStyle: TextStyle(
+                        fontSize: 16,
+                        color: isDark
+                            ? const Color(0xFF6B7280)
+                            : const Color(0xFF9CA3AF),
+                      ),
+                    ),
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
+                    onChanged: (value) {
+                      setState(() => _searchQuery = value.trim().toLowerCase());
+                    },
+                  ),
+                ),
+                SizedBox(width: isWide ? 16 : 0, height: isWide ? 0 : 16),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _statusFilter,
+                    decoration: fieldDecoration,
+                    dropdownColor:
+                        isDark ? const Color(0xFF111827) : Colors.white,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'all', child: Text('All Status')),
+                      DropdownMenuItem(value: 'active', child: Text('Active')),
+                      DropdownMenuItem(value: 'maintenance', child: Text('Maintenance')),
+                      DropdownMenuItem(value: 'inactive', child: Text('Inactive')),
+                    ],
+                    onChanged: (value) {
+                      setState(() => _statusFilter = value ?? 'all');
+                    },
+                  ),
+                ),
+              ];
 
-          if (isWide) {
-            return Row(children: children);
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
-          );
-        },
+              if (isWide) {
+                return Row(children: children);
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: children,
+              );
+            },
+          ),
+          if (filteredCount < totalCount)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                'Showing $filteredCount of $totalCount assets',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: 14,
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -582,21 +828,21 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final crossAxisCount = width >= 1100 ? 3 : (width >= 720 ? 2 : 1);
+        final crossAxisCount = width >= 1024 ? 3 : (width >= 768 ? 2 : 1);
         return GridView.count(
           crossAxisCount: crossAxisCount,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          childAspectRatio: crossAxisCount > 1 ? 0.9 : 0.95,
+          mainAxisSpacing: 24,
+          crossAxisSpacing: 24,
+          childAspectRatio: crossAxisCount > 1 ? 0.82 : 0.95,
           children: assets
               .map(
                 (asset) => _AssetGridCard(
                   model: asset,
                   onOpen: () => _openDetail(context, asset.equipment),
-                  onEdit: () => _openEditor(context, existing: asset.equipment),
-                  onInspect: () => _openInspection(context, asset.equipment),
+                  onHistory: () => _openHistory(context, asset.equipment),
+                  onQr: () => _openDetail(context, asset.equipment),
                 ),
               )
               .toList(),
@@ -689,50 +935,43 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     return assets.where((asset) {
       final matchesSearch = _searchQuery.isEmpty ||
           asset.name.toLowerCase().contains(_searchQuery) ||
-          asset.category.toLowerCase().contains(_searchQuery) ||
-          asset.serialNumber.toLowerCase().contains(_searchQuery) ||
-          asset.location.toLowerCase().contains(_searchQuery) ||
-          asset.assignedTo.toLowerCase().contains(_searchQuery);
+          asset.serialNumber.toLowerCase().contains(_searchQuery);
       final matchesContact = _contactFilter.isEmpty ||
           asset.assignedTo.toLowerCase().contains(_contactFilter);
       final matchesStatus =
           _statusFilter == 'all' || asset.status == _statusFilter;
       final matchesCategory =
-          _categoryFilter == 'all' || asset.category == _categoryFilter;
+          _categoryFilter == 'all' ||
+          _slugify(asset.category) == _categoryFilter;
       final matchesLocation =
-          _locationFilter == 'all' || asset.location == _locationFilter;
+          _locationFilter == 'all' ||
+          _slugify(asset.location) == _locationFilter;
       return matchesSearch &&
           matchesContact &&
           matchesStatus &&
           matchesCategory &&
           matchesLocation;
-    }).toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    }).toList();
   }
 
   List<_CategorySummary> _buildCategorySummaries(
     List<_AssetViewModel> assets,
   ) {
-    final counts = <String, int>{};
-    for (final asset in assets) {
-      if (asset.category.isEmpty) continue;
-      counts.update(asset.category, (value) => value + 1, ifAbsent: () => 1);
-    }
-    final entries = counts.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    return entries
-        .map((entry) => _CategorySummary.fromName(entry.key, entry.value))
-        .toList();
+    return _categorySpecs.map((spec) {
+      final count = assets
+          .where((asset) => _slugify(asset.category) == spec.slug)
+          .length;
+      return _CategorySummary(
+        name: spec.name,
+        slug: spec.slug,
+        count: count,
+        emoji: spec.emoji,
+      );
+    }).toList();
   }
 
-  List<String> _buildLocations(List<_AssetViewModel> assets) {
-    final locations = assets
-        .map((asset) => asset.location.trim())
-        .where((value) => value.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    return locations;
+  List<String> _buildLocations() {
+    return _locationFilterOptions;
   }
 
   List<_MaintenanceItem> _buildMaintenanceSchedule(
@@ -776,9 +1015,28 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     ref.invalidate(equipmentProvider);
   }
 
-  Future<void> _openInspection(BuildContext context, Equipment asset) async {
+  Future<void> _openHistory(BuildContext context, Equipment asset) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => AssetHistorySheet(asset: asset),
+    );
+  }
+
+  Future<void> _openInspection(
+    BuildContext context,
+    Equipment asset, {
+    InspectionCaptureType? captureType,
+    String? titleOverride,
+  }) async {
     final result = await Navigator.of(context).push<AssetInspection?>(
-      MaterialPageRoute(builder: (_) => InspectionEditorPage(asset: asset)),
+      MaterialPageRoute(
+        builder: (_) => InspectionEditorPage(
+          asset: asset,
+          titleOverride: titleOverride,
+          initialCapture: captureType,
+        ),
+      ),
     );
     if (!mounted) return;
     if (result != null) {
@@ -797,20 +1055,48 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
 
   Future<void> _openInspectionTool(
     BuildContext context,
-    List<_AssetViewModel> assets,
-  ) async {
-    final selection = await _pickAsset(context, assets);
-    if (selection == null || !mounted) return;
-    await _openInspection(context, selection);
+    List<_AssetViewModel> assets, {
+    InspectionCaptureType? captureType,
+    String? titleOverride,
+    bool useFirstAsset = false,
+  }) async {
+    if (assets.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No assets available.')),
+      );
+      return;
+    }
+    final selection = useFirstAsset ? assets.first.equipment : null;
+    final picked =
+        selection ?? await _pickAsset(context, assets);
+    if (picked == null || !mounted) return;
+    await _openInspection(
+      context,
+      picked,
+      captureType: captureType,
+      titleOverride: titleOverride,
+    );
   }
 
   Future<void> _openScheduleTool(
     BuildContext context,
     List<_AssetViewModel> assets,
   ) async {
-    final selection = await _pickAsset(context, assets);
-    if (selection == null || !mounted) return;
-    await _openEditor(context, existing: selection);
+    if (assets.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No assets available.')),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => InspectionScheduleSheet(
+        assets: assets.map((asset) => asset.equipment).toList(),
+      ),
+    );
   }
 
   Future<Equipment?> _pickAsset(
@@ -904,8 +1190,8 @@ class _AssetStats {
 
   String get totalValueLabel {
     if (totalValue <= 0) return 'TBD';
-    return NumberFormat.compactCurrency(symbol: '\$', decimalDigits: 0)
-        .format(totalValue);
+    final thousands = (totalValue / 1000).round();
+    return '\$${thousands}K';
   }
 
   factory _AssetStats.fromModels(List<_AssetViewModel> assets) {
@@ -931,14 +1217,17 @@ class _FilterField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final labelStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: isDark ? Colors.grey[400] : Colors.grey[600],
         );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: labelStyle),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         child,
       ],
     );
@@ -957,15 +1246,22 @@ class _AssetStatsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final formatter = NumberFormat.decimalPattern();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedNote =
+        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
+    final greenNote =
+        isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
+    final yellowNote =
+        isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 900 ? 4 : 2;
+        final crossAxisCount = constraints.maxWidth >= 768 ? 4 : 2;
         return GridView.count(
           crossAxisCount: crossAxisCount,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
+          mainAxisSpacing: 16,
+          crossAxisSpacing: 16,
           childAspectRatio: crossAxisCount > 2 ? 2.3 : 1.5,
           children: [
             _AssetStatCard(
@@ -974,6 +1270,7 @@ class _AssetStatsGrid extends StatelessWidget {
               note: totalAssetsNote,
               icon: Icons.inventory_2_outlined,
               color: const Color(0xFF3B82F6),
+              noteColor: mutedNote,
             ),
             _AssetStatCard(
               label: 'Active Assets',
@@ -981,6 +1278,7 @@ class _AssetStatsGrid extends StatelessWidget {
               note: 'Currently in use',
               icon: Icons.check_circle_outline,
               color: const Color(0xFF22C55E),
+              noteColor: greenNote,
             ),
             _AssetStatCard(
               label: 'Maintenance',
@@ -988,6 +1286,7 @@ class _AssetStatsGrid extends StatelessWidget {
               note: 'Requires attention',
               icon: Icons.warning_amber_outlined,
               color: const Color(0xFFF59E0B),
+              noteColor: yellowNote,
             ),
             _AssetStatCard(
               label: 'Total Value',
@@ -995,6 +1294,7 @@ class _AssetStatsGrid extends StatelessWidget {
               note: 'Asset portfolio',
               icon: Icons.trending_up,
               color: const Color(0xFF8B5CF6),
+              noteColor: mutedNote,
             ),
           ],
         );
@@ -1010,6 +1310,7 @@ class _AssetStatCard extends StatelessWidget {
     required this.note,
     required this.icon,
     required this.color,
+    required this.noteColor,
   });
 
   final String label;
@@ -1017,6 +1318,7 @@ class _AssetStatCard extends StatelessWidget {
   final String note;
   final IconData icon;
   final Color color;
+  final Color noteColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1026,14 +1328,14 @@ class _AssetStatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -1046,25 +1348,32 @@ class _AssetStatCard extends StatelessWidget {
               Text(
                 label,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: isDark
+                      ? const Color(0xFF9CA3AF)
+                      : const Color(0xFF6B7280),
                 ),
               ),
-              Icon(icon, color: color),
+              Icon(icon, color: color, size: 20),
             ],
           ),
           const SizedBox(height: 6),
           Text(
             value,
             style: theme.textTheme.headlineSmall?.copyWith(
+              fontSize: 24,
               fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : const Color(0xFF111827),
             ),
           ),
           const SizedBox(height: 4),
           Text(
             note,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w600,
+              color: noteColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -1073,60 +1382,30 @@ class _AssetStatCard extends StatelessWidget {
   }
 }
 
-class _CategorySummary {
-  _CategorySummary({
+class _CategorySpec {
+  const _CategorySpec({
     required this.name,
-    required this.count,
-    required this.icon,
-    required this.color,
+    required this.slug,
+    required this.emoji,
   });
 
   final String name;
-  final int count;
-  final IconData icon;
-  final Color color;
+  final String slug;
+  final String emoji;
+}
 
-  factory _CategorySummary.fromName(String name, int count) {
-    final lower = name.toLowerCase();
-    if (lower.contains('machinery') || lower.contains('equipment')) {
-      return _CategorySummary(
-        name: name,
-        count: count,
-        icon: Icons.precision_manufacturing_outlined,
-        color: const Color(0xFF3B82F6),
-      );
-    }
-    if (lower.contains('vehicle') || lower.contains('transport')) {
-      return _CategorySummary(
-        name: name,
-        count: count,
-        icon: Icons.local_shipping_outlined,
-        color: const Color(0xFF8B5CF6),
-      );
-    }
-    if (lower.contains('tool') || lower.contains('power')) {
-      return _CategorySummary(
-        name: name,
-        count: count,
-        icon: Icons.build_outlined,
-        color: const Color(0xFFF59E0B),
-      );
-    }
-    if (lower.contains('safety')) {
-      return _CategorySummary(
-        name: name,
-        count: count,
-        icon: Icons.health_and_safety_outlined,
-        color: const Color(0xFF10B981),
-      );
-    }
-    return _CategorySummary(
-      name: name,
-      count: count,
-      icon: Icons.category_outlined,
-      color: const Color(0xFF64748B),
-    );
-  }
+class _CategorySummary {
+  _CategorySummary({
+    required this.name,
+    required this.slug,
+    required this.count,
+    required this.emoji,
+  });
+
+  final String name;
+  final String slug;
+  final int count;
+  final String emoji;
 }
 
 class _CategorySection extends StatelessWidget {
@@ -1143,20 +1422,31 @@ class _CategorySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (categories.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final selectedBackground = isDark
+        ? const Color(0xFF1E3A8A).withOpacity(0.3)
+        : const Color(0xFFEFF6FF);
+    final selectedBorder =
+        isDark ? const Color(0xFF2563EB) : const Color(0xFF93C5FD);
+    final defaultBorder =
+        isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Asset Categories',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
+          style: theme.textTheme.titleSmall?.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
               ),
         ),
         const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
-            final crossAxisCount = width >= 1100 ? 3 : (width >= 720 ? 2 : 1);
+            final crossAxisCount = width >= 768 ? 3 : 1;
             return GridView.count(
               crossAxisCount: crossAxisCount,
               shrinkWrap: true,
@@ -1165,35 +1455,27 @@ class _CategorySection extends StatelessWidget {
               crossAxisSpacing: 12,
               childAspectRatio: 2.8,
               children: categories.map((category) {
-                final isSelected = selected == category.name;
+                final isSelected = selected == category.slug;
                 return InkWell(
-                  onTap: () => onSelected(isSelected ? 'all' : category.name),
-                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => onSelected(isSelected ? 'all' : category.slug),
+                  borderRadius: BorderRadius.circular(12),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? category.color.withValues(alpha: 0.12)
-                          : Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(16),
+                      color:
+                          isSelected
+                              ? selectedBackground
+                              : (isDark ? const Color(0xFF1F2937) : Colors.white),
+                      borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isSelected
-                            ? category.color
-                            : Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
+                        color: isSelected ? selectedBorder : defaultBorder,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: category.color.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(category.icon, color: category.color),
+                        Text(
+                          category.emoji,
+                          style: const TextStyle(fontSize: 30),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -1204,12 +1486,24 @@ class _CategorySection extends StatelessWidget {
                               Text(
                                 category.name,
                                 style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
+                                    ?.copyWith(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: isDark
+                                          ? Colors.white
+                                          : const Color(0xFF111827),
+                                    ),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 '${category.count} assets',
-                                style: Theme.of(context).textTheme.labelSmall,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      fontSize: 14,
+                                      color: isDark
+                                          ? const Color(0xFF9CA3AF)
+                                          : const Color(0xFF6B7280),
+                                    ),
                               ),
                             ],
                           ),
@@ -1277,28 +1571,53 @@ class _MaintenanceScheduleCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.calendar_today, size: 18),
+              const Icon(
+                Icons.calendar_today,
+                size: 20,
+                color: Color(0xFF2563EB),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Upcoming Maintenance',
                   style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            isDark ? Colors.white : const Color(0xFF111827),
                       ),
                 ),
               ),
-              TextButton(onPressed: onViewAll, child: const Text('View All')),
+              TextButton(
+                onPressed: onViewAll,
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
+                  textStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                child: const Text('View All'),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -1307,16 +1626,18 @@ class _MaintenanceScheduleCard extends StatelessWidget {
               children: [
                 const SizedBox(height: 16),
                 Icon(
-                  Icons.event_available,
-                  size: 40,
-                  color: theme.colorScheme.onSurfaceVariant,
+                  Icons.calendar_today,
+                  size: 48,
+                  color: isDark ? Colors.grey[500] : Colors.grey[400],
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'No upcoming maintenance',
+                  'No upcoming maintenance for your assets',
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 14,
+                    color: isDark ? Colors.grey[400] : Colors.grey[500],
                   ),
+                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
               ],
@@ -1326,7 +1647,7 @@ class _MaintenanceScheduleCard extends StatelessWidget {
               builder: (context, constraints) {
                 final width = constraints.maxWidth;
                 final crossAxisCount =
-                    width >= 1100 ? 4 : (width >= 720 ? 2 : 1);
+                    width >= 1024 ? 4 : (width >= 768 ? 2 : 1);
                 return GridView.count(
                   crossAxisCount: crossAxisCount,
                   shrinkWrap: true,
@@ -1360,48 +1681,60 @@ class _MaintenanceTile extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colors.background,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Align(
-            alignment: Alignment.topRight,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: colors.badge,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                item.priority.toUpperCase(),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: colors.text,
-                  fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: colors.badge,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  item.priority.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 12,
+                    color: colors.text,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
-            ),
+              const Spacer(),
+              Icon(
+                Icons.access_time,
+                size: 16,
+                color: isDark ? Colors.grey[500] : Colors.grey[500],
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
             item.assetName,
             style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: isDark ? Colors.white : const Color(0xFF111827),
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            'Due: ${DateFormat('MMM d').format(item.dueDate)}',
+            'Due: ${DateFormat.yMd().format(item.dueDate)}',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 12,
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
           const SizedBox(height: 4),
           Text(
             item.type,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 12,
+              color: isDark ? Colors.grey[500] : Colors.grey[500],
             ),
           ),
         ],
@@ -1433,19 +1766,11 @@ _PriorityColors _priorityColors(String priority, bool isDark) {
       badge: isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFECACA),
     );
   }
-  if (priority == 'medium') {
-    return _PriorityColors(
-      background: isDark ? const Color(0xFF3D2F0E) : const Color(0xFFFEF3C7),
-      border: isDark ? const Color(0xFF92400E) : const Color(0xFFFDE68A),
-      text: isDark ? const Color(0xFFFCD34D) : const Color(0xFF92400E),
-      badge: isDark ? const Color(0xFF92400E) : const Color(0xFFFDE68A),
-    );
-  }
   return _PriorityColors(
-    background: isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6),
-    border: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
-    text: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF6B7280),
-    badge: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+    background: isDark ? const Color(0xFF3D2F0E) : const Color(0xFFFEF3C7),
+    border: isDark ? const Color(0xFF92400E) : const Color(0xFFFDE68A),
+    text: isDark ? const Color(0xFFFCD34D) : const Color(0xFF92400E),
+    badge: isDark ? const Color(0xFF92400E) : const Color(0xFFFDE68A),
   );
 }
 
@@ -1466,45 +1791,65 @@ class _InspectionToolsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final border = isDark
+        ? const Color(0xFF7C3AED).withOpacity(0.3)
+        : const Color(0xFFDDD6FE);
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isDark
-              ? const [Color(0xFF1F2937), Color(0xFF111827)]
+              ? [
+                  const Color(0xFF4C1D95).withOpacity(0.2),
+                  const Color(0xFF1F2937),
+                ]
               : const [Color(0xFFF5F3FF), Colors.white],
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.fact_check, size: 18),
+              const Icon(
+                Icons.fact_check,
+                size: 20,
+                color: Color(0xFF7C3AED),
+              ),
               const SizedBox(width: 8),
               Text(
                 'Asset Inspection & Tracking Tools',
                 style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color:
+                          isDark ? Colors.white : const Color(0xFF111827),
                     ),
               ),
             ],
           ),
           const SizedBox(height: 12),
           LayoutBuilder(
-            builder: (context, constraints) {
-              final width = constraints.maxWidth;
-              final crossAxisCount = width >= 900 ? 4 : (width >= 720 ? 2 : 1);
-              return GridView.count(
-                crossAxisCount: crossAxisCount,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.2,
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final crossAxisCount =
+                    width >= 1024 ? 4 : (width >= 768 ? 2 : 1);
+                return GridView.count(
+                  crossAxisCount: crossAxisCount,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
+                  childAspectRatio: 1.2,
                 children: [
                   _ToolTile(
                     icon: Icons.qr_code_scanner,
@@ -1516,21 +1861,21 @@ class _InspectionToolsCard extends StatelessWidget {
                   _ToolTile(
                     icon: Icons.videocam_outlined,
                     title: 'Video Inspection',
-                    subtitle: 'Record inspections',
+                    subtitle: 'Record video inspections',
                     color: const Color(0xFF2563EB),
                     onTap: onInspection,
                   ),
                   _ToolTile(
                     icon: Icons.photo_camera_outlined,
                     title: 'Photo Documentation',
-                    subtitle: 'Capture conditions',
+                    subtitle: 'Capture asset conditions',
                     color: const Color(0xFF16A34A),
                     onTap: onPhoto,
                   ),
                   _ToolTile(
                     icon: Icons.calendar_month_outlined,
                     title: 'Schedule Inspections',
-                    subtitle: 'Manage cadence',
+                    subtitle: 'Daily/Weekly/Monthly',
                     color: const Color(0xFFF97316),
                     onTap: onSchedule,
                   ),
@@ -1563,144 +1908,385 @@ class _ToolTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
-            style: BorderStyle.solid,
+    final borderColor =
+        isDark ? const Color(0xFF4B5563) : const Color(0xFFD1D5DB);
+    final tileBackground =
+        isDark ? const Color(0xFF1F2937).withOpacity(0.5) : Colors.white;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: _DashedBorder(
+          color: borderColor,
+          radius: 12,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            color: tileBackground,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: color, size: 24),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 12,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
         ),
       ),
     );
   }
 }
 
-class _AssetGridCard extends StatelessWidget {
+class _DashedBorder extends StatelessWidget {
+  const _DashedBorder({
+    required this.color,
+    required this.radius,
+    required this.child,
+  });
+
+  final Color color;
+  final double radius;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _DashedBorderPainter(color: color, radius: radius),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _DashedBorderPainter extends CustomPainter {
+  _DashedBorderPainter({required this.color, required this.radius});
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(radius),
+    );
+
+    const dashWidth = 6.0;
+    const dashSpace = 4.0;
+    final path = Path()..addRRect(rrect);
+    final metrics = path.computeMetrics();
+
+    for (final metric in metrics) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final length = dashWidth;
+        final extract = metric.extractPath(distance, distance + length);
+        canvas.drawPath(extract, paint);
+        distance += dashWidth + dashSpace;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedBorderPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.radius != radius;
+  }
+}
+
+class _AssetGridCard extends StatefulWidget {
   const _AssetGridCard({
     required this.model,
     required this.onOpen,
-    required this.onEdit,
-    required this.onInspect,
+    required this.onHistory,
+    required this.onQr,
   });
 
   final _AssetViewModel model;
   final VoidCallback onOpen;
-  final VoidCallback onEdit;
-  final VoidCallback onInspect;
+  final VoidCallback onHistory;
+  final VoidCallback onQr;
+
+  @override
+  State<_AssetGridCard> createState() => _AssetGridCardState();
+}
+
+class _AssetGridCardState extends State<_AssetGridCard> {
+  bool _hovering = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _AssetIconBadge(type: model.type),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _StatusPill(status: model.status),
-                    const SizedBox(height: 8),
-                    Text(
-                      model.name,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
+    final model = widget.model;
+    final statusBarColor = _statusBarColor(model.status, isDark);
+    final valueLabel = _formatCurrency(model.valueAmount);
+    final usageLabel = model.usageHours == null
+        ? '--'
+        : NumberFormat.decimalPattern().format(model.usageHours);
+    final conditionColor = _conditionColor(model.condition, isDark);
+    final supportsHover = kIsWeb ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux;
+    final showShadow = supportsHover && _hovering;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1F2937) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+          boxShadow: showShadow
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: 8,
+              decoration: BoxDecoration(
+                color: statusBarColor,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              model.name,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? Colors.white
+                                    : const Color(0xFF111827),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              model.category,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontSize: 14,
+                                color: isDark
+                                    ? const Color(0xFF6B7280)
+                                    : const Color(0xFF6B7280),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      _StatusPill(status: model.status),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _MetaRow(
+                    icon: Icons.place_outlined,
+                    label: 'Location',
+                    value: model.location,
+                  ),
+                  _MetaRow(
+                    icon: Icons.person_outline,
+                    label: 'Assigned To',
+                    value: model.assignedTo,
+                  ),
+                  _MetaRow(
+                    icon: Icons.qr_code_2,
+                    label: 'Serial #',
+                    value: model.serialNumber,
+                    valueStyle: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      fontFamily: 'monospace',
+                      color: isDark ? Colors.white : const Color(0xFF111827),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      model.category,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  _MetaRow(
+                    label: 'Value',
+                    value: valueLabel,
+                    valueStyle: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
+                    isLast: true,
+                  ),
+                  const SizedBox(height: 16),
+                  Container(height: 1, color: border),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Condition',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 14,
+                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                          ),
+                        ),
                       ),
+                      Text(
+                        model.condition,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: conditionColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Usage Hours',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 14,
+                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '$usageLabel hrs',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color:
+                              isDark ? Colors.white : const Color(0xFF111827),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF374151).withOpacity(0.5)
+                          : const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  ],
-                ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Next Maintenance',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontSize: 12,
+                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          model.nextMaintenanceLabel,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color:
+                                isDark ? Colors.white : const Color(0xFF111827),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF2563EB),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            textStyle: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          onPressed: widget.onOpen,
+                          child: const Text('View Details'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _IconActionButton(
+                        icon: Icons.history,
+                        onPressed: widget.onHistory,
+                      ),
+                      const SizedBox(width: 8),
+                      _IconActionButton(
+                        icon: Icons.qr_code,
+                        onPressed: widget.onQr,
+                      ),
+                    ],
+                  ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(height: 1, color: border),
-          const SizedBox(height: 12),
-          _MetaRow(label: 'Location', value: model.location),
-          _MetaRow(label: 'Assigned', value: model.assignedTo),
-          _MetaRow(label: 'Next Maint.', value: model.nextMaintenanceLabel),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton(
-                  onPressed: onInspect,
-                  child: const Text('Inspect'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _IconActionButton(
-                icon: Icons.visibility_outlined,
-                onPressed: onOpen,
-              ),
-              const SizedBox(width: 8),
-              _IconActionButton(
-                icon: Icons.edit_outlined,
-                onPressed: onEdit,
-              ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1726,8 +2312,8 @@ class _AssetsListTable extends StatelessWidget {
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
       ),
       child: SingleChildScrollView(
@@ -1743,7 +2329,7 @@ class _AssetsListTable extends StatelessWidget {
                       ? const Color(0xFF111827)
                       : const Color(0xFFF9FAFB),
                   borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(16)),
+                      const BorderRadius.vertical(top: Radius.circular(12)),
                   border: Border(bottom: BorderSide(color: border)),
                 ),
                 child: Row(
@@ -1827,6 +2413,7 @@ class _AssetViewModel {
     required this.location,
     required this.assignedTo,
     required this.condition,
+    required this.usageHours,
     required this.valueAmount,
     required this.serialNumber,
     required this.updatedAt,
@@ -1841,6 +2428,7 @@ class _AssetViewModel {
   final String location;
   final String assignedTo;
   final String condition;
+  final int? usageHours;
   final double valueAmount;
   final String serialNumber;
   final DateTime updatedAt;
@@ -1848,7 +2436,7 @@ class _AssetViewModel {
 
   String get nextMaintenanceLabel => nextMaintenanceDate == null
       ? 'Not scheduled'
-      : DateFormat('MMM d').format(nextMaintenanceDate!);
+      : DateFormat.yMd().format(nextMaintenanceDate!);
 
   factory _AssetViewModel.fromEquipment(Equipment asset) {
     final metadata = asset.metadata ?? const <String, dynamic>{};
@@ -1885,6 +2473,12 @@ class _AssetViewModel {
       'Unassigned',
     );
     final condition = _readString(metadata['condition'], 'Good');
+    final usageHours = _parseInt(
+      metadata['usageHours'] ??
+          metadata['usage_hours'] ??
+          metadata['hoursUsed'] ??
+          metadata['hours'],
+    );
     final valueAmount = _parseValue(
       metadata['value'] ??
           metadata['estimatedValue'] ??
@@ -1908,6 +2502,7 @@ class _AssetViewModel {
       location: location,
       assignedTo: assignedTo,
       condition: condition,
+      usageHours: usageHours,
       valueAmount: valueAmount,
       serialNumber: serial,
       updatedAt: updatedAt,
@@ -1936,6 +2531,17 @@ class _AssetViewModel {
     }
     return 0;
   }
+
+  static int? _parseInt(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is int) return raw;
+    if (raw is num) return raw.round();
+    if (raw is String) {
+      final cleaned = raw.replaceAll(RegExp(r'[^0-9]'), '');
+      return int.tryParse(cleaned);
+    }
+    return null;
+  }
 }
 
 class _StatusPill extends StatelessWidget {
@@ -1948,17 +2554,23 @@ class _StatusPill extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final colors = _statusColors(status, isDark);
+    final label = status.trim();
+    final display = label.isEmpty
+        ? label
+        : '${label[0].toUpperCase()}${label.substring(1)}';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: colors.background,
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border),
       ),
       child: Text(
-        status,
+        display,
         style: theme.textTheme.labelSmall?.copyWith(
+          fontSize: 12,
           color: colors.text,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );
@@ -1966,84 +2578,127 @@ class _StatusPill extends StatelessWidget {
 }
 
 class _StatusColors {
-  const _StatusColors({required this.background, required this.text});
+  const _StatusColors({
+    required this.background,
+    required this.text,
+    required this.border,
+  });
 
   final Color background;
   final Color text;
+  final Color border;
 }
 
 _StatusColors _statusColors(String status, bool isDark) {
   switch (status.toLowerCase()) {
     case 'active':
       return _StatusColors(
-        background:
-            isDark ? const Color(0xFF064E3B) : const Color(0xFFD1FAE5),
-        text: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF047857),
+        background: isDark
+            ? const Color(0xFF22C55E).withOpacity(0.2)
+            : const Color(0xFFDCFCE7),
+        text: isDark ? const Color(0xFF4ADE80) : const Color(0xFF15803D),
+        border: isDark
+            ? const Color(0xFF22C55E).withOpacity(0.3)
+            : const Color(0xFFBBF7D0),
       );
     case 'maintenance':
       return _StatusColors(
-        background:
-            isDark ? const Color(0xFF3D2F0E) : const Color(0xFFFEF3C7),
-        text: isDark ? const Color(0xFFFCD34D) : const Color(0xFFB45309),
+        background: isDark
+            ? const Color(0xFFF59E0B).withOpacity(0.2)
+            : const Color(0xFFFEF3C7),
+        text: isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309),
+        border: isDark
+            ? const Color(0xFFF59E0B).withOpacity(0.3)
+            : const Color(0xFFFDE68A),
       );
     default:
       return _StatusColors(
         background:
             isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
         text: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF6B7280),
+        border:
+            isDark ? const Color(0xFF4B5563) : const Color(0xFFE5E7EB),
       );
   }
 }
 
-class _AssetIconBadge extends StatelessWidget {
-  const _AssetIconBadge({required this.type});
-
-  final String type;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
-        ),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Icon(_iconForType(type), color: Colors.white),
-    );
+Color _statusBarColor(String status, bool isDark) {
+  switch (status.toLowerCase()) {
+    case 'active':
+      return const Color(0xFF22C55E);
+    case 'maintenance':
+      return const Color(0xFFF59E0B);
+    default:
+      return const Color(0xFF6B7280);
   }
 }
 
+String _formatCurrency(double amount) {
+  if (amount <= 0) return 'TBD';
+  return NumberFormat.currency(symbol: '\$', decimalDigits: 0).format(amount);
+}
+
+Color _conditionColor(String condition, bool isDark) {
+  final normalized = condition.toLowerCase();
+  if (normalized == 'excellent') {
+    return isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
+  }
+  if (normalized == 'good') {
+    return isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
+  }
+  return isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+}
+
 class _MetaRow extends StatelessWidget {
-  const _MetaRow({required this.label, required this.value});
+  const _MetaRow({
+    required this.label,
+    required this.value,
+    this.icon,
+    this.valueStyle,
+    this.isLast = false,
+  });
 
   final String label;
   final String value;
+  final IconData? icon;
+  final TextStyle? valueStyle;
+  final bool isLast;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final labelStyle = theme.textTheme.labelSmall?.copyWith(
+      fontSize: 14,
+      color: isDark ? Colors.grey[400] : Colors.grey[600],
+    );
+    final valueStyleResolved = valueStyle ??
+        theme.textTheme.bodySmall?.copyWith(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: isDark ? Colors.white : const Color(0xFF111827),
+        );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+            child: Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: labelStyle?.color),
+                  const SizedBox(width: 6),
+                ],
+                Flexible(child: Text(label, style: labelStyle)),
+              ],
             ),
           ),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              style: valueStyleResolved,
             ),
           ),
         ],
@@ -2063,99 +2718,25 @@ class _IconActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         minimumSize: const Size(0, 40),
-      ),
-      child: Icon(icon, size: 18),
-    );
-  }
-}
-
-class _ViewToggle extends StatelessWidget {
-  const _ViewToggle({required this.selected, required this.onChanged});
-
-  final _AssetsViewMode selected;
-  final ValueChanged<_AssetsViewMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final background = isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB);
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ToggleButton(
-            icon: Icons.grid_view_outlined,
-            isSelected: selected == _AssetsViewMode.grid,
-            onTap: () => onChanged(_AssetsViewMode.grid),
-          ),
-          _ToggleButton(
-            icon: Icons.view_list_outlined,
-            isSelected: selected == _AssetsViewMode.list,
-            onTap: () => onChanged(_AssetsViewMode.list),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToggleButton extends StatelessWidget {
-  const _ToggleButton({
-    required this.icon,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? (isDark ? const Color(0xFF374151) : Colors.white)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 6,
-                    offset: const Offset(0, 3),
-                  ),
-                ]
-              : null,
+        foregroundColor: isDark ? Colors.grey[400] : Colors.grey[600],
+        side: BorderSide(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFD1D5DB),
         ),
-        child: Icon(
-          icon,
-          size: 18,
-          color: isSelected
-              ? (isDark ? Colors.white : const Color(0xFF111827))
-              : (isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
         ),
       ),
+      child: Icon(icon, size: 16),
     );
   }
 }
+
 
 class _TableHeader extends StatelessWidget {
   const _TableHeader({required this.label, required this.flex});
@@ -2170,8 +2751,11 @@ class _TableHeader extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontSize: 12,
               fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF9CA3AF)
+                  : const Color(0xFF6B7280),
             ),
       ),
     );
@@ -2308,46 +2892,47 @@ class _MaintenanceSheet extends StatelessWidget {
 }
 
 class _EmptyAssetsCard extends StatelessWidget {
-  const _EmptyAssetsCard({required this.onClear, required this.onCreate});
-
-  final VoidCallback onClear;
-  final VoidCallback onCreate;
+  const _EmptyAssetsCard();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'No assets match your filters.',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text('Clear filters or add a new asset to get started.'),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Clear filters'),
-                  onPressed: onClear,
-                ),
-                FilledButton.icon(
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add asset'),
-                  onPressed: onCreate,
-                ),
-              ],
-            ),
-          ],
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
         ),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 48,
+            color: isDark ? Colors.grey[600] : Colors.grey[400],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No assets found',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : const Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Try adjusting your search or filters',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 14,
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
@@ -2379,4 +2964,8 @@ IconData _iconForType(String type) {
     return Icons.precision_manufacturing_outlined;
   }
   return Icons.inventory_2_outlined;
+}
+
+String _slugify(String value) {
+  return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '-');
 }

@@ -16,8 +16,8 @@ class DashboardShell extends StatelessWidget {
     required this.child,
     required this.onNavigate,
     this.activeRoute = SideMenuRoute.dashboard,
-    this.maxContentWidth = 1200,
-    this.showRightSidebar = true,
+    this.maxContentWidth = 1280,
+    this.showRightSidebar = false,
   });
 
   final UserRole role;
@@ -76,15 +76,22 @@ class DashboardShell extends StatelessWidget {
                               constraints: BoxConstraints(
                                 maxWidth: maxContentWidth,
                               ),
-                              child: ProviderScope(
-                                overrides: [
-                                  dashboardRoleProvider
-                                      .overrideWithValue(role),
-                                ],
-                                child: Navigator(
-                                  key: ValueKey(activeRoute),
-                                  onGenerateRoute: (_) => MaterialPageRoute(
-                                    builder: (_) => child,
+                              child: SizedBox.expand(
+                                child: ProviderScope(
+                                  overrides: [
+                                    dashboardRoleProvider
+                                        .overrideWithValue(role),
+                                  ],
+                                  child: Navigator(
+                                    key: ValueKey(activeRoute),
+                                    pages: [
+                                      MaterialPage(
+                                        key: ValueKey(activeRoute),
+                                        child: child,
+                                      ),
+                                    ],
+                                    onPopPage: (route, result) =>
+                                        route.didPop(result),
                                   ),
                                 ),
                               ),
