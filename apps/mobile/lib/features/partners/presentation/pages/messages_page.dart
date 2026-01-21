@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared/shared.dart';
@@ -246,6 +247,9 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                       selectedId: _selectedId,
                       onSelect: (id) => _handleSelect(id, isWide: isWide),
                       onCompose: () => _showComposeDialog(isWide: isWide),
+                      onMenuPressed: _handleConversationListMenu,
+                      onSwipePin: _handleSwipePin,
+                      onSwipeDelete: _handleSwipeDelete,
                       loading: threadsAsync.isLoading,
                       error: threadsAsync.hasError,
                     ),
@@ -287,6 +291,24 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                       onMessageAction: selected == null
                           ? null
                           : (message) => _showMessageActions(
+                                message: message,
+                                threadId: selected.id,
+                              ),
+                      onMessageLongPress: selected == null
+                          ? null
+                          : (message) => _showQuickReactions(
+                                message: message,
+                                threadId: selected.id,
+                              ),
+                      onMessageReply: selected == null
+                          ? null
+                          : (message) => _handleMessageReply(
+                                message: message,
+                                threadId: selected.id,
+                              ),
+                      onMessageDelete: selected == null
+                          ? null
+                          : (message) => _handleMessageDelete(
                                 message: message,
                                 threadId: selected.id,
                               ),
@@ -364,6 +386,211 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     final muted = await repo.isThreadMuted(threadId: threadId);
     if (!mounted) return;
     setState(() => _mutedThreads[threadId] = muted);
+  }
+
+  Future<void> _handleConversationListMenu(_ConversationListAction action) async {
+    if (!mounted) return;
+
+    final repo = ref.read(partnersRepositoryProvider);
+    try {
+      if (action == _ConversationListAction.markAllRead) {
+        await repo.markAllThreadsRead();
+        ref.invalidate(messageThreadsProvider);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All conversations marked as read.')),
+        );
+      } else if (action == _ConversationListAction.showArchived) {
+        // TODO: Add filter for archived conversations
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Archived filter coming soon.')),
+        );
+      } else if (action == _ConversationListAction.showMuted) {
+        // TODO: Add filter for muted conversations
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Muted filter coming soon.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Action failed: $e')),
+      );
+    }
+  }
+
+  final Set<String> _pinnedThreads = {};
+
+  Future<void> _handleSwipePin(String threadId) async {
+    final isPinned = _pinnedThreads.contains(threadId);
+    setState(() {
+      if (isPinned) {
+        _pinnedThreads.remove(threadId);
+      } else {
+        _pinnedThreads.add(threadId);
+      }
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isPinned ? 'Conversation unpinned.' : 'Conversation pinned.'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    // TODO: Persist pinned status to backend when API is available
+  }
+
+  Future<void> _handleSwipeDelete(String threadId) async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Conversation'),
+        content: const Text('Are you sure you want to delete this conversation? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final repo = ref.read(partnersRepositoryProvider);
+    try {
+      await repo.deleteThread(threadId: threadId);
+      // Clear selection if this was the selected thread and force UI refresh
+      setState(() {
+        if (_selectedId == threadId) {
+          _selectedId = null;
+        }
+      });
+      // Invalidate to refetch from server
+      ref.invalidate(messageThreadsProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Conversation deleted.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete: $e')),
+      );
+    }
+  }
+
+  void _handleMessageReply({
+    required _MessageDisplay message,
+    required String threadId,
+  }) {
+    // Set the reply-to message (this should trigger the reply UI in composer)
+    setState(() {
+      _replyToMessage = message.message;
+    });
+  }
+
+  Future<void> _handleMessageDelete({
+    required _MessageDisplay message,
+    required String threadId,
+  }) async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Message'),
+        content: const Text('Are you sure you want to delete this message?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final repo = ref.read(partnersRepositoryProvider);
+    try {
+      await repo.deleteMessage(messageId: message.message.id);
+      ref.invalidate(threadMessagesProvider(threadId));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Message deleted.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete: $e')),
+      );
+    }
+  }
+
+  Future<void> _showQuickReactions({
+    required _MessageDisplay message,
+    required String threadId,
+  }) async {
+    final colors = _MessagingColors.fromTheme(Theme.of(context));
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black26,
+      builder: (context) {
+        return SafeArea(
+          child: Center(
+            child: _QuickReactionBar(
+              colors: colors,
+              onReact: (emoji) async {
+                Navigator.of(context).pop();
+                await _addReaction(
+                  threadId: threadId,
+                  messageId: message.message.id,
+                  emoji: emoji,
+                );
+              },
+              onMore: () {
+                Navigator.of(context).pop();
+                _showMessageActions(message: message, threadId: threadId);
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _addReaction({
+    required String threadId,
+    required String messageId,
+    required String emoji,
+  }) async {
+    final repo = ref.read(partnersRepositoryProvider);
+    try {
+      await repo.toggleReaction(
+        threadId: threadId,
+        messageId: messageId,
+        emoji: emoji,
+      );
+      ref.invalidate(threadMessagesProvider(threadId));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to add reaction: $e')),
+      );
+    }
   }
 
   Future<void> _showThreadActions({
@@ -1827,6 +2054,9 @@ class _ConversationPanel extends StatelessWidget {
     required this.selectedId,
     required this.onSelect,
     required this.onCompose,
+    required this.onMenuPressed,
+    required this.onSwipePin,
+    required this.onSwipeDelete,
     required this.loading,
     required this.error,
   });
@@ -1838,6 +2068,9 @@ class _ConversationPanel extends StatelessWidget {
   final String? selectedId;
   final ValueChanged<String> onSelect;
   final VoidCallback onCompose;
+  final ValueChanged<_ConversationListAction> onMenuPressed;
+  final ValueChanged<String> onSwipePin;
+  final ValueChanged<String> onSwipeDelete;
   final bool loading;
   final bool error;
 
@@ -1903,14 +2136,51 @@ class _ConversationPanel extends StatelessWidget {
                         ),
                       ),
                     const SizedBox(width: 6),
-                    IconButton(
-                      onPressed: () {},
+                    PopupMenuButton<_ConversationListAction>(
                       icon: Icon(Icons.more_vert, color: colors.muted, size: 20),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
                         minWidth: 32,
                         minHeight: 32,
                       ),
+                      color: colors.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(color: colors.border),
+                      ),
+                      onSelected: onMenuPressed,
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: _ConversationListAction.markAllRead,
+                          child: Row(
+                            children: [
+                              Icon(Icons.done_all, size: 20),
+                              SizedBox(width: 12),
+                              Text('Mark all as read'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: _ConversationListAction.showArchived,
+                          child: Row(
+                            children: [
+                              Icon(Icons.archive_outlined, size: 20),
+                              SizedBox(width: 12),
+                              Text('Show archived'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: _ConversationListAction.showMuted,
+                          child: Row(
+                            children: [
+                              Icon(Icons.notifications_off_outlined, size: 20),
+                              SizedBox(width: 12),
+                              Text('Show muted'),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1947,23 +2217,111 @@ class _ConversationPanel extends StatelessWidget {
                         colors: colors,
                         message: hasQuery
                             ? 'No conversations match your search.'
-                            : 'No conversations yet.',
+                            : 'No messages yet',
+                        subtitle: hasQuery
+                            ? null
+                            : 'Start a conversation with your team or vendors',
+                        onCompose: hasQuery ? null : onCompose,
                       )
                     : ListView.builder(
                         itemCount: conversations.length,
                         itemBuilder: (context, index) {
                           final conversation = conversations[index];
-                          return _ConversationTile(
+                          return _SwipeableConversationTile(
+                            key: Key(conversation.id),
                             colors: colors,
                             conversation: conversation,
                             selected: selectedId == conversation.id,
                             isWide: isWide,
                             onTap: () => onSelect(conversation.id),
+                            onSwipePin: () => onSwipePin(conversation.id),
+                            onSwipeDelete: () => onSwipeDelete(conversation.id),
                           );
                         },
                       ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SwipeableConversationTile extends StatelessWidget {
+  const _SwipeableConversationTile({
+    super.key,
+    required this.colors,
+    required this.conversation,
+    required this.selected,
+    required this.isWide,
+    required this.onTap,
+    required this.onSwipePin,
+    required this.onSwipeDelete,
+  });
+
+  final _MessagingColors colors;
+  final _ConversationDisplay conversation;
+  final bool selected;
+  final bool isWide;
+  final VoidCallback onTap;
+  final VoidCallback onSwipePin;
+  final VoidCallback onSwipeDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dismissible(
+      key: Key('swipe_${conversation.id}'),
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        color: const Color(0xFF3B82F6), // Blue for pin
+        child: const Row(
+          children: [
+            Icon(Icons.push_pin, color: Colors.white),
+            SizedBox(width: 8),
+            Text(
+              'Pin',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: const Color(0xFFEF4444), // Red for delete
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              'Delete',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            SizedBox(width: 8),
+            Icon(Icons.delete, color: Colors.white),
+          ],
+        ),
+      ),
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.startToEnd) {
+          onSwipePin();
+          return false; // Don't remove from list
+        } else {
+          onSwipeDelete();
+          return false; // Don't remove from list (delete handler shows confirmation)
+        }
+      },
+      child: _ConversationTile(
+        colors: colors,
+        conversation: conversation,
+        selected: selected,
+        isWide: isWide,
+        onTap: onTap,
       ),
     );
   }
@@ -2175,6 +2533,9 @@ class _ChatPanel extends StatelessWidget {
     required this.notificationsMuted,
     required this.onChatActions,
     required this.onMessageAction,
+    required this.onMessageLongPress,
+    required this.onMessageReply,
+    required this.onMessageDelete,
     required this.messageFilter,
     required this.onFilterChanged,
     required this.typingUsers,
@@ -2204,6 +2565,9 @@ class _ChatPanel extends StatelessWidget {
   final bool notificationsMuted;
   final VoidCallback? onChatActions;
   final ValueChanged<_MessageDisplay>? onMessageAction;
+  final ValueChanged<_MessageDisplay>? onMessageLongPress;
+  final ValueChanged<_MessageDisplay>? onMessageReply;
+  final ValueChanged<_MessageDisplay>? onMessageDelete;
   final _MessageFilter messageFilter;
   final ValueChanged<_MessageFilter> onFilterChanged;
   final Map<String, DateTime> typingUsers;
@@ -2265,6 +2629,9 @@ class _ChatPanel extends StatelessWidget {
             colors: colors,
             threadAsync: threadAsync,
             onMessageAction: onMessageAction,
+            onMessageLongPress: onMessageLongPress,
+            onMessageReply: onMessageReply,
+            onMessageDelete: onMessageDelete,
             filter: messageFilter,
             onFilterChanged: onFilterChanged,
             searchQuery: threadSearchController.text.trim(),
@@ -2393,27 +2760,6 @@ class _ChatHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (conversation.type == _ConversationType.direct) ...[
-            IconButton(
-              onPressed: () {},
-              icon: Icon(Icons.call, color: colors.muted, size: isWide ? 20 : 16),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(
-                minWidth: 32,
-                minHeight: 32,
-              ),
-            ),
-            IconButton(
-              onPressed: () {},
-              icon:
-                  Icon(Icons.videocam, color: colors.muted, size: isWide ? 20 : 16),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(
-                minWidth: 32,
-                minHeight: 32,
-              ),
-            ),
-          ],
           IconButton(
             onPressed: onToggleSearch,
             icon: Icon(
@@ -2480,6 +2826,9 @@ class _MessageList extends StatelessWidget {
     required this.colors,
     required this.threadAsync,
     required this.onMessageAction,
+    required this.onMessageLongPress,
+    required this.onMessageReply,
+    required this.onMessageDelete,
     required this.filter,
     required this.onFilterChanged,
     required this.searchQuery,
@@ -2489,6 +2838,9 @@ class _MessageList extends StatelessWidget {
   final _MessagingColors colors;
   final AsyncValue<ThreadMessagesBundle>? threadAsync;
   final ValueChanged<_MessageDisplay>? onMessageAction;
+  final ValueChanged<_MessageDisplay>? onMessageLongPress;
+  final ValueChanged<_MessageDisplay>? onMessageReply;
+  final ValueChanged<_MessageDisplay>? onMessageDelete;
   final _MessageFilter filter;
   final ValueChanged<_MessageFilter> onFilterChanged;
   final String searchQuery;
@@ -2567,18 +2919,27 @@ class _MessageList extends StatelessWidget {
           bundle.participants,
           currentUserId,
         );
+        // Only show filter bar when there are filtered messages or active filter
+        final hasFlagged = displayMessages.any((m) => m.isFlagged);
+        final hasArchived = displayMessages.any((m) => m.isArchived);
+        final showFilters = hasFlagged || hasArchived || filter != _MessageFilter.all;
         return Column(
           children: [
-            _MessageFilterBar(
-              colors: colors,
-              selected: filter,
-              onChanged: onFilterChanged,
-            ),
+            if (showFilters)
+              _MessageFilterBar(
+                colors: colors,
+                selected: filter,
+                onChanged: onFilterChanged,
+              ),
             Expanded(
               child: _MessageListBody(
                 colors: colors,
                 messages: displayMessages,
                 onMessageAction: onMessageAction,
+                onLongPress: onMessageLongPress,
+                onReply: onMessageReply,
+                onDelete: onMessageDelete,
+                lastReadAt: bundle.currentParticipant?.lastReadAt,
               ),
             ),
             if (typingLabels.isNotEmpty)
@@ -2593,229 +2954,581 @@ class _MessageList extends StatelessWidget {
   }
 }
 
-class _MessageListBody extends StatelessWidget {
+class _MessageListBody extends StatefulWidget {
   const _MessageListBody({
     required this.colors,
     required this.messages,
     required this.onMessageAction,
+    this.onLongPress,
+    this.onReply,
+    this.onDelete,
+    this.lastReadAt,
   });
 
   final _MessagingColors colors;
   final List<_MessageDisplay> messages;
   final ValueChanged<_MessageDisplay>? onMessageAction;
+  final ValueChanged<_MessageDisplay>? onLongPress;
+  final ValueChanged<_MessageDisplay>? onReply;
+  final ValueChanged<_MessageDisplay>? onDelete;
+  final DateTime? lastReadAt;
+
+  @override
+  State<_MessageListBody> createState() => _MessageListBodyState();
+}
+
+class _MessageListBodyState extends State<_MessageListBody> {
+  final ScrollController _scrollController = ScrollController();
+  bool _showScrollToBottom = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final showButton = _scrollController.position.pixels <
+        _scrollController.position.maxScrollExtent - 100;
+    if (showButton != _showScrollToBottom) {
+      setState(() => _showScrollToBottom = showButton);
+    }
+  }
+
+  void _scrollToBottom() {
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 768;
-        return ListView.builder(
-          padding: EdgeInsets.all(isWide ? 16 : 12),
-          itemCount: messages.length,
-          itemBuilder: (context, index) {
-            return _MessageBubble(
-              colors: colors,
-              message: messages[index],
-              isWide: isWide,
-              onMenu: onMessageAction == null
-                  ? null
-                  : () => onMessageAction!(messages[index]),
-            );
-          },
+
+        // Build list items with date separators and grouping
+        final listItems = <_MessageListItem>[];
+        DateTime? lastDate;
+        String? lastSenderId;
+        bool unreadDividerShown = false;
+        final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+
+        for (var i = 0; i < widget.messages.length; i++) {
+          final message = widget.messages[i];
+          final messageDate = message.message.createdAt;
+          final messageDateOnly = DateTime(messageDate.year, messageDate.month, messageDate.day);
+
+          // Insert unread divider if this is the first unread message
+          if (!unreadDividerShown &&
+              widget.lastReadAt != null &&
+              message.message.senderId != currentUserId &&
+              messageDate.isAfter(widget.lastReadAt!)) {
+            listItems.add(_MessageListItem.unreadDivider());
+            unreadDividerShown = true;
+          }
+
+          // Insert date separator if date changed
+          if (lastDate == null || lastDate != messageDateOnly) {
+            listItems.add(_MessageListItem.dateSeparator(messageDate));
+            lastDate = messageDateOnly;
+            lastSenderId = null; // Reset grouping on new day
+          }
+
+          // Determine grouping
+          final isFirstInGroup = lastSenderId != message.message.senderId;
+          final nextMessage = i + 1 < widget.messages.length ? widget.messages[i + 1] : null;
+          final nextDate = nextMessage?.message.createdAt;
+          final nextDateOnly = nextDate != null
+              ? DateTime(nextDate.year, nextDate.month, nextDate.day)
+              : null;
+          final isLastInGroup = nextMessage == null ||
+              nextMessage.message.senderId != message.message.senderId ||
+              nextDateOnly != messageDateOnly;
+
+          listItems.add(_MessageListItem.message(
+            message,
+            isFirstInGroup: isFirstInGroup,
+            isLastInGroup: isLastInGroup,
+          ));
+          lastSenderId = message.message.senderId;
+        }
+
+        // SlidableAutoCloseBehavior ensures only one message can be swiped open at a time (iMessage behavior)
+        return SlidableAutoCloseBehavior(
+          child: Stack(
+            children: [
+              ListView.builder(
+                controller: _scrollController,
+                padding: EdgeInsets.all(isWide ? 16 : 12),
+                itemCount: listItems.length,
+                itemBuilder: (context, index) {
+                  final item = listItems[index];
+                  if (item.type == _MessageListItemType.dateSeparator) {
+                    return _DateSeparator(date: item.date!, colors: widget.colors);
+                  }
+                  if (item.type == _MessageListItemType.unreadDivider) {
+                    return _UnreadDivider(colors: widget.colors);
+                  }
+                  return _MessageBubble(
+                    colors: widget.colors,
+                    message: item.message!,
+                    isWide: isWide,
+                    isFirstInGroup: item.isFirstInGroup,
+                    isLastInGroup: item.isLastInGroup,
+                    onMenu: widget.onMessageAction == null
+                        ? null
+                        : () => widget.onMessageAction!(item.message!),
+                    onLongPress: widget.onLongPress == null
+                        ? null
+                        : () => widget.onLongPress!(item.message!),
+                    onReply: widget.onReply == null
+                        ? null
+                        : () => widget.onReply!(item.message!),
+                    onDelete: widget.onDelete == null
+                        ? null
+                        : () => widget.onDelete!(item.message!),
+                  );
+                },
+              ),
+              // Scroll-to-bottom button
+              if (_showScrollToBottom)
+                Positioned(
+                  bottom: 16,
+                  right: 16,
+                  child: FloatingActionButton.small(
+                    onPressed: _scrollToBottom,
+                    backgroundColor: widget.colors.primary,
+                    child: const Icon(Icons.arrow_downward, color: Colors.white),
+                  ),
+                ),
+            ],
+          ),
         );
       },
     );
   }
 }
 
+enum _MessageListItemType { dateSeparator, unreadDivider, message }
+
+class _MessageListItem {
+  const _MessageListItem._({
+    required this.type,
+    this.date,
+    this.message,
+    this.isFirstInGroup = false,
+    this.isLastInGroup = false,
+  });
+
+  factory _MessageListItem.dateSeparator(DateTime date) {
+    return _MessageListItem._(type: _MessageListItemType.dateSeparator, date: date);
+  }
+
+  factory _MessageListItem.unreadDivider() {
+    return const _MessageListItem._(type: _MessageListItemType.unreadDivider);
+  }
+
+  factory _MessageListItem.message(
+    _MessageDisplay message, {
+    required bool isFirstInGroup,
+    required bool isLastInGroup,
+  }) {
+    return _MessageListItem._(
+      type: _MessageListItemType.message,
+      message: message,
+      isFirstInGroup: isFirstInGroup,
+      isLastInGroup: isLastInGroup,
+    );
+  }
+
+  final _MessageListItemType type;
+  final DateTime? date;
+  final _MessageDisplay? message;
+  final bool isFirstInGroup;
+  final bool isLastInGroup;
+}
+
+class _DateSeparator extends StatelessWidget {
+  const _DateSeparator({required this.date, required this.colors});
+
+  final DateTime date;
+  final _MessagingColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: colors.filterSurface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          _formatDateLabel(date),
+          style: TextStyle(fontSize: 12, color: colors.muted),
+        ),
+      ),
+    );
+  }
+
+  String _formatDateLabel(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final dateOnly = DateTime(date.year, date.month, date.day);
+
+    if (dateOnly == today) return 'Today';
+    if (dateOnly == yesterday) return 'Yesterday';
+    if (now.difference(date).inDays < 7) {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days[date.weekday - 1];
+    }
+    return '${date.month}/${date.day}/${date.year}';
+  }
+}
+
+class _UnreadDivider extends StatelessWidget {
+  const _UnreadDivider({required this.colors});
+
+  final _MessagingColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: colors.primary, thickness: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'New messages',
+              style: TextStyle(
+                color: colors.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(child: Divider(color: colors.primary, thickness: 1)),
+        ],
+      ),
+    );
+  }
+}
+
+/// iMessage-style message bubble with swipe actions
+///
+/// Features:
+/// - Swipe to reveal Reply/Delete actions (works on all platforms)
+/// - Long press for quick reactions menu
+/// - Grouped messages with reduced spacing
+/// - Sender names and avatars
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.colors,
     required this.message,
     required this.isWide,
     required this.onMenu,
+    this.onLongPress,
+    this.onReply,
+    this.onDelete,
+    this.isFirstInGroup = true,
+    this.isLastInGroup = true,
   });
 
   final _MessagingColors colors;
   final _MessageDisplay message;
   final bool isWide;
   final VoidCallback? onMenu;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onReply;
+  final VoidCallback? onDelete;
+  final bool isFirstInGroup;
+  final bool isLastInGroup;
 
   @override
   Widget build(BuildContext context) {
     final isMine = message.isMine;
-    final bubbleColor = isMine ? colors.primary : colors.bubbleOther;
+
+    // iMessage-style colors
+    final bubbleColor = isMine
+        ? colors.primary // Blue for sent messages
+        : colors.bubbleOther; // Gray for received
     final textColor = isMine ? Colors.white : colors.bubbleOtherText;
-    final attachmentBackground = isMine
-        ? Colors.white.withValues(alpha: 0.2)
-        : const Color(0xFF4B5563).withValues(alpha: 0.2);
-    final attachmentForeground = textColor;
+
+    // iMessage-style bubble corners
+    final largeRadius = const Radius.circular(18);
     final smallRadius = const Radius.circular(4);
-    final largeRadius = const Radius.circular(16);
     final radius = isMine
         ? BorderRadius.only(
             topLeft: largeRadius,
             topRight: largeRadius,
             bottomLeft: largeRadius,
-            bottomRight: smallRadius,
+            bottomRight: isLastInGroup ? smallRadius : largeRadius,
           )
         : BorderRadius.only(
             topLeft: largeRadius,
             topRight: largeRadius,
-            bottomLeft: smallRadius,
+            bottomLeft: isLastInGroup ? smallRadius : largeRadius,
             bottomRight: largeRadius,
           );
-    final padding = EdgeInsets.symmetric(
-      horizontal: 12,
-      vertical: 8,
-    );
-    final avatarSize = isWide ? 32.0 : 24.0;
-    final avatarFontSize = isWide ? 12.0 : 10.0;
-    final verticalGap = isWide ? 8.0 : 4.0;
-    final timeSize = isWide ? 12.0 : 11.0;
-    final textSize = isWide ? 14.0 : 13.0;
-    final menuButton = IconButton(
-      onPressed: onMenu,
-      icon: Icon(Icons.more_horiz, size: 18, color: colors.muted),
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(
-        minWidth: 28,
-        minHeight: 28,
+
+    // Sizing
+    final avatarSize = isWide ? 32.0 : 28.0;
+    final avatarFontSize = isWide ? 12.0 : 11.0;
+    final verticalGap = isFirstInGroup ? (isWide ? 12.0 : 8.0) : 2.0;
+    final textSize = isWide ? 15.0 : 14.0;
+    final timeSize = isWide ? 11.0 : 10.0;
+    final showAvatar = isLastInGroup;
+
+    // Build message content
+    Widget messageContent = Container(
+      constraints: BoxConstraints(
+        maxWidth: isWide ? 500 : 280,
       ),
-      splashRadius: 16,
-    );
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: verticalGap),
-      child: Row(
-        mainAxisAlignment:
-            isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: bubbleColor,
+        borderRadius: radius,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (!isMine)
-            _BubbleAvatar(
+          // Reply preview
+          if (message.replyPreview != null) ...[
+            _ReplyPreview(
               colors: colors,
-              label: message.avatar,
-              isMine: false,
-              size: avatarSize,
-              fontSize: avatarFontSize,
+              reply: message.replyPreview!,
+              isMine: isMine,
             ),
-          if (!isMine) const SizedBox(width: 8),
-          if (isMine) menuButton,
-          if (isMine) const SizedBox(width: 4),
-          Flexible(
-            child: Column(
-              crossAxisAlignment:
-                  isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: padding,
-                  decoration: BoxDecoration(
-                    color: bubbleColor,
-                    borderRadius: radius,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (message.replyPreview != null) ...[
-                        _ReplyPreview(
-                          colors: colors,
-                          reply: message.replyPreview!,
-                          isMine: isMine,
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                      Text(
-                        message.isDeletedForAll
-                            ? 'Message deleted'
-                            : message.content,
-                        style: TextStyle(
-                          color: message.isDeletedForAll
-                              ? colors.muted
-                              : textColor,
-                          fontSize: textSize,
-                          fontStyle: message.isDeletedForAll
-                              ? FontStyle.italic
-                              : FontStyle.normal,
-                        ),
-                      ),
-                      if (message.attachments.isNotEmpty &&
-                          !message.isDeletedForAll) ...[
-                        const SizedBox(height: 8),
-                        _AttachmentGrid(
-                          attachments: message.attachments,
-                          isMine: isMine,
-                          background: attachmentBackground,
-                          foreground: attachmentForeground,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                if (message.reactions.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  _ReactionRow(
-                    colors: colors,
-                    reactions: message.reactions,
-                    isMine: isMine,
-                  ),
-                ],
-                SizedBox(height: isWide ? 4 : 2),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      message.time,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.muted,
-                            fontSize: timeSize,
-                          ),
-                    ),
-                    if (message.isEdited) ...[
-                      const SizedBox(width: 4),
-                      Text(
-                        'edited',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colors.muted,
-                              fontSize: timeSize,
-                            ),
-                      ),
-                    ],
-                    if (isMine && message.recipientCount > 0) ...[
-                      const SizedBox(width: 6),
-                      _ReceiptIndicator(
-                        colors: colors,
-                        readCount: message.readCount,
-                        deliveredCount: message.deliveredCount,
-                        recipientCount: message.recipientCount,
-                      ),
-                    ],
-                    if (message.isFlagged) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.flag, size: 12, color: colors.muted),
-                    ],
-                    if (message.isArchived) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.archive, size: 12, color: colors.muted),
-                    ],
-                  ],
-                ),
-              ],
+            const SizedBox(height: 6),
+          ],
+          // Message text
+          Text(
+            message.isDeletedForAll ? 'This message was deleted' : message.content,
+            style: TextStyle(
+              color: message.isDeletedForAll
+                  ? (isMine ? Colors.white70 : colors.muted)
+                  : textColor,
+              fontSize: textSize,
+              fontStyle: message.isDeletedForAll ? FontStyle.italic : FontStyle.normal,
+              height: 1.3,
             ),
           ),
-          if (!isMine) ...[
-            const SizedBox(width: 4),
-            menuButton,
-          ],
-          if (isMine) const SizedBox(width: 8),
-          if (isMine)
-            _BubbleAvatar(
-              colors: colors,
-              label: message.avatar,
-              isMine: true,
-              size: avatarSize,
-              fontSize: avatarFontSize,
+          // Attachments
+          if (message.attachments.isNotEmpty && !message.isDeletedForAll) ...[
+            const SizedBox(height: 8),
+            _AttachmentGrid(
+              attachments: message.attachments,
+              isMine: isMine,
+              background: isMine
+                  ? Colors.white.withValues(alpha: 0.2)
+                  : const Color(0xFF4B5563).withValues(alpha: 0.2),
+              foreground: textColor,
             ),
+          ],
         ],
+      ),
+    );
+
+    // Reactions row
+    Widget? reactionsRow;
+    if (message.reactions.isNotEmpty) {
+      reactionsRow = Padding(
+        padding: EdgeInsets.only(
+          top: 4,
+          left: isMine ? 0 : avatarSize + 8,
+          right: isMine ? avatarSize + 8 : 0,
+        ),
+        child: _ReactionRow(
+          colors: colors,
+          reactions: message.reactions,
+          isMine: isMine,
+        ),
+      );
+    }
+
+    // Time and status row
+    Widget timeRow = Padding(
+      padding: EdgeInsets.only(
+        top: 4,
+        left: isMine ? 0 : avatarSize + 12,
+        right: isMine ? avatarSize + 12 : 0,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          Text(
+            message.time,
+            style: TextStyle(
+              color: colors.muted,
+              fontSize: timeSize,
+            ),
+          ),
+          if (message.isEdited) ...[
+            Text(
+              ' · edited',
+              style: TextStyle(
+                color: colors.muted,
+                fontSize: timeSize,
+              ),
+            ),
+          ],
+          if (isMine && message.recipientCount > 0) ...[
+            const SizedBox(width: 6),
+            _ReceiptIndicator(
+              colors: colors,
+              readCount: message.readCount,
+              deliveredCount: message.deliveredCount,
+              recipientCount: message.recipientCount,
+            ),
+          ],
+          if (message.isFlagged) ...[
+            const SizedBox(width: 4),
+            Icon(Icons.flag, size: 12, color: colors.muted),
+          ],
+        ],
+      ),
+    );
+
+    // Build the full message row
+    Widget messageRow = Column(
+      crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: [
+        // Sender name (first in group, not mine)
+        if (isFirstInGroup && !isMine)
+          Padding(
+            padding: EdgeInsets.only(left: avatarSize + 12, bottom: 4),
+            child: Text(
+              message.sender,
+              style: TextStyle(
+                fontSize: 12,
+                color: colors.muted,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        // Message bubble with avatar
+        Row(
+          mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            // Avatar (left side for others)
+            if (!isMine) ...[
+              showAvatar
+                  ? _BubbleAvatar(
+                      colors: colors,
+                      label: message.avatar,
+                      isMine: false,
+                      size: avatarSize,
+                      fontSize: avatarFontSize,
+                    )
+                  : SizedBox(width: avatarSize),
+              const SizedBox(width: 8),
+            ],
+            // Message bubble
+            Flexible(child: messageContent),
+            // Avatar (right side for mine)
+            if (isMine) ...[
+              const SizedBox(width: 8),
+              showAvatar
+                  ? _BubbleAvatar(
+                      colors: colors,
+                      label: message.avatar,
+                      isMine: true,
+                      size: avatarSize,
+                      fontSize: avatarFontSize,
+                    )
+                  : SizedBox(width: avatarSize),
+            ],
+          ],
+        ),
+        // Reactions
+        if (reactionsRow != null) reactionsRow,
+        // Time row (only on last in group)
+        if (isLastInGroup) timeRow,
+      ],
+    );
+
+    // Swipe actions - iMessage style
+    // Swipe direction reveals actions on the OPPOSITE side:
+    // - Swipe LEFT (endActionPane) reveals actions on RIGHT
+    // - Swipe RIGHT (startActionPane) reveals actions on LEFT
+    final replyAction = SlidableAction(
+      onPressed: (_) => onReply?.call(),
+      backgroundColor: colors.primary,
+      foregroundColor: Colors.white,
+      icon: Icons.reply,
+      label: 'Reply',
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+    );
+
+    final deleteAction = SlidableAction(
+      onPressed: (_) => onDelete?.call(),
+      backgroundColor: const Color(0xFFEF4444),
+      foregroundColor: Colors.white,
+      icon: Icons.delete_outline,
+      label: 'Delete',
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+    );
+
+    final moreAction = SlidableAction(
+      onPressed: (_) => onMenu?.call(),
+      backgroundColor: const Color(0xFF6B7280),
+      foregroundColor: Colors.white,
+      icon: Icons.more_horiz,
+      label: 'More',
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+    );
+
+    return Padding(
+      padding: EdgeInsets.only(
+        top: verticalGap,
+        left: isWide ? 16 : 8,
+        right: isWide ? 16 : 8,
+      ),
+      child: Slidable(
+        key: ValueKey(message.message.id),
+        // Swipe from left edge reveals actions on left (for received messages)
+        startActionPane: !isMine
+            ? ActionPane(
+                motion: const BehindMotion(),
+                extentRatio: 0.5,
+                children: [replyAction, moreAction],
+              )
+            : null,
+        // Swipe from right edge reveals actions on right (for sent messages)
+        endActionPane: isMine
+            ? ActionPane(
+                motion: const BehindMotion(),
+                extentRatio: 0.5,
+                children: [replyAction, deleteAction, moreAction],
+              )
+            : null,
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onLongPress: onLongPress,
+          onDoubleTap: () {
+            // Double tap to quick-react with heart (iMessage style)
+            // This calls onLongPress which shows the reaction picker
+            onLongPress?.call();
+          },
+          child: messageRow,
+        ),
       ),
     );
   }
@@ -3168,6 +3881,85 @@ class _TypingIndicator extends StatelessWidget {
   }
 }
 
+class _QuickReactionBar extends StatelessWidget {
+  const _QuickReactionBar({
+    required this.colors,
+    required this.onReact,
+    required this.onMore,
+  });
+
+  final _MessagingColors colors;
+  final ValueChanged<String> onReact;
+  final VoidCallback onMore;
+
+  static const _reactions = ['👍', '❤️', '😂', '😮', '🎉', '👀'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ..._reactions.map((emoji) => _ReactionButton(
+                emoji: emoji,
+                onTap: () => onReact(emoji),
+              )),
+          Container(
+            width: 1,
+            height: 24,
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            color: colors.border,
+          ),
+          IconButton(
+            onPressed: onMore,
+            icon: Icon(Icons.more_horiz, color: colors.muted, size: 20),
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReactionButton extends StatelessWidget {
+  const _ReactionButton({
+    required this.emoji,
+    required this.onTap,
+  });
+
+  final String emoji;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Text(
+          emoji,
+          style: const TextStyle(fontSize: 24),
+        ),
+      ),
+    );
+  }
+}
+
 class _ReplyPreview extends StatelessWidget {
   const _ReplyPreview({
     required this.colors,
@@ -3462,25 +4254,57 @@ class _EmptyConversationState extends StatelessWidget {
   const _EmptyConversationState({
     required this.colors,
     required this.message,
+    this.subtitle,
+    this.onCompose,
   });
 
   final _MessagingColors colors;
   final String message;
+  final String? subtitle;
+  final VoidCallback? onCompose;
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.chat_bubble_outline, size: 48, color: colors.muted),
-          const SizedBox(height: 12),
-          Text(
-            message,
-            style:
-                Theme.of(context).textTheme.bodyMedium?.copyWith(color: colors.muted),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.chat_bubble_outline, size: 64, color: colors.muted),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: colors.title,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                subtitle!,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.muted,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            if (onCompose != null) ...[
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: onCompose,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('New Message'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: colors.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -3591,6 +4415,12 @@ enum _ThreadAction {
   unarchive,
   manageMembers,
   leaveGroup,
+}
+
+enum _ConversationListAction {
+  markAllRead,
+  showArchived,
+  showMuted,
 }
 
 enum _MessageFilter { all, unread, flagged, archived }

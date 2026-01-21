@@ -96,22 +96,7 @@ serve(async (req) => {
     return jsonResponse({ error: "Unauthorized." }, 401);
   }
 
-  const { data: membership, error: membershipError } = await supabase
-    .from("org_members")
-    .select("org_id, role")
-    .eq("user_id", caller.id)
-    .maybeSingle();
-
-  if (membershipError || !membership?.org_id) {
-    return jsonResponse({ error: "Caller has no organization." }, 400);
-  }
-
-  const membershipRole = membership.role?.toString() ?? "member";
-  if (membershipRole !== "owner" && membershipRole !== "admin") {
-    return jsonResponse({ error: "Forbidden." }, 403);
-  }
-
-  // Get caller's app role to determine what roles they can assign
+  // Get caller's app role first to check for platform-level roles
   const { data: callerProfile } = await supabase
     .from("profiles")
     .select("role")
@@ -119,6 +104,28 @@ serve(async (req) => {
     .maybeSingle();
 
   const callerAppRole = callerProfile?.role?.toString().toLowerCase() ?? "";
+
+  // Platform-level roles (developer, techsupport) can operate across orgs
+  const isPlatformRole = callerAppRole === "developer" || callerAppRole === "techsupport";
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("org_members")
+    .select("org_id, role")
+    .eq("user_id", caller.id)
+    .maybeSingle();
+
+  // For platform roles, they may not have an org_members entry - that's OK
+  // They can specify the target orgId in the request payload
+  if (!isPlatformRole) {
+    if (membershipError || !membership?.org_id) {
+      return jsonResponse({ error: "Caller has no organization." }, 400);
+    }
+
+    const membershipRole = membership.role?.toString() ?? "member";
+    if (membershipRole !== "owner" && membershipRole !== "admin") {
+      return jsonResponse({ error: "Forbidden." }, 403);
+    }
+  }
 
   // Only developers can assign platform-level roles (developer, techsupport)
   if (callerAppRole !== "developer") {
@@ -146,9 +153,18 @@ serve(async (req) => {
     }
   }
 
-  const orgId = membership.org_id?.toString();
+  // Determine target org - platform roles can specify orgId in payload
+  let orgId: string | undefined;
+  if (isPlatformRole && payload.orgId) {
+    orgId = payload.orgId.toString();
+  } else {
+    orgId = membership?.org_id?.toString();
+  }
+
   if (!orgId) {
-    return jsonResponse({ error: "Caller has no organization." }, 400);
+    return jsonResponse({ error: isPlatformRole
+      ? "Platform roles must specify orgId in the request."
+      : "Caller has no organization." }, 400);
   }
 
   let invitedUserId: string | null = null;

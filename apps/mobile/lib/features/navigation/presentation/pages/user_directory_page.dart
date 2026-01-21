@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../admin/data/admin_models.dart';
 import '../../../admin/data/admin_providers.dart';
+import '../../../dashboard/data/active_role_provider.dart';
 
 class UserDirectoryPage extends ConsumerStatefulWidget {
   const UserDirectoryPage({super.key});
@@ -201,9 +202,46 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
   }
 
   Future<void> _openAddUserDialog(_UserDirectoryColors colors) async {
+    final currentRole = ref.read(activeRoleProvider);
+
+    // For platform roles (developer, techSupport), ensure organizations are loaded
+    List<AdminOrgSummary> orgs = [];
+    if (currentRole.canViewAcrossOrgs) {
+      // Trigger a refresh and wait for organizations to load
+      final orgAsync = ref.read(adminOrganizationsProvider);
+      if (orgAsync.isLoading || orgAsync.hasError) {
+        // Show loading indicator while fetching
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Loading organizations...')),
+        );
+        // Wait for the provider to complete
+        orgs = await ref.read(adminOrganizationsProvider.future);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      } else {
+        orgs = orgAsync.asData?.value ?? [];
+      }
+
+      if (orgs.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No organizations found. Please create an organization first.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    }
+
     final invitedEmail = await showDialog<String>(
       context: context,
-      builder: (_) => _AddUserDialog(colors: colors),
+      builder: (_) => _AddUserDialog(
+        colors: colors,
+        currentUserRole: currentRole,
+        organizations: orgs,
+      ),
     );
     if (invitedEmail == null) return;
     ref.invalidate(adminUsersProvider);
@@ -1551,9 +1589,15 @@ class _ErrorBanner extends StatelessWidget {
 }
 
 class _AddUserDialog extends StatefulWidget {
-  const _AddUserDialog({required this.colors});
+  const _AddUserDialog({
+    required this.colors,
+    required this.currentUserRole,
+    required this.organizations,
+  });
 
   final _UserDirectoryColors colors;
+  final UserRole currentUserRole;
+  final List<AdminOrgSummary> organizations;
 
   @override
   State<_AddUserDialog> createState() => _AddUserDialogState();
@@ -1566,8 +1610,21 @@ class _AddUserDialogState extends State<_AddUserDialog> {
   final TextEditingController _departmentController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
   String _role = 'Employee';
+  String? _selectedOrgId;
   String? _error;
   bool _isSubmitting = false;
+
+  /// Whether the current user is a platform-level role that can add users to any org
+  bool get _isPlatformRole => widget.currentUserRole.canViewAcrossOrgs;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-select first org for platform roles if available
+    if (_isPlatformRole && widget.organizations.isNotEmpty) {
+      _selectedOrgId = widget.organizations.first.id;
+    }
+  }
 
   @override
   void dispose() {
@@ -1591,196 +1648,228 @@ class _AddUserDialogState extends State<_AddUserDialog> {
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 680),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Add New User',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: colors.title,
-                          ),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Add New User',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: colors.title,
+                            ),
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(Icons.close, color: colors.muted),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: Icon(Icons.close, color: colors.muted),
+                    ),
+                  ],
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _error!,
+                      style: TextStyle(color: colors.danger),
+                    ),
                   ),
                 ],
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    _error!,
-                    style: TextStyle(color: colors.danger),
+                const SizedBox(height: 16),
+                // Show org selector for platform roles (Developer, Tech Support)
+                if (_isPlatformRole) ...[
+                  _DialogField(
+                    label: 'Organization',
+                    child: DropdownButtonFormField<String>(
+                      value: _selectedOrgId,
+                      decoration: _inputDecoration(
+                        colors,
+                        hintText: 'Select organization',
+                        prefixIcon: Icons.business,
+                      ),
+                      items: [
+                        for (final org in widget.organizations)
+                          DropdownMenuItem(
+                            value: org.id,
+                            child: Text(
+                              org.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _selectedOrgId = value);
+                        }
+                      },
+                    ),
                   ),
-                ),
-              ],
-              const SizedBox(height: 16),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final isWide = constraints.maxWidth >= 520;
-                  final fields = [
-                    _DialogField(
-                      label: 'Name',
-                      child: TextField(
-                        controller: _nameController,
-                        decoration: _inputDecoration(
-                          colors,
-                          hintText: 'Enter full name',
+                  const SizedBox(height: 12),
+                ],
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth >= 520;
+                    final fields = [
+                      _DialogField(
+                        label: 'Name',
+                        child: TextField(
+                          controller: _nameController,
+                          decoration: _inputDecoration(
+                            colors,
+                            hintText: 'Enter full name',
+                          ),
                         ),
                       ),
-                    ),
-                    _DialogField(
-                      label: 'Email',
-                      child: TextField(
-                        controller: _emailController,
-                        decoration: _inputDecoration(
-                          colors,
-                          hintText: 'email@formbridge.com',
+                      _DialogField(
+                        label: 'Email',
+                        child: TextField(
+                          controller: _emailController,
+                          decoration: _inputDecoration(
+                            colors,
+                            hintText: 'email@formbridge.com',
+                          ),
                         ),
                       ),
-                    ),
-                    _DialogField(
-                      label: 'Phone',
-                      child: TextField(
-                        controller: _phoneController,
-                        decoration: _inputDecoration(
-                          colors,
-                          hintText: '+1 (555) 123-4567',
+                      _DialogField(
+                        label: 'Phone',
+                        child: TextField(
+                          controller: _phoneController,
+                          decoration: _inputDecoration(
+                            colors,
+                            hintText: '+1 (555) 123-4567',
+                          ),
                         ),
                       ),
-                    ),
-                    _DialogField(
-                      label: 'Role',
-                      child: DropdownButtonFormField<String>(
-                        value: _role,
-                        decoration: _inputDecoration(colors, hintText: ''),
-                        items: [
-                          for (final role in _roleOptions)
-                            DropdownMenuItem(value: role, child: Text(role)),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _role = value);
-                          }
-                        },
-                      ),
-                    ),
-                    _DialogField(
-                      label: 'Department',
-                      child: TextField(
-                        controller: _departmentController,
-                        decoration: _inputDecoration(
-                          colors,
-                          hintText: 'e.g., Field Services',
+                      _DialogField(
+                        label: 'Role',
+                        child: DropdownButtonFormField<String>(
+                          value: _role,
+                          decoration: _inputDecoration(colors, hintText: ''),
+                          items: [
+                            for (final role in _roleOptions)
+                              DropdownMenuItem(value: role, child: Text(role)),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _role = value);
+                            }
+                          },
                         ),
                       ),
-                    ),
-                    _DialogField(
-                      label: 'Location',
-                      child: TextField(
-                        controller: _locationController,
-                        decoration: _inputDecoration(
-                          colors,
-                          hintText: 'City, State',
+                      _DialogField(
+                        label: 'Department',
+                        child: TextField(
+                          controller: _departmentController,
+                          decoration: _inputDecoration(
+                            colors,
+                            hintText: 'e.g., Field Services',
+                          ),
                         ),
                       ),
-                    ),
-                  ];
+                      _DialogField(
+                        label: 'Location',
+                        child: TextField(
+                          controller: _locationController,
+                          decoration: _inputDecoration(
+                            colors,
+                            hintText: 'City, State',
+                          ),
+                        ),
+                      ),
+                    ];
 
-                  if (isWide) {
+                    if (isWide) {
+                      return Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(child: fields[0]),
+                              const SizedBox(width: 12),
+                              Expanded(child: fields[1]),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(child: fields[2]),
+                              const SizedBox(width: 12),
+                              Expanded(child: fields[3]),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(child: fields[4]),
+                              const SizedBox(width: 12),
+                              Expanded(child: fields[5]),
+                            ],
+                          ),
+                        ],
+                      );
+                    }
                     return Column(
                       children: [
-                        Row(
-                          children: [
-                            Expanded(child: fields[0]),
-                            const SizedBox(width: 12),
-                            Expanded(child: fields[1]),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(child: fields[2]),
-                            const SizedBox(width: 12),
-                            Expanded(child: fields[3]),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(child: fields[4]),
-                            const SizedBox(width: 12),
-                            Expanded(child: fields[5]),
-                          ],
-                        ),
+                        for (final field in fields) ...[
+                          field,
+                          const SizedBox(height: 12),
+                        ],
                       ],
                     );
-                  }
-                  return Column(
-                    children: [
-                      for (final field in fields) ...[
-                        field,
-                        const SizedBox(height: 12),
-                      ],
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: TextButton.styleFrom(
-                      foregroundColor: colors.body,
-                      backgroundColor: colors.filterSurface,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
+                  },
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: TextButton.styleFrom(
+                        foregroundColor: colors.body,
+                        backgroundColor: colors.filterSurface,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      child: const Text('Cancel'),
                     ),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _isSubmitting ? null : _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: colors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 12,
+                    const SizedBox(width: 12),
+                    ElevatedButton(
+                      onPressed: _isSubmitting ? null : _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                        shadowColor: colors.primary.withValues(alpha: 0.25),
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 2,
-                      shadowColor: colors.primary.withValues(alpha: 0.25),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Add User'),
                     ),
-                    child: _isSubmitting
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Add User'),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1793,6 +1882,12 @@ class _AddUserDialogState extends State<_AddUserDialog> {
     final phone = _phoneController.text.trim();
     final department = _departmentController.text.trim();
     final location = _locationController.text.trim();
+
+    // Validate org selection for platform roles
+    if (_isPlatformRole && _selectedOrgId == null) {
+      setState(() => _error = 'Please select an organization.');
+      return;
+    }
 
     if (name.isEmpty || email.isEmpty) {
       setState(() => _error = 'Name and email are required.');
@@ -1825,6 +1920,7 @@ class _AddUserDialogState extends State<_AddUserDialog> {
         body: {
           'email': email,
           'role': appRole,
+          if (_isPlatformRole && _selectedOrgId != null) 'orgId': _selectedOrgId,
           if (firstName.isNotEmpty) 'firstName': firstName,
           if (lastName.isNotEmpty) 'lastName': lastName,
           if (phone.isNotEmpty) 'phone': phone,

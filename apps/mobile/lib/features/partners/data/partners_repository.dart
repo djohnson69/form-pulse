@@ -92,6 +92,7 @@ abstract class PartnersRepositoryBase {
     required String threadId,
     required bool archived,
   });
+  Future<void> deleteThread({required String threadId});
   Future<void> addThreadParticipants({
     required String threadId,
     required List<String> userIds,
@@ -103,6 +104,7 @@ abstract class PartnersRepositoryBase {
   Future<void> leaveThread({required String threadId});
   Future<void> markThreadDelivered({required String threadId});
   Future<void> markThreadRead({required String threadId});
+  Future<void> markAllThreadsRead();
   Future<void> updateTypingStatus({
     required String threadId,
     required bool isTyping,
@@ -362,7 +364,21 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
             entry.value.where((participant) => participant.isActive).length;
       }
 
-      return mappedThreads.map((thread) {
+      // Filter out threads where the current user has left or archived
+      final filteredThreads = mappedThreads.where((thread) {
+        final currentParticipant = currentParticipantByThread[thread.id];
+        if (currentParticipant == null) {
+          // User has no participant record - check if thread is orphaned
+          // Show it so they can delete it, unless it has no messages
+          return true;
+        }
+        // Hide if user has left or archived the thread
+        if (currentParticipant.leftAt != null) return false;
+        if (currentParticipant.isArchived) return false;
+        return true;
+      }).toList();
+
+      return filteredThreads.map((thread) {
         final last = lastMessageByThread[thread.id];
         final targetName = thread.clientId != null
             ? clientIndex[thread.clientId]
@@ -854,6 +870,90 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
   }
 
   @override
+  Future<void> deleteThread({required String threadId}) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) {
+      developer.log('deleteThread: No user logged in');
+      return;
+    }
+    developer.log('deleteThread: Attempting to delete thread=$threadId for user=$userId');
+    try {
+      // First, check if user has a participant record for this thread
+      final participantRows = await _client
+          .from('message_participants')
+          .select('id')
+          .eq('thread_id', threadId)
+          .eq('user_id', userId);
+
+      final hasParticipantRecord = (participantRows as List<dynamic>).isNotEmpty;
+      developer.log('deleteThread: User has participant record: $hasParticipantRecord');
+
+      if (hasParticipantRecord) {
+        // User is a participant - remove their participation (soft delete for them)
+        await _client
+            .from('message_participants')
+            .delete()
+            .eq('thread_id', threadId)
+            .eq('user_id', userId);
+        developer.log('deleteThread: Successfully deleted participant record');
+      } else {
+        // Orphaned thread - user sees it but has no participant record
+        // Check if there are ANY participants for this thread
+        final allParticipants = await _client
+            .from('message_participants')
+            .select('id')
+            .eq('thread_id', threadId);
+
+        final hasAnyParticipants = (allParticipants as List<dynamic>).isNotEmpty;
+        developer.log('deleteThread: Thread has any participants: $hasAnyParticipants');
+
+        if (!hasAnyParticipants) {
+          // No participants at all - this is truly orphaned data
+          // Delete the thread and its messages entirely
+          developer.log('deleteThread: Deleting orphaned thread and messages');
+
+          // Delete messages first (foreign key constraint)
+          await _client
+              .from('messages')
+              .delete()
+              .eq('thread_id', threadId);
+
+          // Then delete the thread
+          await _client
+              .from('message_threads')
+              .delete()
+              .eq('id', threadId);
+
+          developer.log('deleteThread: Successfully deleted orphaned thread');
+        } else {
+          // Thread has other participants but not this user
+          // Add and immediately remove user as participant to create a "left" record
+          // Or simply log that this shouldn't happen
+          developer.log('deleteThread: Thread has participants but user is not one - adding hidden record');
+
+          // Insert a participant record marked as left/archived
+          final orgId = await _getOrgId();
+          await _client.from('message_participants').insert({
+            'thread_id': threadId,
+            'user_id': userId,
+            'org_id': orgId,
+            'is_archived': true,
+            'left_at': DateTime.now().toUtc().toIso8601String(),
+          });
+          developer.log('deleteThread: Created archived participant record');
+        }
+      }
+    } on PostgrestException catch (e, st) {
+      developer.log(
+        'Supabase deleteThread failed: ${e.message} (code: ${e.code})',
+        error: e,
+        stackTrace: st,
+      );
+      rethrow;
+    }
+  }
+
+  @override
   Future<void> addThreadParticipants({
     required String threadId,
     required List<String> userIds,
@@ -956,6 +1056,23 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           })
           .eq('thread_id', threadId)
           .eq('user_id', userId);
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> markAllThreadsRead() async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final now = DateTime.now().toIso8601String();
+      await _client
+          .from('message_participants')
+          .update({
+            'last_read_at': now,
+            'last_delivered_at': now,
+          })
+          .eq('user_id', userId)
+          .eq('is_active', true);
     } catch (_) {}
   }
 

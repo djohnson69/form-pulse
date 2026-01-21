@@ -107,6 +107,9 @@ dependencies:
   flutter_stripe: ^11.3.0
   flutter_stripe_web: ^6.3.0
 
+  # Swipeable list items (iMessage-style)
+  flutter_slidable: ^3.1.1
+
 dependency_overrides:
   # Override freezed_annotation to resolve conflict between riverpod_generator (^3.0.0)
   # and flutter_stripe (^2.4.1). Using ^2.4.1 which is compatible with both at runtime.
