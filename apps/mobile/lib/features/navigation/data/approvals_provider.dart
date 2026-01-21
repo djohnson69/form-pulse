@@ -62,7 +62,7 @@ class SupabaseApprovalsRepository implements ApprovalsRepositoryBase {
 
   @override
   Future<List<ApprovalItem>> fetchApprovals({required UserRole role}) async {
-    final isGlobal = role == UserRole.techSupport;
+    final isGlobal = role.canViewAcrossOrgs;
     final orgId = isGlobal ? null : await _getOrgId();
     if (!isGlobal && orgId == null) return const [];
     try {

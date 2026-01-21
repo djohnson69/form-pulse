@@ -89,6 +89,7 @@ class _EnterpriseOnboardingPageState
   bool _cardComplete = false;
   String? _stripeCustomerId;
   String? _setupIntentClientSecret;
+  String? _stripePaymentMethodId; // Saved after card confirmation
   bool _stripeInitialized = false;
 
   // Step 5: Team Invites
@@ -229,8 +230,55 @@ class _EnterpriseOnboardingPageState
     super.dispose();
   }
 
-  void _nextStep() {
+  Future<void> _nextStep() async {
     if (!_validateCurrentStep()) return;
+
+    // For billing step, confirm the card with Stripe before proceeding
+    if (_effectiveStep == 4 && _stripePaymentMethodId == null) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+
+      try {
+        // Create SetupIntent if not already created
+        await _createSetupIntent();
+
+        if (_setupIntentClientSecret == null) {
+          throw Exception('Failed to initialize payment. Please try again.');
+        }
+
+        // Confirm the SetupIntent with Stripe to save the card
+        final setupIntentResult = await Stripe.instance.confirmSetupIntent(
+          paymentIntentClientSecret: _setupIntentClientSecret!,
+          params: const PaymentMethodParams.card(
+            paymentMethodData: PaymentMethodData(),
+          ),
+        );
+
+        final paymentMethodId = setupIntentResult.paymentMethodId;
+        if (paymentMethodId.isEmpty) {
+          throw Exception('Failed to save payment method. Please try again.');
+        }
+
+        setState(() {
+          _stripePaymentMethodId = paymentMethodId;
+          _isLoading = false;
+        });
+      } on StripeException catch (e) {
+        setState(() {
+          _error = e.error.localizedMessage ?? 'Card verification failed';
+          _isLoading = false;
+        });
+        return;
+      } catch (e) {
+        setState(() {
+          _error = e.toString().replaceFirst('Exception: ', '');
+          _isLoading = false;
+        });
+        return;
+      }
+    }
 
     if (_currentStep < _totalSteps - 1) {
       setState(() {
@@ -358,29 +406,9 @@ class _EnterpriseOnboardingPageState
     });
 
     try {
-      // Step 1: Create SetupIntent if not already created
-      await _createSetupIntent();
-
-      if (_setupIntentClientSecret == null) {
-        throw Exception('Failed to initialize payment. Please try again.');
-      }
-
-      // Step 2: Confirm the SetupIntent with Stripe to save the card
-      final SetupIntent setupIntentResult;
-      try {
-        setupIntentResult = await Stripe.instance.confirmSetupIntent(
-          paymentIntentClientSecret: _setupIntentClientSecret!,
-          params: const PaymentMethodParams.card(
-            paymentMethodData: PaymentMethodData(),
-          ),
-        );
-      } on StripeException catch (e) {
-        throw Exception(e.error.localizedMessage ?? 'Card verification failed');
-      }
-
-      final paymentMethodId = setupIntentResult.paymentMethodId;
-      if (paymentMethodId.isEmpty) {
-        throw Exception('Failed to save payment method. Please try again.');
+      // Payment method should already be saved when leaving billing step
+      if (_stripePaymentMethodId == null || _stripeCustomerId == null) {
+        throw Exception('Payment method not configured. Please go back to billing step.');
       }
 
       final repo = ref.read(onboardingRepositoryProvider);
@@ -396,7 +424,7 @@ class _EnterpriseOnboardingPageState
         await repo.signUpAndOnboard(
           // Stripe payment info
           stripeCustomerId: _stripeCustomerId,
-          stripePaymentMethodId: paymentMethodId,
+          stripePaymentMethodId: _stripePaymentMethodId,
           // Account info
           email: _emailController.text.trim(),
           password: _passwordController.text,
@@ -479,7 +507,7 @@ class _EnterpriseOnboardingPageState
         await repo.completeOnboarding(
           // Stripe payment info
           stripeCustomerId: _stripeCustomerId,
-          stripePaymentMethodId: paymentMethodId,
+          stripePaymentMethodId: _stripePaymentMethodId,
           orgName: _companyNameController.text.trim(),
           displayName: _displayNameController.text.trim().isNotEmpty
               ? _displayNameController.text.trim()
@@ -1220,10 +1248,27 @@ class _EnterpriseOnboardingPageState
   ) {
     final isWide = MediaQuery.of(context).size.width > 700;
 
+    // Reorder plans: Professional (recommended) first, then Starter, then Enterprise
+    final orderedPlans = <SubscriptionPlan>[];
+    final proPlan = plans.where((p) => p.name == 'pro').firstOrNull;
+    final starterPlan = plans.where((p) => p.name == 'starter').firstOrNull;
+    final enterprisePlan = plans.where((p) => p.name == 'enterprise').firstOrNull;
+
+    if (proPlan != null) orderedPlans.add(proPlan);
+    if (starterPlan != null) orderedPlans.add(starterPlan);
+    if (enterprisePlan != null) orderedPlans.add(enterprisePlan);
+
+    // Add any other plans not in our predefined order
+    for (final plan in plans) {
+      if (!orderedPlans.contains(plan)) {
+        orderedPlans.add(plan);
+      }
+    }
+
     if (isWide) {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: plans
+        children: orderedPlans
             .map((plan) => Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1235,7 +1280,7 @@ class _EnterpriseOnboardingPageState
     }
 
     return Column(
-      children: plans
+      children: orderedPlans
           .map((plan) => Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: _buildPlanCard(plan, theme, colors),
@@ -1255,6 +1300,9 @@ class _EnterpriseOnboardingPageState
         ? plan.yearlyMonthlyPriceDisplay
         : plan.monthlyPriceDisplay;
 
+    // Green color for recommended plan
+    const recommendedColor = Color(0xFF4CAF50);
+
     return GestureDetector(
       onTap: () => setState(() => _selectedPlanName = plan.name),
       child: AnimatedContainer(
@@ -1263,8 +1311,12 @@ class _EnterpriseOnboardingPageState
           color: colors.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? colors.primary : colors.outlineVariant,
-            width: isSelected ? 2 : 1,
+            color: isSelected
+                ? colors.primary
+                : isRecommended
+                    ? recommendedColor
+                    : colors.outlineVariant,
+            width: isSelected || isRecommended ? 2 : 1,
           ),
           boxShadow: isSelected
               ? [
@@ -1274,7 +1326,15 @@ class _EnterpriseOnboardingPageState
                     offset: const Offset(0, 2),
                   ),
                 ]
-              : null,
+              : isRecommended
+                  ? [
+                      BoxShadow(
+                        color: recommendedColor.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
         ),
         child: Column(
           children: [
@@ -1283,16 +1343,16 @@ class _EnterpriseOnboardingPageState
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                decoration: BoxDecoration(
-                  color: colors.primary,
-                  borderRadius: const BorderRadius.vertical(
+                decoration: const BoxDecoration(
+                  color: recommendedColor,
+                  borderRadius: BorderRadius.vertical(
                     top: Radius.circular(10),
                   ),
                 ),
-                child: Text(
+                child: const Text(
                   'RECOMMENDED',
                   style: TextStyle(
-                    color: colors.onPrimary,
+                    color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1,

@@ -9,7 +9,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../admin/presentation/pages/admin_dashboard_page.dart';
 import '../../../admin/presentation/pages/admin_shell_page.dart';
-import '../../../admin/presentation/pages/super_admin_dashboard_page.dart';
+import '../../../platform/presentation/pages/developer_console_page.dart';
+import '../../../platform/presentation/pages/tech_support_console_page.dart';
 import '../../../analytics/presentation/pages/analytics_page.dart';
 import '../../../assets/presentation/pages/assets_page.dart';
 import '../../../documents/presentation/pages/documents_page.dart';
@@ -67,10 +68,12 @@ class RoleDashboardPage extends ConsumerWidget {
     final activeRole = override ?? role;
     switch (activeRole) {
       case UserRole.developer:
-        return const SuperAdminDashboardPage(role: UserRole.developer);
+        return const DeveloperConsolePage();
+      case UserRole.techSupport:
+        return const TechSupportConsolePage();
       case UserRole.superAdmin:
-        return const SuperAdminDashboardPage();
       case UserRole.admin:
+        // Both superAdmin and admin are org-specific roles
         return AdminShellPage(role: activeRole);
       case UserRole.manager:
         return RoleShellPage(role: activeRole);
@@ -79,8 +82,6 @@ class RoleDashboardPage extends ConsumerWidget {
       case UserRole.employee:
         return RoleShellPage(role: activeRole);
       case UserRole.maintenance:
-        return RoleShellPage(role: activeRole);
-      case UserRole.techSupport:
         return RoleShellPage(role: activeRole);
       case UserRole.client:
       case UserRole.vendor:
@@ -163,6 +164,8 @@ Widget _pageForRoute(UserRole role, SideMenuRoute route) {
     SideMenuRoute.systemLogs => const SystemLogsPage(),
     SideMenuRoute.users => const UserDirectoryPage(),
     SideMenuRoute.dashboard => _roleDashboardBody(role),
+    // Platform-level routes (handled by Developer/TechSupport consoles)
+    _ => _roleDashboardBody(role),
   };
 }
 
@@ -570,19 +573,15 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
               headerPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               bodyPadding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
               showShadow: true,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final crossAxisCount = constraints.maxWidth >= 1024 ? 4 : 2;
-                  return GridView.count(
-                    crossAxisCount: crossAxisCount,
-                    shrinkWrap: true,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    physics: const NeverScrollableScrollPhysics(),
-                    childAspectRatio: 1.35,
-                    children: quickActions,
-                  );
-                },
+              child: Column(
+                children: quickActions
+                    .map((action) => _QuickActionRow(
+                          icon: action.icon,
+                          label: action.label,
+                          color: action.color,
+                          onTap: action.onTap,
+                        ))
+                    .toList(),
               ),
             ),
             SizedBox(height: sectionSpacing),
@@ -1187,29 +1186,29 @@ class _SupervisorDashboardPageState
             const SizedBox(height: 16),
           ],
           if (layout.showNotifications) ...[
-            NotificationsPanel(
-              notifications: _sampleSupervisorNotifications(),
-              onDismiss: (item) {},
-              initialLimit: 2,
+            ref.watch(notificationsProvider).when(
+              data: (notifications) => NotificationsPanel(
+                notifications: _buildEmployeeNotifications(notifications),
+                onDismiss: (item) {},
+                initialLimit: 2,
+              ),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
             ),
             const SizedBox(height: 16),
           ],
           if (layout.showQuickActions) ...[
             _SectionCard(
               title: 'Quick Actions',
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final crossAxisCount = constraints.maxWidth > 900 ? 4 : 2;
-                  return GridView.count(
-                    crossAxisCount: crossAxisCount,
-                    shrinkWrap: true,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    physics: const NeverScrollableScrollPhysics(),
-                    childAspectRatio: 1.35,
-                    children: quickActions,
-                  );
-                },
+              child: Column(
+                children: quickActions
+                    .map((action) => _QuickActionRow(
+                          icon: action.icon,
+                          label: action.label,
+                          color: action.color,
+                          onTap: action.onTap,
+                        ))
+                    .toList(),
               ),
             ),
             const SizedBox(height: 16),
@@ -1700,10 +1699,14 @@ class _ManagerDashboardPageState extends ConsumerState<ManagerDashboardPage> {
             const SizedBox(height: 16),
           ],
           if (layout.showNotifications) ...[
-            NotificationsPanel(
-              notifications: _sampleManagerNotifications(),
-              onDismiss: (item) {},
-              initialLimit: 2,
+            ref.watch(notificationsProvider).when(
+              data: (notifications) => NotificationsPanel(
+                notifications: _buildEmployeeNotifications(notifications),
+                onDismiss: (item) {},
+                initialLimit: 2,
+              ),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
             ),
             const SizedBox(height: 16),
           ],
@@ -2791,6 +2794,8 @@ void _navigateFromSideMenu(
     SideMenuRoute.knowledgeBase => const SopLibraryPage(),
     SideMenuRoute.systemLogs => const SystemLogsPage(),
     SideMenuRoute.users => const UserDirectoryPage(),
+    // Platform-level routes (handled by Developer/TechSupport consoles)
+    _ => null,
   };
 
   if (page == null) return;
@@ -3418,6 +3423,69 @@ class _HeaderIconButton extends StatelessWidget {
           Icons.more_vert,
           size: 20,
           color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact list row style for quick actions - replaces grid cards
+class _QuickActionRow extends StatelessWidget {
+  const _QuickActionRow({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final scheme = theme.colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+          child: Row(
+            children: [
+              // Icon with colored background
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: isDark ? 0.2 : 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 20, color: color),
+              ),
+              const SizedBox(width: 14),
+              // Label
+              Expanded(
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ),
+              // Chevron
+              Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: scheme.onSurfaceVariant,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -6606,115 +6674,4 @@ String _formatRelativeTime(DateTime time) {
   if (diff.inDays < 7) return '${diff.inDays} days ago';
   final weeks = (diff.inDays / 7).floor();
   return '$weeks weeks ago';
-}
-
-List<NotificationItem> _sampleEmployeeNotifications() {
-  return [
-    NotificationItem(
-      id: 'task',
-      title: 'New Task Assigned',
-      description: 'Complete safety inspection for Building A by Friday',
-      timeLabel: '15 min ago',
-      icon: Icons.check_circle_outline,
-      priority: NotificationPriority.high,
-    ),
-    NotificationItem(
-      id: 'training',
-      title: 'Training Due Soon',
-      description: 'Annual OSHA certification expires in 7 days',
-      timeLabel: '1 hour ago',
-      icon: Icons.warning_amber_outlined,
-      priority: NotificationPriority.medium,
-    ),
-    NotificationItem(
-      id: 'timesheet',
-      title: 'Timesheet Reminder',
-      description: 'Submit your timesheet for this week by EOD tomorrow',
-      timeLabel: '3 hours ago',
-      icon: Icons.schedule,
-      priority: NotificationPriority.medium,
-    ),
-    NotificationItem(
-      id: 'message',
-      title: 'Message from Supervisor',
-      description: 'Sarah Johnson: Great work on the Johnson project!',
-      timeLabel: '5 hours ago',
-      icon: Icons.chat_bubble_outline,
-      priority: NotificationPriority.low,
-    ),
-  ];
-}
-
-List<NotificationItem> _sampleSupervisorNotifications() {
-  return [
-    NotificationItem(
-      id: 'urgent',
-      title: 'Urgent: Team Emergency',
-      description: 'Sarah Johnson injured - immediate attention required',
-      timeLabel: 'Just now',
-      icon: Icons.warning_amber_outlined,
-      priority: NotificationPriority.urgent,
-    ),
-    NotificationItem(
-      id: 'approval',
-      title: 'Approval Required',
-      description: 'Mike Chen submitted timesheet for review',
-      timeLabel: '10 min ago',
-      icon: Icons.schedule,
-      priority: NotificationPriority.high,
-    ),
-    NotificationItem(
-      id: 'overdue',
-      title: 'Task Overdue',
-      description: 'Emily Davis has 1 overdue task - Equipment Maintenance',
-      timeLabel: '30 min ago',
-      icon: Icons.error_outline,
-      priority: NotificationPriority.medium,
-    ),
-    NotificationItem(
-      id: 'achievement',
-      title: 'Team Achievement',
-      description: 'Your team completed 15 tasks this week',
-      timeLabel: '2 hours ago',
-      icon: Icons.check_circle_outline,
-      priority: NotificationPriority.low,
-    ),
-  ];
-}
-
-List<NotificationItem> _sampleManagerNotifications() {
-  return [
-    NotificationItem(
-      id: 'budget',
-      title: 'Budget Alert',
-      description: 'Department spending at 85% - review Q4 allocations',
-      timeLabel: '30 min ago',
-      icon: Icons.attach_money,
-      priority: NotificationPriority.high,
-    ),
-    NotificationItem(
-      id: 'report',
-      title: 'Supervisor Report Due',
-      description: 'John Smith quarterly review needs approval',
-      timeLabel: '2 hours ago',
-      icon: Icons.people_outline,
-      priority: NotificationPriority.medium,
-    ),
-    NotificationItem(
-      id: 'milestone',
-      title: 'Project Milestone',
-      description: 'Building A construction 90% complete - ahead of schedule',
-      timeLabel: '4 hours ago',
-      icon: Icons.folder_outlined,
-      priority: NotificationPriority.low,
-    ),
-    NotificationItem(
-      id: 'performance',
-      title: 'Team Performance',
-      description: 'Department exceeded productivity goals by 12% this month',
-      timeLabel: '1 day ago',
-      icon: Icons.trending_up,
-      priority: NotificationPriority.low,
-    ),
-  ];
 }

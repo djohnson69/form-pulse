@@ -1204,8 +1204,7 @@ IconData _statusIcon(String status) {
 }
 
 bool _canAct(UserRole role) {
-  return role == UserRole.superAdmin ||
-      role == UserRole.admin ||
+  return role.isAdmin ||
       role == UserRole.manager ||
       role == UserRole.supervisor ||
       role == UserRole.techSupport;

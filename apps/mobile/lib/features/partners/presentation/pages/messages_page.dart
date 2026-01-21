@@ -1761,14 +1761,7 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     if (thread == null || !mounted) return;
     ref.invalidate(messageThreadsProvider);
     ref.invalidate(threadMessagesProvider(thread.id));
-    if (isWide) {
-      _handleSelect(thread.id, isWide: true);
-    } else {
-      setState(() {
-        _selectedId = thread.id;
-        _showConversations = true;
-      });
-    }
+    _handleSelect(thread.id, isWide: isWide);
   }
 
   _ConversationDisplay _mapPreview(MessageThreadPreview preview) {

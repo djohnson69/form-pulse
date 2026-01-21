@@ -33,9 +33,7 @@ class _OrganizationChartPageState
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final override = ref.watch(roleOverrideProvider);
     final role = override ?? widget.role ?? UserRole.employee;
-    final canEdit = role == UserRole.manager ||
-        role == UserRole.admin ||
-        role == UserRole.superAdmin;
+    final canEdit = role == UserRole.manager || role.isAdmin;
     final employeesAsync = ref.watch(employeesProvider);
     final employees = employeesAsync.asData?.value ?? const <Employee>[];
     final data = _buildOrganizationData(employees);
@@ -310,7 +308,7 @@ class _OrganizationChartPageState
             ),
             TextSpan(
               text:
-                  ' You can view the organization chart, but editing requires Manager, Admin, or Super Admin permissions.',
+                  ' You can view the organization chart, but editing requires Manager, Admin, Super Admin, or Developer permissions.',
             ),
           ],
         ),

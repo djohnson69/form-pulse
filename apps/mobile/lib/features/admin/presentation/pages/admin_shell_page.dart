@@ -104,5 +104,7 @@ Widget _adminPageForRoute(UserRole role, SideMenuRoute route) {
     SideMenuRoute.systemLogs => const SystemLogsPage(),
     SideMenuRoute.users => const UserDirectoryPage(),
     SideMenuRoute.dashboard => AdminDashboardPage(userRole: role, embedInShell: true),
+    // Platform-level routes (handled by Developer/TechSupport consoles)
+    _ => AdminDashboardPage(userRole: role, embedInShell: true),
   };
 }

@@ -35,7 +35,7 @@ import '../../../ops/presentation/pages/ai_tools_page.dart';
 import '../../../ops/presentation/pages/news_posts_page.dart';
 import '../../../ops/data/ops_provider.dart';
 import '../../../ops/data/ops_repository.dart';
-import '../../../ops/presentation/widgets/ai_chat_panel.dart';
+import '../../../ai_assistant/presentation/widgets/ai_chat_panel_v2.dart';
 import '../../../navigation/presentation/widgets/side_menu.dart';
 import '../widgets/top_bar.dart';
 import '../../../profile/presentation/pages/profile_page.dart';
@@ -1709,15 +1709,14 @@ class DashboardHomeView extends ConsumerWidget {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 12),
-            const AiChatPanel(
+            const AiChatPanelV2(
               suggestions: [
                 'Summarize the latest submissions for my projects.',
                 'Draft a daily log from my task list.',
                 'What should I follow up on today?',
               ],
               placeholder: 'Ask AI about tasks, forms, or reports...',
-              initialMessage: 'Hi! How can I help with your forms today?',
-              maxHeight: 200,
+              maxHeight: 260,
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -2636,6 +2635,7 @@ class _StatCardData {
   final String value;
   final Color color;
   final String? subtitle;
+  final VoidCallback? onTap;
 
   _StatCardData({
     required this.icon,
@@ -2643,6 +2643,7 @@ class _StatCardData {
     required this.value,
     required this.color,
     this.subtitle,
+    this.onTap,
   });
 }
 
@@ -2654,120 +2655,84 @@ class _StatisticsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        int crossAxisCount = 2;
-        if (width > 1400) {
-          crossAxisCount = 5;
-        } else if (width > 1100) {
-          crossAxisCount = 4;
-        } else if (width > 800) {
-          crossAxisCount = 3;
-        } else if (compact && width > 600) {
-          crossAxisCount = 3;
-        }
-        final spacing = compact ? 10.0 : 14.0;
-        final aspect = compact ? 1.25 : 1.35;
-        return GridView.count(
-          crossAxisCount: crossAxisCount,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: spacing,
-          mainAxisSpacing: spacing,
-          childAspectRatio: aspect,
-          children: cards
-              .map(
-                (card) => _StatCard(
-                  icon: card.icon,
-                  title: card.title,
-                  value: card.value,
-                  color: card.color,
-                  subtitle: card.subtitle,
-                  compact: compact,
-                ),
-              )
-              .toList(),
-        );
-      },
+    // Compact list row design - no grid, just vertical list of horizontal rows
+    return Column(
+      children: cards
+          .map((card) => _StatRow(
+                icon: card.icon,
+                title: card.title,
+                value: card.value,
+                color: card.color,
+                onTap: card.onTap,
+              ))
+          .toList(),
     );
   }
 }
 
-class _StatCard extends StatelessWidget {
+class _StatRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String value;
   final Color color;
-  final String? subtitle;
-  final bool compact;
+  final VoidCallback? onTap;
 
-  const _StatCard({
+  const _StatRow({
     required this.icon,
     required this.title,
     required this.value,
     required this.color,
-    this.subtitle,
-    this.compact = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 10 : 14),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, size: 20, color: color),
-                ),
-                const Spacer(),
-                Icon(
-                  Icons.trending_up,
-                  size: 18,
-                  color: scheme.primary,
-                ),
-              ],
-            ),
-            SizedBox(height: compact ? 8 : 12),
-            Text(
-              value,
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 4),
-            Text(title, style: Theme.of(context).textTheme.bodyMedium),
-            if (subtitle != null) ...[
-              const SizedBox(height: 6),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Row(
+            children: [
+              // Icon with colored background
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(999),
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
                 ),
+                child: Icon(icon, size: 18, color: color),
+              ),
+              const SizedBox(width: 12),
+              // Title
+              Expanded(
                 child: Text(
-                  subtitle!,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
+                  title,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurface,
                       ),
                 ),
               ),
+              // Value
+              Text(
+                value,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+              ),
+              const SizedBox(width: 8),
+              // Chevron
+              Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: scheme.onSurfaceVariant,
+              ),
             ],
-          ],
+          ),
         ),
       ),
     );

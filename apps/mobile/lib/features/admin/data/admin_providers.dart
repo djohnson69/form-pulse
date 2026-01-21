@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'admin_models.dart';
 import 'admin_repository.dart';
+import '../../dashboard/data/active_role_provider.dart';
+import '../../dashboard/data/user_profile_provider.dart';
 
 final _supabaseClientProvider = Provider<SupabaseClient>((ref) {
   return Supabase.instance.client;
@@ -25,9 +27,15 @@ final adminSelectedOrgIdProvider = legacy.StateProvider<String?>((ref) => null);
 final adminActiveOrgIdProvider = Provider<String?>((ref) {
   final selectedId = ref.watch(adminSelectedOrgIdProvider);
   if (selectedId != null && selectedId.isNotEmpty) return selectedId;
+  final role = ref.watch(activeRoleProvider);
+  // Only developer and techSupport can view across orgs
+  if (role.canViewAcrossOrgs) return null;
+  // Try to get org from loaded orgs list
   final orgs = ref.watch(adminOrganizationsProvider).asData?.value;
   if (orgs != null && orgs.isNotEmpty) return orgs.first.id;
-  return null;
+  // Fallback: use current user's org_id from profile
+  final profile = ref.watch(userProfileProvider).asData?.value;
+  return profile?.orgId;
 });
 
 final adminStatsProvider = FutureProvider<AdminStats>((ref) async {
@@ -94,4 +102,12 @@ final adminAuditProvider =
   final repo = ref.read(adminRepositoryProvider);
   final orgId = ref.watch(adminActiveOrgIdProvider);
   return repo.fetchAuditLog(orgId: orgId);
+});
+
+/// Provider for pending invitations in the current organization
+final adminPendingInvitationsProvider =
+    FutureProvider.autoDispose<List<PendingInvitation>>((ref) async {
+  final repo = ref.read(adminRepositoryProvider);
+  final orgId = ref.watch(adminActiveOrgIdProvider);
+  return repo.fetchPendingInvitations(orgId: orgId);
 });

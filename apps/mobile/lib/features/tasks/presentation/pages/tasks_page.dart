@@ -193,7 +193,6 @@ class _TasksPageState extends ConsumerState<TasksPage> {
           final userId = Supabase.instance.client.auth.currentUser?.id;
           final isLimitedView = role == UserRole.employee ||
               role == UserRole.maintenance ||
-              role == UserRole.techSupport ||
               role == UserRole.supervisor;
           final accessLabel = isLimitedView
               ? (role == UserRole.supervisor
@@ -304,7 +303,7 @@ class _TasksPageState extends ConsumerState<TasksPage> {
     UserRole role,
     _TeamAccessInfo teamAccess,
   ) {
-    if (role == UserRole.techSupport) {
+    if (role.canViewAcrossOrgs) {
       return tasks;
     }
     final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -1167,7 +1166,7 @@ class _TasksHeader extends StatelessWidget {
     final exportHoverColor =
         isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6);
     final subtitle = switch (role) {
-      UserRole.employee || UserRole.maintenance || UserRole.techSupport =>
+      UserRole.employee || UserRole.maintenance =>
         'Your assigned tasks and milestones',
       UserRole.supervisor => 'Your team\'s tasks and milestones',
       UserRole.manager => 'Department tasks and milestones',
@@ -1703,8 +1702,7 @@ class _TaskStatsGrid extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final subtitle = role == UserRole.employee ||
-            role == UserRole.maintenance ||
-            role == UserRole.techSupport
+            role == UserRole.maintenance
         ? 'Assigned to you'
         : role == UserRole.supervisor
             ? 'Team tasks'

@@ -79,9 +79,8 @@ class AssetDetailPage extends ConsumerWidget {
   }
 
   bool _canManageAssets(UserRole role) {
-    return role == UserRole.manager ||
-        role == UserRole.admin ||
-        role == UserRole.superAdmin ||
+    return role.isAdmin ||
+        role == UserRole.manager ||
         role == UserRole.techSupport ||
         role == UserRole.supervisor;
   }

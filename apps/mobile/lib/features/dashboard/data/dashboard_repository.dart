@@ -295,11 +295,15 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
           .eq('org_id', orgId)
           .order('submitted_at', ascending: false)
           .limit(50);
-      final notificationsFuture = _client
-          .from('notifications')
-          .select()
-          .order('created_at', ascending: false)
-          .limit(50);
+      final notificationsFuture = userId != null
+          ? _client
+              .from('notifications')
+              .select()
+              .eq('org_id', orgId)
+              .eq('user_id', userId)
+              .order('created_at', ascending: false)
+              .limit(50)
+          : Future.value(<dynamic>[]);
 
       final results = await Future.wait([
         formsFuture,
@@ -308,15 +312,18 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       ]);
 
       developer.log('Supabase queries completed successfully');
-      developer.log('Raw results - forms: ${(results[0] as List).length}, submissions: ${(results[1] as List).length}, notifications: ${(results[2] as List).length}');
+      final formsResult = results[0];
+      final submissionsResult = results[1];
+      final notificationsResult = results[2];
+      developer.log('Raw results - forms: ${formsResult.length}, submissions: ${submissionsResult.length}, notifications: ${notificationsResult.length}');
 
-      final forms = (results[0] as List<dynamic>)
+      final forms = formsResult
           .map((e) => _mapFormDefinition(Map<String, dynamic>.from(e as Map)))
           .toList();
       final role = await roleFuture;
       final filteredForms = _filterFormsForRole(forms, role, userId);
       final formTitleIndex = {for (final f in filteredForms) f.id: f.title};
-      final submissions = (results[1] as List<dynamic>)
+      final submissions = submissionsResult
           .map(
             (e) => _mapSubmission(
               Map<String, dynamic>.from(e as Map),
@@ -331,7 +338,7 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       }).toList();
       final signedSubmissions =
           await Future.wait(scopedSubmissions.map(_withSignedAttachments));
-      final notifications = (results[2] as List<dynamic>)
+      final notifications = notificationsResult
           .map((e) => _mapNotification(Map<String, dynamic>.from(e as Map)))
           .toList();
 
@@ -996,167 +1003,20 @@ List<FormSubmission> _applySubmissionFilters(
 }
 
 // ---------------------------------------------------------------------------
-// Demo data used when the backend is offline or unreachable.
+// Form title resolver - fallback when form title is not available
 // ---------------------------------------------------------------------------
 
-final List<FormDefinition> _demoForms = _buildDemoForms();
-
+/// Resolves a form title, using a generic fallback if not found
 String resolveFormTitle(String formId) {
-  final match = _demoForms.firstWhere(
-    (f) => f.id == formId,
-    orElse: () => FormDefinition(
-      id: formId,
-      title: 'Form $formId',
-      description: '',
-      fields: const [],
-      createdBy: 'demo',
-      createdAt: DateTime.now(),
-    ),
-  );
-  return match.title;
-}
-
-List<FormDefinition> _buildDemoForms() {
-  return [
-    {
-      'id': 'jobsite-safety',
-      'title': 'Job Site Safety Walk',
-      'description': '15-point safety walkthrough with photo capture',
-      'category': 'Safety',
-      'isPublished': true,
-      'version': '1.0.0',
-      'createdBy': 'system',
-      'createdAt': DateTime.now()
-          .subtract(const Duration(days: 2))
-          .toIso8601String(),
-      'updatedAt': DateTime.now()
-          .subtract(const Duration(hours: 6))
-          .toIso8601String(),
-      'fields': [
-        {
-          'id': 'siteName',
-          'label': 'Site name',
-          'type': 'text',
-          'placeholder': 'South Plant 7',
-          'isRequired': true,
-          'order': 1,
-        },
-        {
-          'id': 'inspector',
-          'label': 'Inspector',
-          'type': 'text',
-          'placeholder': 'Your name',
-          'isRequired': true,
-          'order': 2,
-        },
-        {
-          'id': 'ppe',
-          'label': 'PPE compliance',
-          'type': 'checkbox',
-          'options': ['Hard hat', 'Vest', 'Gloves', 'Eye protection'],
-          'isRequired': true,
-          'order': 3,
-        },
-        {
-          'id': 'hazards',
-          'label': 'Hazards observed',
-          'type': 'textarea',
-          'order': 4,
-        },
-        {'id': 'photos', 'label': 'Attach photos', 'type': 'photo', 'order': 5},
-        {
-          'id': 'location',
-          'label': 'GPS location',
-          'type': 'location',
-          'order': 6,
-        },
-        {
-          'id': 'signature',
-          'label': 'Supervisor signature',
-          'type': 'signature',
-          'order': 7,
-        },
-      ],
-      'metadata': {'riskLevel': 'medium'},
-    },
-    {
-      'id': 'equipment-checkout',
-      'title': 'Equipment Checkout',
-      'description': 'Log equipment issue/return with QR scan',
-      'category': 'Operations',
-      'isPublished': true,
-      'version': '1.1.0',
-      'createdBy': 'system',
-      'createdAt': DateTime.now()
-          .subtract(const Duration(days: 5))
-          .toIso8601String(),
-      'fields': [
-        {
-          'id': 'assetTag',
-          'label': 'Asset tag / QR',
-          'type': 'barcode',
-          'order': 1,
-          'isRequired': true,
-        },
-        {
-          'id': 'condition',
-          'label': 'Condition',
-          'type': 'radio',
-          'options': ['Excellent', 'Good', 'Fair', 'Damaged'],
-          'order': 2,
-          'isRequired': true,
-        },
-        {'id': 'notes', 'label': 'Notes', 'type': 'textarea', 'order': 3},
-        {
-          'id': 'photos',
-          'label': 'Proof of condition',
-          'type': 'photo',
-          'order': 4,
-        },
-      ],
-      'metadata': {'requiresSupervisor': true},
-    },
-    {
-      'id': 'visitor-log',
-      'title': 'Visitor Log',
-      'description': 'Quick intake with badge printing flag',
-      'category': 'Security',
-      'isPublished': true,
-      'version': '0.9.0',
-      'createdBy': 'system',
-      'createdAt': DateTime.now()
-          .subtract(const Duration(days: 1))
-          .toIso8601String(),
-      'fields': [
-        {
-          'id': 'fullName',
-          'label': 'Full name',
-          'type': 'text',
-          'order': 1,
-          'isRequired': true,
-        },
-        {'id': 'company', 'label': 'Company', 'type': 'text', 'order': 2},
-        {'id': 'host', 'label': 'Host', 'type': 'text', 'order': 3},
-        {
-          'id': 'purpose',
-          'label': 'Purpose',
-          'type': 'dropdown',
-          'options': ['Delivery', 'Interview', 'Maintenance', 'Audit', 'Other'],
-          'order': 4,
-        },
-        {
-          'id': 'arrivedAt',
-          'label': 'Arrival time',
-          'type': 'datetime',
-          'order': 5,
-        },
-        {
-          'id': 'badge',
-          'label': 'Badge required',
-          'type': 'toggle',
-          'order': 6,
-        },
-      ],
-    },
-  ].map((json) => FormDefinition.fromJson(json)).toList();
+  // Format the form ID into a more readable title
+  // e.g., "jobsite-safety" -> "Jobsite Safety"
+  final words = formId.split(RegExp(r'[-_]'));
+  if (words.isNotEmpty) {
+    return words
+        .map((word) => word.isNotEmpty
+            ? '${word[0].toUpperCase()}${word.substring(1)}'
+            : '')
+        .join(' ');
+  }
+  return 'Form $formId';
 }

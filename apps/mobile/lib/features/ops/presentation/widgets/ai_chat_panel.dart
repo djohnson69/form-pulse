@@ -210,40 +210,106 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         contextParts.add('Work Orders: Unable to load');
       }
 
-      // Get recent forms
+      // Get recent forms (org-scoped)
       try {
-        final formsRes = await client
-            .from('forms')
-            .select('id, title, category')
-            .eq('is_published', true)
-            .order('updated_at', ascending: false)
-            .limit(3);
-        if (formsRes.isNotEmpty) {
-          final formTitles = (formsRes as List)
-              .map((f) => f['title']?.toString() ?? 'Untitled')
-              .join(', ');
-          contextParts.add('Available Forms: $formTitles');
+        final formsOrgId = profile?.orgId;
+        if (formsOrgId != null) {
+          final formsRes = await client
+              .from('forms')
+              .select('id, title, category')
+              .eq('org_id', formsOrgId)
+              .eq('is_published', true)
+              .order('updated_at', ascending: false)
+              .limit(3);
+          if (formsRes.isNotEmpty) {
+            final formTitles = (formsRes as List)
+                .map((f) => f['title']?.toString() ?? 'Untitled')
+                .join(', ');
+            contextParts.add('Available Forms: $formTitles');
+          }
         }
       } catch (e) {
         // Silently skip forms context
       }
-      
-      // Get assets count
+
+      // Get assets (org-scoped)
       try {
-        final assetsRes = await client
-            .from('equipment')
-            .select('id')
-            .eq('assigned_to', user.id);
-        final count = (assetsRes as List<dynamic>).length;
-        if (count > 0) {
-          contextParts.add('Assigned Assets: $count');
+        final assetsOrgId = profile?.orgId;
+        if (assetsOrgId != null) {
+          final assetsRes = await client
+              .from('equipment')
+              .select('id, name, category, status')
+              .eq('org_id', assetsOrgId)
+              .eq('is_active', true)
+              .order('updated_at', ascending: false)
+              .limit(5);
+          if (assetsRes.isNotEmpty) {
+            final assetLines = (assetsRes as List).map((a) {
+              final name = a['name']?.toString() ?? 'Unnamed';
+              final category = a['category']?.toString() ?? '';
+              final status = a['status']?.toString() ?? '';
+              return category.isNotEmpty
+                  ? '- $name [$category]${status.isNotEmpty ? " ($status)" : ""}'
+                  : '- $name${status.isNotEmpty ? " ($status)" : ""}';
+            }).join('\n');
+            contextParts.add('Organization Assets:\n$assetLines');
+          }
         }
       } catch (e) {
         // Silently skip assets context
       }
+
+      // Get recent announcements/news posts (org-scoped)
+      try {
+        final newsOrgId = profile?.orgId;
+        if (newsOrgId != null) {
+          final newsRes = await client
+              .from('news_posts')
+              .select('id, title, body, scope, published_at')
+              .eq('org_id', newsOrgId)
+              .eq('is_published', true)
+              .order('published_at', ascending: false)
+              .limit(3);
+          if (newsRes.isNotEmpty) {
+            final formatter = DateFormat('MMM d');
+            final newsLines = (newsRes as List).map((n) {
+              final title = n['title']?.toString() ?? 'Untitled';
+              final scope = n['scope']?.toString() ?? '';
+              final publishedAt = DateTime.tryParse(n['published_at']?.toString() ?? '');
+              final dateStr = publishedAt != null ? formatter.format(publishedAt) : '';
+              return '- $title${scope.isNotEmpty ? " [$scope]" : ""}${dateStr.isNotEmpty ? " ($dateStr)" : ""}';
+            }).join('\n');
+            contextParts.add('Recent Announcements:\n$newsLines');
+          }
+        }
+      } catch (e) {
+        // Silently skip announcements context
+      }
+
+      // Get recent notifications (org-scoped, for current user)
+      try {
+        final notifOrgId = profile?.orgId;
+        if (notifOrgId != null) {
+          final notifRes = await client
+              .from('notifications')
+              .select('id, title, body, type, is_read, created_at')
+              .eq('org_id', notifOrgId)
+              .eq('user_id', user.id)
+              .order('created_at', ascending: false)
+              .limit(5);
+          if (notifRes.isNotEmpty) {
+            final unreadCount = (notifRes as List).where((n) => n['is_read'] != true).length;
+            if (unreadCount > 0) {
+              contextParts.add('Unread Notifications: $unreadCount');
+            }
+          }
+        }
+      } catch (e) {
+        // Silently skip notifications context
+      }
     }
-    
-    final context = contextParts.isNotEmpty 
+
+    final context = contextParts.isNotEmpty
         ? '\n\nContext:\n${contextParts.join('\n')}'
         : '';
     

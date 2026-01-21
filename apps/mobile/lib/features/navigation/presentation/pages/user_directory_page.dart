@@ -85,11 +85,15 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
                 _UsersTable(
                   colors: colors,
                   users: filteredUsers,
+                  onEditRole: _handleEditRole,
+                  onToggleActive: _handleToggleActive,
                 )
               else
                 _UsersGrid(
                   colors: colors,
                   users: filteredUsers,
+                  onEditRole: _handleEditRole,
+                  onToggleActive: _handleToggleActive,
                 ),
               const SizedBox(height: 80),
             ],
@@ -106,9 +110,6 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
       data: (users) => users,
       orElse: () => const <AdminUserSummary>[],
     );
-    if (baseUsers.isEmpty) {
-      return List<_UserEntry>.from(_demoUsers);
-    }
     return baseUsers.map(_mapAdminUser).toList();
   }
 
@@ -213,6 +214,62 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
         backgroundColor: Colors.green,
       ),
     );
+  }
+
+  void _handleEditRole(_UserEntry user) {
+    final colors = _UserDirectoryColors.fromTheme(Theme.of(context));
+    showDialog<void>(
+      context: context,
+      builder: (_) => _EditRoleDialog(
+        colors: colors,
+        user: user,
+        onSaved: () => ref.invalidate(adminUsersProvider),
+      ),
+    );
+  }
+
+  Future<void> _handleToggleActive(_UserEntry user) async {
+    final newStatus = !user.isActive;
+    final action = newStatus ? 'activate' : 'deactivate';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${action.substring(0, 1).toUpperCase()}${action.substring(1)} User'),
+        content: Text('Are you sure you want to $action ${user.name}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(action.substring(0, 1).toUpperCase() + action.substring(1)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final repo = ref.read(adminRepositoryProvider);
+      await repo.updateUserActive(userId: user.id, isActive: newStatus);
+      ref.invalidate(adminUsersProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${user.name} has been ${newStatus ? 'activated' : 'deactivated'}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to $action user: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
@@ -777,17 +834,21 @@ class _ViewModeToggle extends StatelessWidget {
   }
 }
 
-class _UsersTable extends StatelessWidget {
+class _UsersTable extends ConsumerWidget {
   const _UsersTable({
     required this.colors,
     required this.users,
+    required this.onEditRole,
+    required this.onToggleActive,
   });
 
   final _UserDirectoryColors colors;
   final List<_UserEntry> users;
+  final void Function(_UserEntry user) onEditRole;
+  final void Function(_UserEntry user) onToggleActive;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (users.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(24),
@@ -869,7 +930,12 @@ class _UsersTable extends StatelessWidget {
                     DataCell(_LocationCell(colors: colors, location: user.location)),
                     DataCell(_StatusCell(colors: colors, user: user)),
                     DataCell(_PerformanceCell(colors: colors, user: user)),
-                    DataCell(_ActionButtons(colors: colors)),
+                    DataCell(_ActionButtons(
+                      colors: colors,
+                      user: user,
+                      onEditRole: () => onEditRole(user),
+                      onToggleActive: () => onToggleActive(user),
+                    )),
                   ],
                 );
               }).toList(),
@@ -881,17 +947,21 @@ class _UsersTable extends StatelessWidget {
   }
 }
 
-class _UsersGrid extends StatelessWidget {
+class _UsersGrid extends ConsumerWidget {
   const _UsersGrid({
     required this.colors,
     required this.users,
+    required this.onEditRole,
+    required this.onToggleActive,
   });
 
   final _UserDirectoryColors colors;
   final List<_UserEntry> users;
+  final void Function(_UserEntry user) onEditRole;
+  final void Function(_UserEntry user) onToggleActive;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (users.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(24),
@@ -926,7 +996,12 @@ class _UsersGrid extends StatelessWidget {
           crossAxisSpacing: 16,
           childAspectRatio: ratio,
           children: users
-              .map((user) => _UserCard(colors: colors, user: user))
+              .map((user) => _UserCard(
+                    colors: colors,
+                    user: user,
+                    onEditRole: () => onEditRole(user),
+                    onToggleActive: () => onToggleActive(user),
+                  ))
               .toList(),
         );
       },
@@ -935,10 +1010,17 @@ class _UsersGrid extends StatelessWidget {
 }
 
 class _UserCard extends StatelessWidget {
-  const _UserCard({required this.colors, required this.user});
+  const _UserCard({
+    required this.colors,
+    required this.user,
+    required this.onEditRole,
+    required this.onToggleActive,
+  });
 
   final _UserDirectoryColors colors;
   final _UserEntry user;
+  final VoidCallback onEditRole;
+  final VoidCallback onToggleActive;
 
   @override
   Widget build(BuildContext context) {
@@ -1065,13 +1147,13 @@ class _UserCard extends StatelessWidget {
               _ActionIconButton(
                 colors: colors,
                 icon: Icons.edit_outlined,
-                onTap: () {},
+                onTap: onEditRole,
               ),
               const SizedBox(width: 8),
               _ActionIconButton(
                 colors: colors,
-                icon: Icons.delete_outline,
-                onTap: () {},
+                icon: user.isActive ? Icons.person_off_outlined : Icons.person_outlined,
+                onTap: onToggleActive,
               ),
             ],
           ),
@@ -1252,27 +1334,53 @@ class _PerformanceCell extends StatelessWidget {
 }
 
 class _ActionButtons extends StatelessWidget {
-  const _ActionButtons({required this.colors});
+  const _ActionButtons({
+    required this.colors,
+    required this.user,
+    required this.onEditRole,
+    required this.onToggleActive,
+  });
 
   final _UserDirectoryColors colors;
+  final _UserEntry user;
+  final VoidCallback onEditRole;
+  final VoidCallback onToggleActive;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         IconButton(
-          onPressed: () {},
+          onPressed: onEditRole,
           icon: Icon(Icons.edit_outlined, color: colors.primary),
           iconSize: 18,
           constraints: const BoxConstraints.tightFor(width: 32, height: 32),
           padding: EdgeInsets.zero,
+          tooltip: 'Edit role',
         ),
-        IconButton(
-          onPressed: () {},
+        PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: colors.muted),
           iconSize: 18,
-          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
           padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+          onSelected: (value) {
+            if (value == 'toggle_active') onToggleActive();
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'toggle_active',
+              child: Row(
+                children: [
+                  Icon(
+                    user.isActive ? Icons.person_off_outlined : Icons.person_outlined,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(user.isActive ? 'Deactivate' : 'Activate'),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1746,6 +1854,185 @@ class _AddUserDialogState extends State<_AddUserDialog> {
   }
 }
 
+class _EditRoleDialog extends ConsumerStatefulWidget {
+  const _EditRoleDialog({
+    required this.colors,
+    required this.user,
+    required this.onSaved,
+  });
+
+  final _UserDirectoryColors colors;
+  final _UserEntry user;
+  final VoidCallback onSaved;
+
+  @override
+  ConsumerState<_EditRoleDialog> createState() => _EditRoleDialogState();
+}
+
+class _EditRoleDialogState extends ConsumerState<_EditRoleDialog> {
+  late String _selectedRole;
+  bool _isSubmitting = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedRole = widget.user.role;
+  }
+
+  List<String> _getAssignableRoles() {
+    // Get assignable roles based on current user's role
+    // Simple implementation - show org-level roles only (excludes platform roles)
+    return const [
+      'Admin',
+      'Manager',
+      'Supervisor',
+      'Employee',
+      'Maintenance',
+      'Client',
+      'Vendor',
+      'Viewer',
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    final assignableRoles = _getAssignableRoles();
+
+    return AlertDialog(
+      title: Text('Edit Role for ${widget.user.name}'),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Current role: ${widget.user.role}',
+              style: TextStyle(color: colors.muted, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            _DialogField(
+              label: 'New Role',
+              child: DropdownButtonFormField<String>(
+                value: assignableRoles.contains(_selectedRole)
+                    ? _selectedRole
+                    : assignableRoles.first,
+                decoration: _inputDecoration(
+                  colors,
+                  hintText: 'Select role',
+                ),
+                items: [
+                  for (final role in assignableRoles)
+                    DropdownMenuItem(value: role, child: Text(role)),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _selectedRole = value);
+                  }
+                },
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                style: TextStyle(color: colors.danger, fontSize: 13),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _isSubmitting ? null : _handleSave,
+          child: _isSubmitting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleSave() async {
+    if (_selectedRole == widget.user.role) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+    });
+
+    try {
+      final appRole = _toAppRoleFromLabel(_selectedRole);
+      if (appRole == null) {
+        setState(() => _error = 'Invalid role selected');
+        return;
+      }
+
+      final repo = ref.read(adminRepositoryProvider);
+      await repo.updateUserRole(
+        userId: widget.user.id,
+        role: appRole,
+      );
+
+      widget.onSaved();
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${widget.user.name}\'s role updated to $_selectedRole'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Failed to update role: $e');
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+}
+
+UserRole? _toAppRoleFromLabel(String roleLabel) {
+  switch (roleLabel) {
+    case 'Super Admin':
+      return UserRole.superAdmin;
+    case 'Admin':
+      return UserRole.admin;
+    case 'Manager':
+      return UserRole.manager;
+    case 'Supervisor':
+      return UserRole.supervisor;
+    case 'Employee':
+      return UserRole.employee;
+    case 'Tech Support':
+      return UserRole.techSupport;
+    case 'Maintenance':
+      return UserRole.maintenance;
+    case 'Client':
+      return UserRole.client;
+    case 'Vendor':
+      return UserRole.vendor;
+    case 'Viewer':
+      return UserRole.viewer;
+    case 'Developer':
+      return UserRole.developer;
+  }
+  return null;
+}
+
 String? _toAppRole(String roleLabel) {
   switch (roleLabel) {
     case 'Super Admin':
@@ -2013,114 +2300,6 @@ const List<String> _roleOptions = [
   'Employee',
   'Tech Support',
   'Maintenance',
-];
-
-final List<_UserEntry> _demoUsers = [
-  _UserEntry(
-    id: '1',
-    name: 'John Doe',
-    email: 'john.doe@formbridge.com',
-    phone: '+1 (555) 123-4567',
-    role: 'Super Admin',
-    department: 'IT',
-    isActive: true,
-    location: 'San Francisco, CA',
-    joinedDate: DateTime(2024, 1, 15),
-    lastActive: '2 hours ago',
-    tasksCompleted: 145,
-    formsSubmitted: 32,
-    certifications: 5,
-  ),
-  _UserEntry(
-    id: '2',
-    name: 'Jane Smith',
-    email: 'jane.smith@formbridge.com',
-    phone: '+1 (555) 234-5678',
-    role: 'Admin',
-    department: 'Administration',
-    isActive: true,
-    location: 'New York, NY',
-    joinedDate: DateTime(2024, 2, 20),
-    lastActive: '5 hours ago',
-    tasksCompleted: 98,
-    formsSubmitted: 28,
-    certifications: 4,
-  ),
-  _UserEntry(
-    id: '3',
-    name: 'Mike Johnson',
-    email: 'mike.johnson@formbridge.com',
-    phone: '+1 (555) 345-6789',
-    role: 'Manager',
-    department: 'Operations',
-    isActive: true,
-    location: 'Los Angeles, CA',
-    joinedDate: DateTime(2024, 3, 10),
-    lastActive: '1 day ago',
-    tasksCompleted: 234,
-    formsSubmitted: 45,
-    certifications: 6,
-  ),
-  _UserEntry(
-    id: '4',
-    name: 'Sarah Williams',
-    email: 'sarah.w@formbridge.com',
-    phone: '+1 (555) 456-7890',
-    role: 'Supervisor',
-    department: 'Field Services',
-    isActive: true,
-    location: 'Chicago, IL',
-    joinedDate: DateTime(2024, 4, 5),
-    lastActive: '30 minutes ago',
-    tasksCompleted: 187,
-    formsSubmitted: 52,
-    certifications: 3,
-  ),
-  _UserEntry(
-    id: '5',
-    name: 'Tom Brown',
-    email: 'tom.brown@formbridge.com',
-    phone: '+1 (555) 567-8901',
-    role: 'Employee',
-    department: 'Field Services',
-    isActive: false,
-    location: 'Houston, TX',
-    joinedDate: DateTime(2024, 5, 12),
-    lastActive: '2 weeks ago',
-    tasksCompleted: 67,
-    formsSubmitted: 18,
-    certifications: 2,
-  ),
-  _UserEntry(
-    id: '6',
-    name: 'Lisa Anderson',
-    email: 'lisa.a@formbridge.com',
-    phone: '+1 (555) 678-9012',
-    role: 'Tech Support',
-    department: 'IT Support',
-    isActive: true,
-    location: 'Seattle, WA',
-    joinedDate: DateTime(2024, 6, 8),
-    lastActive: '3 hours ago',
-    tasksCompleted: 156,
-    formsSubmitted: 38,
-    certifications: 5,
-  ),
-  _UserEntry(
-    id: '7',
-    name: 'David Martinez',
-    email: 'david.m@formbridge.com',
-    phone: '+1 (555) 789-0123',
-    role: 'Maintenance',
-    department: 'Facilities',
-    isActive: true,
-    location: 'Phoenix, AZ',
-    joinedDate: DateTime(2024, 7, 15),
-    lastActive: '1 hour ago',
-    tasksCompleted: 92,
-    formsSubmitted: 24,
-    certifications: 3,
-  ),
 ];
 
 _UserEntry _mapAdminUser(AdminUserSummary user) {

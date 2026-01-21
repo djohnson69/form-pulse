@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../core/theme/theme_mode_provider.dart';
 import 'app_navigator.dart';
 
 /// Main app entry point
@@ -10,13 +11,18 @@ class AppEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ProviderScope(
-      child: MaterialApp(
-        title: 'Form Bridge',
-        debugShowCheckedModeBanner: false,
-        theme: _buildLightTheme(),
-        darkTheme: _buildDarkTheme(),
-        themeMode: ThemeMode.dark, // Default to dark theme like React app
-        home: const AppNavigator(),
+      child: Consumer(
+        builder: (context, ref, _) {
+          final themeMode = ref.watch(themeModeProvider);
+          return MaterialApp(
+            title: 'Form Bridge',
+            debugShowCheckedModeBanner: false,
+            theme: _buildLightTheme(),
+            darkTheme: _buildDarkTheme(),
+            themeMode: themeMode,
+            home: const AppNavigator(),
+          );
+        },
       ),
     );
   }

@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile/features/dashboard/presentation/pages/role_dashboard_page.dart';
 import 'package:mobile/features/auth/presentation/pages/account_disabled_page.dart';
 import 'package:mobile/features/auth/presentation/pages/login_page.dart';
-import 'package:mobile/features/auth/presentation/pages/org_onboarding_page.dart';
+import 'package:mobile/features/auth/presentation/pages/enterprise_onboarding_page.dart';
 import 'package:shared/shared.dart';
 
 /// Main app navigator and entry point with admin routing
@@ -45,35 +45,45 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
         debugPrint(
           'No profile or role found for user ${user.id}, defaulting to viewer',
         );
+        const fallbackRole = UserRole.viewer;
         return _UserAccess(
-          role: UserRole.viewer,
+          role: fallbackRole,
           isActive: true,
-          needsOnboarding: orgId == null || orgId.isEmpty,
+          needsOnboarding: (orgId == null || orgId.isEmpty) && !fallbackRole.canViewAcrossOrgs,
         );
       }
 
       final role = UserRole.fromRaw(rawRole);
       final isActive = res?['is_active'] as bool? ?? true;
+      final needsOnboarding =
+          (orgId == null || orgId.isEmpty) && !role.canViewAcrossOrgs;
+      debugPrint(
+        'AppNavigator: user=${user.id}, rawRole=$rawRole, role=$role, '
+        'orgId=$orgId, canViewAcrossOrgs=${role.canViewAcrossOrgs}, '
+        'needsOnboarding=$needsOnboarding',
+      );
       return _UserAccess(
         role: role,
         isActive: isActive,
-        needsOnboarding: orgId == null || orgId.isEmpty,
+        needsOnboarding: needsOnboarding,
       );
     } on PostgrestException catch (e) {
       debugPrint('Error fetching user role: $e, defaulting to viewer');
       final orgId = await _resolveOrgId(client, user.id);
+      const fallbackRole = UserRole.viewer;
       return _UserAccess(
-        role: UserRole.viewer,
+        role: fallbackRole,
         isActive: true,
-        needsOnboarding: orgId == null || orgId.isEmpty,
+        needsOnboarding: (orgId == null || orgId.isEmpty) && !fallbackRole.canViewAcrossOrgs,
       );
     } catch (e) {
       debugPrint('Error fetching user role: $e, defaulting to viewer');
       final orgId = await _resolveOrgId(client, user.id);
+      const fallbackRole = UserRole.viewer;
       return _UserAccess(
-        role: UserRole.viewer,
+        role: fallbackRole,
         isActive: true,
-        needsOnboarding: orgId == null || orgId.isEmpty,
+        needsOnboarding: (orgId == null || orgId.isEmpty) && !fallbackRole.canViewAcrossOrgs,
       );
     }
   }
@@ -144,7 +154,7 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
             }
 
             if (access.needsOnboarding) {
-              return OrgOnboardingPage(
+              return EnterpriseOnboardingPage(
                 onCompleted: () => setState(() {}),
               );
             }

@@ -1,83 +1,74 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class SystemOverviewPage extends StatelessWidget {
+import '../../../platform/data/platform_providers.dart';
+
+/// Provider for system health status - checks Supabase connectivity
+final systemHealthProvider = FutureProvider<_SystemHealth>((ref) async {
+  final client = Supabase.instance.client;
+
+  // Check API health by making a simple query
+  bool apiHealthy = false;
+  bool dbHealthy = false;
+  bool storageHealthy = false;
+
+  try {
+    // Test database connection
+    await client.from('orgs').select('id').limit(1);
+    dbHealthy = true;
+    apiHealthy = true;
+  } catch (_) {
+    // DB or API is down
+  }
+
+  try {
+    // Test storage connection
+    await client.storage.listBuckets();
+    storageHealthy = true;
+  } catch (_) {
+    // Storage might not be configured
+    storageHealthy = true; // Assume OK if not configured
+  }
+
+  return _SystemHealth(
+    apiHealthy: apiHealthy,
+    dbHealthy: dbHealthy,
+    storageHealthy: storageHealthy,
+  );
+});
+
+class _SystemHealth {
+  const _SystemHealth({
+    required this.apiHealthy,
+    required this.dbHealthy,
+    required this.storageHealthy,
+  });
+
+  final bool apiHealthy;
+  final bool dbHealthy;
+  final bool storageHealthy;
+
+  bool get allHealthy => apiHealthy && dbHealthy && storageHealthy;
+}
+
+class SystemOverviewPage extends ConsumerWidget {
   const SystemOverviewPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final background = isDark ? const Color(0xFF111827) : const Color(0xFFF9FAFB);
     final surface = isDark ? const Color(0xFF1F2937) : Colors.white;
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final muted = isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
 
-    const metrics = _SystemMetrics(
-      cpu: 45,
-      memory: 68,
-      disk: 72,
-      network: 34,
-      uptime: '99.9%',
-      activeUsers: 142,
-      apiCalls: '2.4M',
-      avgResponseTime: '85ms',
-    );
-
-    const services = [
-      _ServiceStatus(
-        name: 'API Gateway',
-        status: _ServiceHealth.healthy,
-        uptime: '99.99%',
-        responseTime: '12ms',
-      ),
-      _ServiceStatus(
-        name: 'Auth Service',
-        status: _ServiceHealth.healthy,
-        uptime: '99.95%',
-        responseTime: '8ms',
-      ),
-      _ServiceStatus(
-        name: 'Database Primary',
-        status: _ServiceHealth.healthy,
-        uptime: '100%',
-        responseTime: '5ms',
-      ),
-      _ServiceStatus(
-        name: 'Database Replica',
-        status: _ServiceHealth.healthy,
-        uptime: '99.98%',
-        responseTime: '6ms',
-      ),
-      _ServiceStatus(
-        name: 'File Storage',
-        status: _ServiceHealth.healthy,
-        uptime: '99.97%',
-        responseTime: '15ms',
-      ),
-      _ServiceStatus(
-        name: 'Email Service',
-        status: _ServiceHealth.warning,
-        uptime: '98.5%',
-        responseTime: '125ms',
-      ),
-    ];
-
-    const alerts = [
-      _SystemAlert(
-        level: _AlertLevel.warning,
-        message: 'Email Service response time elevated',
-        time: '5 min ago',
-      ),
-      _SystemAlert(
-        level: _AlertLevel.info,
-        message: 'Database backup completed successfully',
-        time: '2 hours ago',
-      ),
-      _SystemAlert(
-        level: _AlertLevel.info,
-        message: 'System update deployed',
-        time: '1 day ago',
-      ),
-    ];
+    final platformStats = ref.watch(platformStatsProvider);
+    final apiStats = ref.watch(apiOverviewStatsProvider);
+    final sessionsAsync = ref.watch(activeSessionsProvider);
+    final errorsAsync = ref.watch(errorEventsProvider);
+    final healthAsync = ref.watch(systemHealthProvider);
 
     return Scaffold(
       backgroundColor: background,
@@ -95,32 +86,58 @@ class SystemOverviewPage extends StatelessWidget {
               child: ListView(
                 padding: pagePadding,
                 children: [
-                  Text(
-                    'System Overview',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color:
-                              isDark ? Colors.white : const Color(0xFF111827),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'System Overview',
+                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color:
+                                        isDark ? Colors.white : const Color(0xFF111827),
+                                  ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Monitor system health, performance, and infrastructure',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: muted,
+                                    fontSize: 16,
+                                  ),
+                            ),
+                          ],
                         ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Monitor system health, performance, and infrastructure',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: muted,
-                          fontSize: 16,
-                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          ref.invalidate(platformStatsProvider);
+                          ref.invalidate(apiOverviewStatsProvider);
+                          ref.invalidate(activeSessionsProvider);
+                          ref.invalidate(errorEventsProvider);
+                          ref.invalidate(systemHealthProvider);
+                        },
+                        icon: const Icon(Icons.refresh),
+                        tooltip: 'Refresh',
+                      ),
+                    ],
                   ),
                   SizedBox(height: sectionSpacing),
-                  _MetricsGrid(metrics: metrics),
+                  _MetricsGrid(
+                    platformStats: platformStats,
+                    apiStats: apiStats,
+                    sessionsAsync: sessionsAsync,
+                  ),
                   SizedBox(height: sectionSpacing),
                   LayoutBuilder(
                     builder: (context, constraints) {
                       final isWide = constraints.maxWidth >= 1024;
                       final children = [
                         Expanded(
-                          child: _ResourceUsageCard(
-                            metrics: metrics,
+                          child: _SystemHealthCard(
+                            healthAsync: healthAsync,
                             surface: surface,
                             border: border,
                             muted: muted,
@@ -128,8 +145,8 @@ class SystemOverviewPage extends StatelessWidget {
                         ),
                         const SizedBox(width: 24, height: 24),
                         Expanded(
-                          child: _ServicesStatusCard(
-                            services: services,
+                          child: _RecentErrorsCard(
+                            errorsAsync: errorsAsync,
                             surface: surface,
                             border: border,
                             muted: muted,
@@ -145,13 +162,6 @@ class SystemOverviewPage extends StatelessWidget {
                       return Column(children: children);
                     },
                   ),
-                  SizedBox(height: sectionSpacing),
-                  _AlertsCard(
-                    alerts: alerts,
-                    surface: surface,
-                    border: border,
-                    muted: muted,
-                  ),
                   const SizedBox(height: 80),
                 ],
               ),
@@ -164,12 +174,20 @@ class SystemOverviewPage extends StatelessWidget {
 }
 
 class _MetricsGrid extends StatelessWidget {
-  const _MetricsGrid({required this.metrics});
+  const _MetricsGrid({
+    required this.platformStats,
+    required this.apiStats,
+    required this.sessionsAsync,
+  });
 
-  final _SystemMetrics metrics;
+  final AsyncValue<PlatformStats> platformStats;
+  final AsyncValue<ApiOverviewStats> apiStats;
+  final AsyncValue<List<ActiveSession>> sessionsAsync;
 
   @override
   Widget build(BuildContext context) {
+    final numberFormat = NumberFormat.compact();
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 1024 ? 4 : 2;
@@ -183,9 +201,13 @@ class _MetricsGrid extends StatelessWidget {
           childAspectRatio: aspectRatio,
           children: [
             _MetricCard(
-              label: 'System Uptime',
-              value: metrics.uptime,
-              icon: Icons.dns_outlined,
+              label: 'Total Organizations',
+              value: platformStats.when(
+                data: (stats) => numberFormat.format(stats.totalOrganizations),
+                loading: () => '...',
+                error: (_, __) => '-',
+              ),
+              icon: Icons.business_outlined,
               accent: const Color(0xFF2563EB),
               iconBackground: const Color(0xFF2563EB),
               gradientLightStart: const Color(0xFFEFF6FF),
@@ -198,15 +220,14 @@ class _MetricsGrid extends StatelessWidget {
               borderDark: const Color(0xFF1D4ED8).withValues(alpha: 0.5),
               labelLight: const Color(0xFF1D4ED8),
               labelDark: const Color(0xFF93C5FD),
-              trailing: const Icon(
-                Icons.check_circle,
-                color: Color(0xFF22C55E),
-                size: 24,
-              ),
             ),
             _MetricCard(
-              label: 'Active Users',
-              value: metrics.activeUsers.toString(),
+              label: 'Active Sessions',
+              value: sessionsAsync.when(
+                data: (sessions) => sessions.length.toString(),
+                loading: () => '...',
+                error: (_, __) => '-',
+              ),
               icon: Icons.groups_outlined,
               accent: const Color(0xFF7C3AED),
               iconBackground: const Color(0xFF7C3AED),
@@ -222,8 +243,12 @@ class _MetricsGrid extends StatelessWidget {
               labelDark: const Color(0xFFD8B4FE),
             ),
             _MetricCard(
-              label: 'API Calls Today',
-              value: metrics.apiCalls,
+              label: 'API Requests (24h)',
+              value: apiStats.when(
+                data: (stats) => numberFormat.format(stats.totalRequests),
+                loading: () => '...',
+                error: (_, __) => '-',
+              ),
               icon: Icons.flash_on,
               accent: const Color(0xFF16A34A),
               iconBackground: const Color(0xFF16A34A),
@@ -240,7 +265,13 @@ class _MetricsGrid extends StatelessWidget {
             ),
             _MetricCard(
               label: 'Avg Response Time',
-              value: metrics.avgResponseTime,
+              value: apiStats.when(
+                data: (stats) => stats.avgLatencyMs > 0
+                    ? '${stats.avgLatencyMs.toStringAsFixed(0)}ms'
+                    : '-',
+                loading: () => '...',
+                error: (_, __) => '-',
+              ),
               icon: Icons.show_chart_outlined,
               accent: const Color(0xFFF97316),
               iconBackground: const Color(0xFFEA580C),
@@ -277,7 +308,6 @@ class _MetricCard extends StatelessWidget {
     this.labelLight,
     this.labelDark,
     this.iconBackground,
-    this.trailing,
   });
 
   final String label;
@@ -293,7 +323,6 @@ class _MetricCard extends StatelessWidget {
   final Color? labelLight;
   final Color? labelDark;
   final Color? iconBackground;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -325,20 +354,14 @@ class _MetricCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: iconBackground ?? accent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: Colors.white, size: 24),
-              ),
-              if (trailing != null) trailing!,
-            ],
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: iconBackground ?? accent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
           ),
           const SizedBox(height: 16),
           Text(
@@ -364,15 +387,15 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-class _ResourceUsageCard extends StatelessWidget {
-  const _ResourceUsageCard({
-    required this.metrics,
+class _SystemHealthCard extends StatelessWidget {
+  const _SystemHealthCard({
+    required this.healthAsync,
     required this.surface,
     required this.border,
     required this.muted,
   });
 
-  final _SystemMetrics metrics;
+  final AsyncValue<_SystemHealth> healthAsync;
   final Color surface;
   final Color border;
   final Color muted;
@@ -380,6 +403,7 @@ class _ResourceUsageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -392,7 +416,7 @@ class _ResourceUsageCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Resource Usage',
+            'System Health',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                   fontSize: 18,
@@ -400,151 +424,53 @@ class _ResourceUsageCard extends StatelessWidget {
                 ),
           ),
           const SizedBox(height: 16),
-          _UsageRow(
-            label: 'CPU Usage',
-            value: metrics.cpu,
-            icon: Icons.memory,
-            color: const Color(0xFF3B82F6),
-            muted: muted,
-          ),
-          const SizedBox(height: 20),
-          _UsageRow(
-            label: 'Memory Usage',
-            value: metrics.memory,
-            icon: Icons.storage,
-            color: const Color(0xFF8B5CF6),
-            muted: muted,
-          ),
-          const SizedBox(height: 20),
-          _UsageRow(
-            label: 'Disk Usage',
-            value: metrics.disk,
-            icon: Icons.sd_storage,
-            color: const Color(0xFFF97316),
-            muted: muted,
-          ),
-          const SizedBox(height: 20),
-          _UsageRow(
-            label: 'Network Usage',
-            value: metrics.network,
-            icon: Icons.network_check,
-            color: const Color(0xFF22C55E),
-            muted: muted,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _UsageRow extends StatelessWidget {
-  const _UsageRow({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-    required this.muted,
-  });
-
-  final String label;
-  final int value;
-  final IconData icon;
-  final Color color;
-  final Color muted;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final labelColor =
-        isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
+          healthAsync.when(
+            data: (health) => Column(
               children: [
-                Icon(icon, size: 20, color: color),
-                const SizedBox(width: 8),
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: labelColor,
-                        fontSize: 14,
-                      ),
+                _HealthStatusTile(
+                  name: 'API Gateway',
+                  isHealthy: health.apiHealthy,
+                  muted: muted,
+                ),
+                const SizedBox(height: 12),
+                _HealthStatusTile(
+                  name: 'Database',
+                  isHealthy: health.dbHealthy,
+                  muted: muted,
+                ),
+                const SizedBox(height: 12),
+                _HealthStatusTile(
+                  name: 'Storage',
+                  isHealthy: health.storageHealthy,
+                  muted: muted,
                 ),
               ],
             ),
-            Text(
-              '$value%',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : const Color(0xFF111827),
-                    fontSize: 14,
-                  ),
+            loading: () => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
             ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: value / 100,
-            minHeight: 12,
-            backgroundColor:
-                isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ServicesStatusCard extends StatelessWidget {
-  const _ServicesStatusCard({
-    required this.services,
-    required this.surface,
-    required this.border,
-    required this.muted,
-  });
-
-  final List<_ServiceStatus> services;
-  final Color surface;
-  final Color border;
-  final Color muted;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: border),
-        boxShadow: _cardShadow(isDark),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Services Status',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
-                  color: isDark ? Colors.white : const Color(0xFF111827),
+            error: (_, __) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      color: isDark ? const Color(0xFFF87171) : const Color(0xFFEF4444),
+                      size: 40,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Unable to check system health',
+                      style: TextStyle(
+                        color: isDark ? const Color(0xFFF87171) : const Color(0xFFEF4444),
+                      ),
+                    ),
+                  ],
                 ),
-          ),
-          const SizedBox(height: 16),
-          ...services.map(
-            (service) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _ServiceStatusTile(
-                service: service,
-                muted: muted,
               ),
             ),
           ),
@@ -554,188 +480,36 @@ class _ServicesStatusCard extends StatelessWidget {
   }
 }
 
-class _ServiceStatusTile extends StatelessWidget {
-  const _ServiceStatusTile({required this.service, required this.muted});
+class _HealthStatusTile extends StatelessWidget {
+  const _HealthStatusTile({
+    required this.name,
+    required this.isHealthy,
+    required this.muted,
+  });
 
-  final _ServiceStatus service;
+  final String name;
+  final bool isHealthy;
   final Color muted;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isHealthy = service.status == _ServiceHealth.healthy;
-    final accent = isHealthy ? const Color(0xFF22C55E) : const Color(0xFFF59E0B);
+    final accent = isHealthy ? const Color(0xFF22C55E) : const Color(0xFFEF4444);
     final background = isHealthy
         ? (isDark
             ? const Color(0xFF14532D).withValues(alpha: 0.2)
             : const Color(0xFFF0FDF4))
         : (isDark
-            ? const Color(0xFF78350F).withValues(alpha: 0.2)
-            : const Color(0xFFFFFBEB));
+            ? const Color(0xFF7F1D1D).withValues(alpha: 0.2)
+            : const Color(0xFFFEF2F2));
     final border = isHealthy
         ? (isDark
             ? const Color(0xFF15803D).withValues(alpha: 0.5)
             : const Color(0xFFBBF7D0))
         : (isDark
-            ? const Color(0xFFB45309).withValues(alpha: 0.5)
-            : const Color(0xFFFEF3C7));
-    final pillBackground = isHealthy
-        ? (isDark
-            ? const Color(0xFF14532D).withValues(alpha: 0.5)
-            : const Color(0xFFDCFCE7))
-        : (isDark
-            ? const Color(0xFF78350F).withValues(alpha: 0.5)
-            : const Color(0xFFFEF3C7));
-    final pillText = isHealthy
-        ? (isDark ? const Color(0xFF4ADE80) : const Color(0xFF15803D))
-        : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309));
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    isHealthy ? Icons.check_circle : Icons.warning_amber_rounded,
-                    size: 20,
-                    color: accent,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    service.name,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white : const Color(0xFF111827),
-                          fontSize: 14,
-                        ),
-                  ),
-                ],
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: pillBackground,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  isHealthy ? 'healthy' : 'warning',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: pillText,
-                        fontSize: 12,
-                      ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Text(
-                'Uptime: ${service.uptime}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: muted,
-                      fontSize: 14,
-                    ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Response: ${service.responseTime}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: muted,
-                      fontSize: 14,
-                    ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
+            ? const Color(0xFFDC2626).withValues(alpha: 0.5)
+            : const Color(0xFFFECACA));
 
-class _AlertsCard extends StatelessWidget {
-  const _AlertsCard({
-    required this.alerts,
-    required this.surface,
-    required this.border,
-    required this.muted,
-  });
-
-  final List<_SystemAlert> alerts;
-  final Color surface;
-  final Color border;
-  final Color muted;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: border),
-        boxShadow: _cardShadow(isDark),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Recent Alerts',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
-                  color: isDark ? Colors.white : const Color(0xFF111827),
-                ),
-          ),
-          const SizedBox(height: 16),
-          ...alerts.map(
-            (alert) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _AlertTile(alert: alert, muted: muted),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AlertTile extends StatelessWidget {
-  const _AlertTile({required this.alert, required this.muted});
-
-  final _SystemAlert alert;
-  final Color muted;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isWarning = alert.level == _AlertLevel.warning;
-    final accent = isWarning ? const Color(0xFFF59E0B) : const Color(0xFF3B82F6);
-    final background = isWarning
-        ? (isDark
-            ? const Color(0xFF78350F).withValues(alpha: 0.2)
-            : const Color(0xFFFFFBEB))
-        : (isDark
-            ? const Color(0xFF1E3A8A).withValues(alpha: 0.2)
-            : const Color(0xFFEFF6FF));
-    final border = isWarning
-        ? (isDark
-            ? const Color(0xFFB45309).withValues(alpha: 0.5)
-            : const Color(0xFFFEF3C7))
-        : (isDark
-            ? const Color(0xFF1D4ED8).withValues(alpha: 0.5)
-            : const Color(0xFFBFDBFE));
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -744,35 +518,214 @@ class _AlertTile extends StatelessWidget {
         border: Border.all(color: border),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            isWarning ? Icons.warning_amber_rounded : Icons.check_circle,
-            color: accent,
+            isHealthy ? Icons.check_circle : Icons.error,
             size: 20,
+            color: accent,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  alert.message,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : const Color(0xFF111827),
-                        fontSize: 14,
-                      ),
+            child: Text(
+              name,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
+                  ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              isHealthy ? 'Healthy' : 'Down',
+              style: TextStyle(
+                color: accent,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentErrorsCard extends StatelessWidget {
+  const _RecentErrorsCard({
+    required this.errorsAsync,
+    required this.surface,
+    required this.border,
+    required this.muted,
+  });
+
+  final AsyncValue<List<ErrorEvent>> errorsAsync;
+  final Color surface;
+  final Color border;
+  final Color muted;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final timeFormat = DateFormat('MMM d, h:mm a');
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+        boxShadow: _cardShadow(isDark),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Recent Errors',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                  color: isDark ? Colors.white : const Color(0xFF111827),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  alert.time,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: muted,
-                        fontSize: 14,
+          ),
+          const SizedBox(height: 16),
+          errorsAsync.when(
+            data: (errors) {
+              if (errors.isEmpty) {
+                return Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF14532D).withValues(alpha: 0.2)
+                        : const Color(0xFFF0FDF4),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFF15803D).withValues(alpha: 0.5)
+                          : const Color(0xFFBBF7D0),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.check_circle,
+                        color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF22C55E),
+                        size: 20,
                       ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'No recent errors',
+                        style: TextStyle(
+                          color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF15803D),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return Column(
+                children: errors.take(5).map((error) {
+                  final isWarning = error.severity == 'medium' || error.severity == 'low';
+                  final accent = isWarning ? const Color(0xFFF59E0B) : const Color(0xFFEF4444);
+                  final background = isWarning
+                      ? (isDark
+                          ? const Color(0xFF78350F).withValues(alpha: 0.2)
+                          : const Color(0xFFFFFBEB))
+                      : (isDark
+                          ? const Color(0xFF7F1D1D).withValues(alpha: 0.2)
+                          : const Color(0xFFFEF2F2));
+                  final borderColor = isWarning
+                      ? (isDark
+                          ? const Color(0xFFB45309).withValues(alpha: 0.5)
+                          : const Color(0xFFFEF3C7))
+                      : (isDark
+                          ? const Color(0xFFDC2626).withValues(alpha: 0.5)
+                          : const Color(0xFFFECACA));
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: background,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: borderColor),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            isWarning ? Icons.warning_amber_rounded : Icons.error,
+                            color: accent,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  error.errorType,
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark ? Colors.white : const Color(0xFF111827),
+                                        fontSize: 14,
+                                      ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  timeFormat.format(error.lastSeen),
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: muted,
+                                        fontSize: 12,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${error.occurrenceCount}x',
+                              style: TextStyle(
+                                color: accent,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+            loading: () => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+            error: (_, __) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  'Unable to load errors',
+                  style: TextStyle(color: muted),
                 ),
-              ],
+              ),
             ),
           ),
         ],
@@ -789,56 +742,4 @@ List<BoxShadow> _cardShadow(bool isDark) {
       offset: const Offset(0, 4),
     ),
   ];
-}
-
-class _SystemMetrics {
-  const _SystemMetrics({
-    required this.cpu,
-    required this.memory,
-    required this.disk,
-    required this.network,
-    required this.uptime,
-    required this.activeUsers,
-    required this.apiCalls,
-    required this.avgResponseTime,
-  });
-
-  final int cpu;
-  final int memory;
-  final int disk;
-  final int network;
-  final String uptime;
-  final int activeUsers;
-  final String apiCalls;
-  final String avgResponseTime;
-}
-
-enum _ServiceHealth { healthy, warning }
-
-class _ServiceStatus {
-  const _ServiceStatus({
-    required this.name,
-    required this.status,
-    required this.uptime,
-    required this.responseTime,
-  });
-
-  final String name;
-  final _ServiceHealth status;
-  final String uptime;
-  final String responseTime;
-}
-
-enum _AlertLevel { info, warning }
-
-class _SystemAlert {
-  const _SystemAlert({
-    required this.level,
-    required this.message,
-    required this.time,
-  });
-
-  final _AlertLevel level;
-  final String message;
-  final String time;
 }

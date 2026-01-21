@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart' as shared;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/dashboard_provider.dart';
 import 'form_detail_page.dart';
@@ -438,7 +439,7 @@ class _CreateFormPageState extends ConsumerState<CreateFormPage> {
           .toList(),
       isPublished: initial?.isPublished ?? true,
       version: initial?.version,
-      createdBy: shouldUpdate ? initial!.createdBy : 'demo-user',
+      createdBy: shouldUpdate ? initial!.createdBy : (Supabase.instance.client.auth.currentUser?.id ?? 'unknown'),
       createdAt: shouldUpdate ? initial!.createdAt : DateTime.now(),
       updatedAt: shouldUpdate ? DateTime.now() : null,
       metadata: metadata,

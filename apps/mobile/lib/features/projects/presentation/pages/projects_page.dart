@@ -81,7 +81,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         ],
       ),
       data: (projects) {
-        final resolved = projects.isEmpty ? _demoProjects() : projects;
+        final resolved = projects;
         final models = resolved
             .map((project) => _ProjectViewModel.fromProject(project))
             .toList();
@@ -1368,116 +1368,4 @@ DateTime? _readDate(dynamic value) {
     return DateTime.tryParse(value);
   }
   return null;
-}
-
-List<Project> _demoProjects() {
-  final now = DateTime.now();
-  final items = [
-    {
-      'id': 'demo-1',
-      'name': 'Main Construction Site',
-      'location': 'Downtown',
-      'team': 12,
-      'progress': 75,
-      'status': 'active',
-      'dueDate': '2026-03-15',
-      'budget': r'$2.5M',
-      'spent': r'$1.8M',
-      'tasks': 45,
-      'completedTasks': 34,
-      'manager': 'Sarah Johnson',
-    },
-    {
-      'id': 'demo-2',
-      'name': 'Residential Complex',
-      'location': 'North District',
-      'team': 8,
-      'progress': 45,
-      'status': 'active',
-      'dueDate': '2026-06-30',
-      'budget': r'$1.8M',
-      'spent': r'$810K',
-      'tasks': 32,
-      'completedTasks': 14,
-      'manager': 'Mike Chen',
-    },
-    {
-      'id': 'demo-3',
-      'name': 'Office Building Renovation',
-      'location': 'Business Park',
-      'team': 15,
-      'progress': 90,
-      'status': 'active',
-      'dueDate': '2025-12-31',
-      'budget': r'$3.2M',
-      'spent': r'$2.9M',
-      'tasks': 56,
-      'completedTasks': 50,
-      'manager': 'Emily Davis',
-    },
-    {
-      'id': 'demo-4',
-      'name': 'Warehouse Expansion',
-      'location': 'Industrial Zone',
-      'team': 6,
-      'progress': 100,
-      'status': 'completed',
-      'dueDate': '2025-11-15',
-      'budget': r'$950K',
-      'spent': r'$920K',
-      'tasks': 28,
-      'completedTasks': 28,
-      'manager': 'Alex Martinez',
-    },
-    {
-      'id': 'demo-5',
-      'name': 'HVAC System Installation',
-      'location': 'Tech Campus',
-      'team': 10,
-      'progress': 60,
-      'status': 'active',
-      'dueDate': '2026-02-28',
-      'budget': r'$1.2M',
-      'spent': r'$720K',
-      'tasks': 38,
-      'completedTasks': 23,
-      'manager': 'Tom Brown',
-    },
-    {
-      'id': 'demo-6',
-      'name': 'Parking Structure Build',
-      'location': 'City Center',
-      'team': 14,
-      'progress': 35,
-      'status': 'active',
-      'dueDate': '2026-08-15',
-      'budget': r'$4.5M',
-      'spent': r'$1.6M',
-      'tasks': 67,
-      'completedTasks': 23,
-      'manager': 'Lisa Anderson',
-    },
-  ];
-
-  return items
-      .map(
-        (item) => Project(
-          id: item['id'] as String,
-          name: item['name'] as String,
-          status: item['status'] as String,
-          createdAt: now,
-          metadata: {
-            'location': item['location'],
-            'team': item['team'],
-            'progress': item['progress'],
-            'tasks': item['tasks'],
-            'completedTasks': item['completedTasks'],
-            'dueDate': item['dueDate'],
-            'budget': item['budget'],
-            'spent': item['spent'],
-            'manager': item['manager'],
-          },
-        ),
-      )
-      .toList();
 }

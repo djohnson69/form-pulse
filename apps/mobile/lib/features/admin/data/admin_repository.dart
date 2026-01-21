@@ -241,30 +241,66 @@ class AdminRepository {
     );
   }
 
+  Future<UserRole?> _resolveCurrentUserRole(String userId) async {
+    try {
+      final profile = await _client
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .maybeSingle();
+      final rawRole = profile?['role']?.toString();
+      if (rawRole != null && rawRole.isNotEmpty) {
+        return UserRole.fromRaw(rawRole);
+      }
+    } catch (_) {}
+    try {
+      final member = await _client
+          .from('org_members')
+          .select('role')
+          .eq('user_id', userId)
+          .maybeSingle();
+      final rawRole = member?['role']?.toString();
+      if (rawRole != null && rawRole.isNotEmpty) {
+        return UserRole.fromRaw(rawRole);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<List<AdminOrgSummary>> fetchOrganizations() async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return [];
 
-    final memberships = await _client
-        .from('org_members')
-        .select('org_id, role')
-        .eq('user_id', userId);
+    final role = await _resolveCurrentUserRole(userId);
+    final canViewAllOrgs = role?.canViewAcrossOrgs ?? false;
+    late final List<dynamic> orgRows;
+    late final List<dynamic> members;
 
-    final orgIds = memberships
-        .map((row) => row['org_id']?.toString())
-        .whereType<String>()
-        .toSet()
-        .toList();
-    if (orgIds.isEmpty) return [];
+    if (canViewAllOrgs) {
+      orgRows = await _client.from('orgs').select('id,name,created_at');
+      members = await _client.from('org_members').select('org_id, role');
+    } else {
+      final memberships = await _client
+          .from('org_members')
+          .select('org_id, role')
+          .eq('user_id', userId);
 
-    final orgRows = await _client
-        .from('orgs')
-        .select('id,name,created_at')
-        .inFilter('id', orgIds);
-    final members = await _client
-        .from('org_members')
-        .select('org_id, role')
-        .inFilter('org_id', orgIds);
+      final orgIds = memberships
+          .map((row) => row['org_id']?.toString())
+          .whereType<String>()
+          .toSet()
+          .toList();
+      if (orgIds.isEmpty) return [];
+
+      orgRows = await _client
+          .from('orgs')
+          .select('id,name,created_at')
+          .inFilter('id', orgIds);
+      members = await _client
+          .from('org_members')
+          .select('org_id, role')
+          .inFilter('org_id', orgIds);
+    }
 
     final roleCountsByOrg = <String, Map<String, int>>{};
     final memberCounts = <String, int>{};
@@ -359,6 +395,86 @@ class AdminRepository {
       }
       rethrow;
     }
+  }
+
+  // ============================================
+  // INVITATION MANAGEMENT
+  // ============================================
+
+  /// Fetch pending invitations for an organization
+  Future<List<PendingInvitation>> fetchPendingInvitations({String? orgId}) async {
+    try {
+      var query = _client
+          .from('user_invitations')
+          .select()
+          .eq('status', 'pending');
+
+      if (orgId != null) {
+        query = query.eq('org_id', orgId);
+      }
+
+      final res = await query.order('invited_at', ascending: false);
+      return (res as List)
+          .map((row) => PendingInvitation.fromJson(row as Map<String, dynamic>))
+          .toList();
+    } on PostgrestException catch (e) {
+      // Table might not exist yet
+      if (e.code == '42P01') return [];
+      rethrow;
+    }
+  }
+
+  /// Resend an invitation email
+  Future<void> resendInvitation(String invitationId) async {
+    // Get invitation details
+    final invitation = await _client
+        .from('user_invitations')
+        .select()
+        .eq('id', invitationId)
+        .single();
+
+    // Call org-invite function to resend
+    await _client.functions.invoke('org-invite', body: {
+      'email': invitation['email'],
+      'role': invitation['role'],
+      'firstName': invitation['first_name'],
+      'lastName': invitation['last_name'],
+      'resend': true,
+    });
+
+    // Update expires_at to extend the invitation
+    await _client.from('user_invitations').update({
+      'expires_at': DateTime.now().add(const Duration(days: 7)).toUtc().toIso8601String(),
+    }).eq('id', invitationId);
+  }
+
+  /// Revoke a pending invitation
+  Future<void> revokeInvitation(String invitationId) async {
+    await _client.from('user_invitations').update({
+      'status': 'revoked',
+    }).eq('id', invitationId);
+  }
+
+  /// Record a new invitation (called by org-invite function)
+  Future<void> recordInvitation({
+    required String orgId,
+    required String email,
+    required String role,
+    String? firstName,
+    String? lastName,
+    required String invitedBy,
+  }) async {
+    await _client.from('user_invitations').upsert({
+      'org_id': orgId,
+      'email': email,
+      'role': role,
+      'first_name': firstName,
+      'last_name': lastName,
+      'invited_by': invitedBy,
+      'status': 'pending',
+      'invited_at': DateTime.now().toUtc().toIso8601String(),
+      'expires_at': DateTime.now().add(const Duration(days: 7)).toUtc().toIso8601String(),
+    }, onConflict: 'org_id,email');
   }
 
   Future<List<AdminFormSummary>> fetchForms({

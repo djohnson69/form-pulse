@@ -21,6 +21,21 @@ const ALLOWED_APP_ROLES = new Set([
   "viewer",
 ]);
 
+// Platform-level roles that can only be assigned by developers
+const PLATFORM_ONLY_ROLES = new Set(["developer", "techsupport"]);
+
+// Roles that org admins (superadmin, admin) can assign
+const ORG_ASSIGNABLE_ROLES = new Set([
+  "admin",
+  "manager",
+  "supervisor",
+  "employee",
+  "maintenance",
+  "client",
+  "vendor",
+  "viewer",
+]);
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -94,6 +109,41 @@ serve(async (req) => {
   const membershipRole = membership.role?.toString() ?? "member";
   if (membershipRole !== "owner" && membershipRole !== "admin") {
     return jsonResponse({ error: "Forbidden." }, 403);
+  }
+
+  // Get caller's app role to determine what roles they can assign
+  const { data: callerProfile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", caller.id)
+    .maybeSingle();
+
+  const callerAppRole = callerProfile?.role?.toString().toLowerCase() ?? "";
+
+  // Only developers can assign platform-level roles (developer, techsupport)
+  if (callerAppRole !== "developer") {
+    if (PLATFORM_ONLY_ROLES.has(appRole)) {
+      return jsonResponse(
+        { error: "Cannot assign platform-level roles (developer, techSupport). Only developers can do this." },
+        403,
+      );
+    }
+
+    // Prevent creating additional superadmins - each org has one owner
+    if (appRole === "superadmin") {
+      return jsonResponse(
+        { error: "Cannot create additional superAdmins. Each organization has one owner." },
+        403,
+      );
+    }
+
+    // Admins (non-superadmin) cannot assign admin role
+    if (callerAppRole === "admin" && appRole === "admin") {
+      return jsonResponse(
+        { error: "Admins cannot assign the admin role. Only superAdmins can do this." },
+        403,
+      );
+    }
   }
 
   const orgId = membership.org_id?.toString();

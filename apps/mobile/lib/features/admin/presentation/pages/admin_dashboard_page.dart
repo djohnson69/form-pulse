@@ -26,7 +26,7 @@ import '../../../ops/presentation/pages/payment_requests_page.dart';
 import '../../../ops/presentation/pages/portfolio_items_page.dart';
 import '../../../ops/presentation/pages/reviews_page.dart';
 import '../../../ops/presentation/pages/signature_requests_page.dart';
-import '../../../ops/presentation/widgets/ai_chat_panel.dart';
+import '../../../ai_assistant/presentation/widgets/ai_chat_panel_v2.dart';
 import '../../../dashboard/presentation/widgets/top_bar.dart';
 import '../../../navigation/presentation/pages/audit_logs_page.dart';
 import '../../../navigation/presentation/pages/before_after_photos_page.dart';
@@ -426,7 +426,7 @@ class _AdminPermissions {
 
   bool get canViewOverview => true;
   bool get canViewOrgs => role.canAccessAdminConsole;
-  bool get canSwitchOrg => role == UserRole.superAdmin;
+  bool get canSwitchOrg => role.canViewAcrossOrgs;
   bool get canViewUsers => role.isAdmin || role == UserRole.manager || role == UserRole.supervisor;
   bool get canManageUsers => role.isAdmin;
   bool get canViewForms => role.canAccessAdminConsole;
@@ -2326,15 +2326,14 @@ class _AdminAiAssistantCard extends StatelessWidget {
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 12),
-        const AiChatPanel(
+        const AiChatPanelV2(
           suggestions: [
             'Summarize incident trends from the last week.',
             'Draft a compliance update for project managers.',
             'Create an audit checklist for site inspections.',
           ],
           placeholder: 'Ask AI about audits, compliance, or operations...',
-          initialMessage: 'Hi! Ask me about audits, submissions, or workflows.',
-          maxHeight: 220,
+          maxHeight: 280,
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -4195,24 +4194,33 @@ String _labelForAiType(String type) {
 List<UserRole> _assignableRoles(UserRole actor) {
   switch (actor) {
     case UserRole.developer:
+      // Platform role - can assign any role
       return UserRole.values;
     case UserRole.superAdmin:
-      return UserRole.values;
-    case UserRole.admin:
+      // Org owner can assign org-level roles only (not developer, techSupport, or superAdmin)
       return const [
         UserRole.admin,
         UserRole.manager,
         UserRole.supervisor,
         UserRole.employee,
         UserRole.maintenance,
-        UserRole.techSupport,
+        UserRole.client,
+        UserRole.vendor,
+        UserRole.viewer,
+      ];
+    case UserRole.admin:
+      // Admin can assign lower org roles (not admin, superAdmin, developer, techSupport)
+      return const [
+        UserRole.manager,
+        UserRole.supervisor,
+        UserRole.employee,
+        UserRole.maintenance,
         UserRole.client,
         UserRole.vendor,
         UserRole.viewer,
       ];
     case UserRole.manager:
       return const [
-        UserRole.manager,
         UserRole.supervisor,
         UserRole.employee,
         UserRole.maintenance,
@@ -4222,7 +4230,6 @@ List<UserRole> _assignableRoles(UserRole actor) {
       ];
     case UserRole.supervisor:
       return const [
-        UserRole.supervisor,
         UserRole.employee,
         UserRole.maintenance,
         UserRole.viewer,

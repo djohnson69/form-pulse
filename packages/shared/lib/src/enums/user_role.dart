@@ -67,6 +67,10 @@ enum UserRole {
       this == UserRole.admin ||
       this == UserRole.developer;
 
+  /// Check if role can view across organizations.
+  bool get canViewAcrossOrgs =>
+      this == UserRole.developer || this == UserRole.techSupport;
+
   /// Check if role has management privileges
   bool get canManage => isAdmin || this == UserRole.manager;
 
@@ -76,6 +80,37 @@ enum UserRole {
   /// Check if role can access the admin console
   bool get canAccessAdminConsole =>
       isAdmin || this == UserRole.manager || this == UserRole.supervisor;
+
+  /// Check if role is a platform-level role (cross-org capable)
+  bool get isPlatformRole =>
+      this == UserRole.developer || this == UserRole.techSupport;
+
+  /// Check if role is an org-level role (bound to a single organization)
+  bool get isOrgRole => !isPlatformRole;
+
+  /// Roles that a SuperAdmin (org owner) can assign within their organization.
+  /// Excludes platform roles (developer, techSupport) and superAdmin (only one per org).
+  static List<UserRole> get superAdminAssignableRoles => const [
+    UserRole.admin,
+    UserRole.manager,
+    UserRole.supervisor,
+    UserRole.employee,
+    UserRole.maintenance,
+    UserRole.client,
+    UserRole.vendor,
+    UserRole.viewer,
+  ];
+
+  /// Roles that an Admin can assign (excludes admin-level and above).
+  static List<UserRole> get adminAssignableRoles => const [
+    UserRole.manager,
+    UserRole.supervisor,
+    UserRole.employee,
+    UserRole.maintenance,
+    UserRole.client,
+    UserRole.vendor,
+    UserRole.viewer,
+  ];
 
   static UserRole fromRaw(String? raw) {
     if (raw == null || raw.trim().isEmpty) return UserRole.viewer;

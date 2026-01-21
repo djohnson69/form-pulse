@@ -66,7 +66,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     setState(() => _loading = true);
     try {
       final role = ref.read(activeRoleProvider);
-      final isGlobal = role == UserRole.techSupport;
+      final isGlobal = role.canViewAcrossOrgs;
       final orgId = isGlobal ? null : await _resolveOrgId();
       _orgId = orgId;
       _userName = _resolveUserName();
@@ -83,8 +83,14 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     required bool isGlobal,
   }) async {
     try {
+      // Non-global users must have an org_id to view work orders
+      if (!isGlobal && orgId == null) {
+        setState(() => _orders = const []);
+        return;
+      }
       dynamic query = _supabase.from('work_orders').select();
-      if (!isGlobal && orgId != null) {
+      // Only filter by org_id for non-global users (developers/techSupport can see all)
+      if (!isGlobal) {
         query = query.eq('org_id', orgId);
       }
       query = query
@@ -762,9 +768,7 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     String userName,
     List<String> teamMembers,
   ) {
-    if (role == UserRole.superAdmin ||
-        role == UserRole.admin ||
-        role == UserRole.techSupport) {
+    if (role.isAdmin || role == UserRole.techSupport) {
       return orders;
     }
     if (role == UserRole.manager) {
@@ -3299,10 +3303,7 @@ String? _accessLabel(UserRole role, int count) {
 }
 
 bool _canManageOrders(UserRole role) {
-  return role == UserRole.manager ||
-      role == UserRole.admin ||
-      role == UserRole.superAdmin ||
-      role == UserRole.techSupport;
+  return role.isAdmin || role == UserRole.manager || role == UserRole.techSupport;
 }
 
 // ignore: unused_element

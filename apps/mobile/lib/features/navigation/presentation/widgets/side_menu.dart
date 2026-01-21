@@ -39,6 +39,12 @@ enum SideMenuRoute {
   knowledgeBase,
   systemLogs,
   users,
+  // Platform-level routes (Developer/TechSupport)
+  activeSessions,
+  userActivity,
+  apiMetrics,
+  errorTracking,
+  impersonationLog,
 }
 
 class SideMenuItem {
@@ -79,7 +85,99 @@ List<SideMenuItem> sideMenuItemsForRole(UserRole role) {
 
   switch (role) {
     case UserRole.developer:
-      return sideMenuItemsForRole(UserRole.superAdmin);
+      return [
+        ...common,
+        const SideMenuItem(
+          route: SideMenuRoute.organization,
+          label: 'All Organizations',
+          icon: Icons.apartment_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.users,
+          label: 'All Users',
+          icon: Icons.people_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.activeSessions,
+          label: 'Active Sessions',
+          icon: Icons.people_alt_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.userActivity,
+          label: 'User Activity',
+          icon: Icons.timeline_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.impersonationLog,
+          label: 'Impersonation Log',
+          icon: Icons.history_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.systemOverview,
+          label: 'System Overview',
+          icon: Icons.monitor_heart_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.apiMetrics,
+          label: 'API Metrics',
+          icon: Icons.speed_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.errorTracking,
+          label: 'Error Tracking',
+          icon: Icons.bug_report_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.auditLogs,
+          label: 'Audit Logs',
+          icon: Icons.fact_check_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.systemLogs,
+          label: 'System Logs',
+          icon: Icons.storage_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.supportTickets,
+          label: 'Support Tickets',
+          icon: Icons.support_agent_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.forms,
+          label: 'Forms',
+          icon: Icons.description_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.projects,
+          label: 'Projects',
+          icon: Icons.work_outline,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.tasks,
+          label: 'Tasks',
+          icon: Icons.checklist_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.assets,
+          label: 'Assets',
+          icon: Icons.inventory_2_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.documents,
+          label: 'Documents',
+          icon: Icons.folder_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.rolesPermissions,
+          label: 'Roles & Permissions',
+          icon: Icons.security_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.settings,
+          label: 'Settings',
+          icon: Icons.settings_outlined,
+        ),
+      ];
     case UserRole.employee:
       return [
         ...common,
@@ -489,9 +587,9 @@ List<SideMenuItem> sideMenuItemsForRole(UserRole role) {
       return [
         ...common,
         const SideMenuItem(
-          route: SideMenuRoute.organizationChart,
-          label: 'Organization Chart',
-          icon: Icons.account_tree_outlined,
+          route: SideMenuRoute.organization,
+          label: 'All Organizations',
+          icon: Icons.apartment_outlined,
         ),
         const SideMenuItem(
           route: SideMenuRoute.supportTickets,
@@ -500,28 +598,28 @@ List<SideMenuItem> sideMenuItemsForRole(UserRole role) {
         ),
         const SideMenuItem(
           route: SideMenuRoute.users,
-          label: 'Users',
-          icon: Icons.groups_outlined,
+          label: 'All Users',
+          icon: Icons.people_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.activeSessions,
+          label: 'Active Sessions',
+          icon: Icons.people_alt_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.userActivity,
+          label: 'User Activity',
+          icon: Icons.timeline_outlined,
+        ),
+        const SideMenuItem(
+          route: SideMenuRoute.impersonationLog,
+          label: 'Impersonation Log',
+          icon: Icons.history_outlined,
         ),
         const SideMenuItem(
           route: SideMenuRoute.documents,
           label: 'Documents',
           icon: Icons.folder_outlined,
-        ),
-        const SideMenuItem(
-          route: SideMenuRoute.photos,
-          label: 'Photos & Videos',
-          icon: Icons.photo_library_outlined,
-        ),
-        const SideMenuItem(
-          route: SideMenuRoute.beforeAfter,
-          label: 'Before/After Photos',
-          icon: Icons.compare_outlined,
-        ),
-        const SideMenuItem(
-          route: SideMenuRoute.training,
-          label: 'Training',
-          icon: Icons.school_outlined,
         ),
         const SideMenuItem(
           route: SideMenuRoute.knowledgeBase,

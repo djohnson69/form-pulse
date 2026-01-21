@@ -202,3 +202,49 @@ class AdminAuditEvent {
   final DateTime createdAt;
   final Map<String, dynamic>? payload;
 }
+
+/// Represents a pending user invitation
+class PendingInvitation {
+  const PendingInvitation({
+    required this.id,
+    required this.orgId,
+    required this.email,
+    required this.role,
+    required this.invitedAt,
+    required this.status,
+    this.firstName,
+    this.lastName,
+    this.invitedBy,
+    this.expiresAt,
+  });
+
+  final String id;
+  final String orgId;
+  final String email;
+  final String role;
+  final DateTime invitedAt;
+  final String status;
+  final String? firstName;
+  final String? lastName;
+  final String? invitedBy;
+  final DateTime? expiresAt;
+
+  bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
+
+  factory PendingInvitation.fromJson(Map<String, dynamic> json) {
+    return PendingInvitation(
+      id: json['id'] as String,
+      orgId: json['org_id'] as String,
+      email: json['email'] as String,
+      role: json['role'] as String,
+      invitedAt: DateTime.parse(json['invited_at'] as String),
+      status: json['status'] as String,
+      firstName: json['first_name'] as String?,
+      lastName: json['last_name'] as String?,
+      invitedBy: json['invited_by'] as String?,
+      expiresAt: json['expires_at'] != null
+          ? DateTime.parse(json['expires_at'] as String)
+          : null,
+    );
+  }
+}

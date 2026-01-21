@@ -60,9 +60,9 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
 
   @override
   Future<List<Task>> fetchTasks({UserRole? role}) async {
-    // Only tech support can see across orgs; all other roles (including superAdmin)
+    // Only developer and tech support can see across orgs; all other roles
     // are scoped to their organization.
-    final isGlobalView = role == UserRole.techSupport;
+    final isGlobalView = role?.canViewAcrossOrgs ?? false;
     final orgId = await _getOrgId();
     if (!isGlobalView && orgId == null) return const [];
     try {
