@@ -87,7 +87,7 @@ Widget _developerPageForRoute(
     SideMenuRoute.companyNews => const NewsPostsPage(),
     SideMenuRoute.organizationChart => OrganizationChartPage(role: UserRole.developer),
     SideMenuRoute.systemOverview => const SystemOverviewPage(),
-    SideMenuRoute.users => const UserDirectoryPage(),
+    SideMenuRoute.users => const UserDirectoryPage(role: UserRole.developer),
     SideMenuRoute.rolesPermissions => const RolesPermissionsPage(),
     SideMenuRoute.projects => const ProjectsPage(),
     SideMenuRoute.tasks => const TasksPage(),

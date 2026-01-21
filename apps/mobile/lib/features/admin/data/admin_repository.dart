@@ -328,6 +328,160 @@ class AdminRepository {
       ..sort((a, b) => a.name.compareTo(b.name));
   }
 
+  /// Fetch full organization details by ID
+  Future<AdminOrgDetail?> fetchOrganizationDetail(String orgId) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return null;
+
+    final role = await _resolveCurrentUserRole(userId);
+    final canViewAllOrgs = role?.canViewAcrossOrgs ?? false;
+    if (!canViewAllOrgs) return null;
+
+    final res = await _client
+        .from('orgs')
+        .select()
+        .eq('id', orgId)
+        .maybeSingle();
+
+    if (res == null) return null;
+
+    // Get member count
+    final members = await _client
+        .from('org_members')
+        .select('id')
+        .eq('org_id', orgId);
+    final memberCount = (members as List).length;
+
+    return AdminOrgDetail(
+      id: res['id'] as String,
+      name: res['name'] as String? ?? '',
+      displayName: res['display_name'] as String?,
+      industry: res['industry'] as String?,
+      companySize: res['company_size'] as String?,
+      website: res['website'] as String?,
+      phone: res['phone'] as String?,
+      addressLine1: res['address_line1'] as String?,
+      addressLine2: res['address_line2'] as String?,
+      city: res['city'] as String?,
+      state: res['state'] as String?,
+      postalCode: res['postal_code'] as String?,
+      country: res['country'] as String?,
+      taxId: res['tax_id'] as String?,
+      isActive: res['is_active'] as bool? ?? true,
+      createdAt: DateTime.tryParse(res['created_at']?.toString() ?? '') ?? DateTime.now(),
+      updatedAt: DateTime.tryParse(res['updated_at']?.toString() ?? '') ?? DateTime.now(),
+      memberCount: memberCount,
+    );
+  }
+
+  /// Create a new organization (platform roles only)
+  Future<AdminOrgDetail> createOrganization({
+    required String name,
+    String? displayName,
+    String? industry,
+    String? companySize,
+    String? website,
+    String? phone,
+    String? addressLine1,
+    String? addressLine2,
+    String? city,
+    String? state,
+    String? postalCode,
+    String? country,
+    String? taxId,
+  }) async {
+    final res = await _client.functions.invoke(
+      'org-manage',
+      body: {
+        'action': 'create',
+        'name': name,
+        if (displayName != null) 'displayName': displayName,
+        if (industry != null) 'industry': industry,
+        if (companySize != null) 'companySize': companySize,
+        if (website != null) 'website': website,
+        if (phone != null) 'phone': phone,
+        if (addressLine1 != null) 'addressLine1': addressLine1,
+        if (addressLine2 != null) 'addressLine2': addressLine2,
+        if (city != null) 'city': city,
+        if (state != null) 'state': state,
+        if (postalCode != null) 'postalCode': postalCode,
+        if (country != null) 'country': country,
+        if (taxId != null) 'taxId': taxId,
+      },
+    );
+
+    final data = res.data as Map<String, dynamic>?;
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error']?.toString() ?? 'Failed to create organization');
+    }
+
+    return AdminOrgDetail.fromEdgeResponse(data['org'] as Map<String, dynamic>);
+  }
+
+  /// Update an existing organization (platform roles only)
+  Future<AdminOrgDetail> updateOrganization({
+    required String orgId,
+    String? name,
+    String? displayName,
+    String? industry,
+    String? companySize,
+    String? website,
+    String? phone,
+    String? addressLine1,
+    String? addressLine2,
+    String? city,
+    String? state,
+    String? postalCode,
+    String? country,
+    String? taxId,
+    bool? isActive,
+  }) async {
+    final res = await _client.functions.invoke(
+      'org-manage',
+      body: {
+        'action': 'update',
+        'orgId': orgId,
+        if (name != null) 'name': name,
+        if (displayName != null) 'displayName': displayName,
+        if (industry != null) 'industry': industry,
+        if (companySize != null) 'companySize': companySize,
+        if (website != null) 'website': website,
+        if (phone != null) 'phone': phone,
+        if (addressLine1 != null) 'addressLine1': addressLine1,
+        if (addressLine2 != null) 'addressLine2': addressLine2,
+        if (city != null) 'city': city,
+        if (state != null) 'state': state,
+        if (postalCode != null) 'postalCode': postalCode,
+        if (country != null) 'country': country,
+        if (taxId != null) 'taxId': taxId,
+        if (isActive != null) 'isActive': isActive,
+      },
+    );
+
+    final data = res.data as Map<String, dynamic>?;
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error']?.toString() ?? 'Failed to update organization');
+    }
+
+    return AdminOrgDetail.fromEdgeResponse(data['org'] as Map<String, dynamic>);
+  }
+
+  /// Soft-delete (deactivate) an organization (platform roles only)
+  Future<void> deleteOrganization(String orgId) async {
+    final res = await _client.functions.invoke(
+      'org-manage',
+      body: {
+        'action': 'delete',
+        'orgId': orgId,
+      },
+    );
+
+    final data = res.data as Map<String, dynamic>?;
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error']?.toString() ?? 'Failed to delete organization');
+    }
+  }
+
   Future<List<AdminUserSummary>> fetchUsers({
     String? orgId,
     String? search,

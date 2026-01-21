@@ -12,7 +12,10 @@ import '../../../admin/data/admin_providers.dart';
 import '../../../dashboard/data/active_role_provider.dart';
 
 class UserDirectoryPage extends ConsumerStatefulWidget {
-  const UserDirectoryPage({super.key});
+  const UserDirectoryPage({super.key, this.role});
+
+  /// The role to use for permission checks. If null, falls back to activeRoleProvider.
+  final UserRole? role;
 
   @override
   ConsumerState<UserDirectoryPage> createState() => _UserDirectoryPageState();
@@ -202,7 +205,8 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
   }
 
   Future<void> _openAddUserDialog(_UserDirectoryColors colors) async {
-    final currentRole = ref.read(activeRoleProvider);
+    final UserRole currentRole = widget.role ?? ref.read(activeRoleProvider);
+    debugPrint('_openAddUserDialog: currentRole=$currentRole, canViewAcrossOrgs=${currentRole.canViewAcrossOrgs}, widgetRole=${widget.role}');
 
     // For platform roles (developer, techSupport), ensure organizations are loaded
     List<AdminOrgSummary> orgs = [];

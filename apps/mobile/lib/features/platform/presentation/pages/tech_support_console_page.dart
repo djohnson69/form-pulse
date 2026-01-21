@@ -66,7 +66,7 @@ Widget _techSupportPageForRoute(
     SideMenuRoute.companyNews => const NewsPostsPage(),
     SideMenuRoute.organization => const AllOrganizationsPage(),
     SideMenuRoute.supportTickets => const SupportTicketsPage(),
-    SideMenuRoute.users => const UserDirectoryPage(),
+    SideMenuRoute.users => const UserDirectoryPage(role: UserRole.techSupport),
     SideMenuRoute.documents => const DocumentsPage(),
     SideMenuRoute.knowledgeBase => const SopLibraryPage(),
     SideMenuRoute.systemLogs => const SystemLogsPage(),

@@ -106,6 +106,150 @@ class AdminOrgSummary {
   final Map<String, int> roleCounts;
 }
 
+/// Full organization details for platform role management
+class AdminOrgDetail {
+  const AdminOrgDetail({
+    required this.id,
+    required this.name,
+    this.displayName,
+    this.industry,
+    this.companySize,
+    this.website,
+    this.phone,
+    this.addressLine1,
+    this.addressLine2,
+    this.city,
+    this.state,
+    this.postalCode,
+    this.country,
+    this.taxId,
+    required this.isActive,
+    required this.createdAt,
+    required this.updatedAt,
+    this.memberCount = 0,
+  });
+
+  final String id;
+  final String name;
+  final String? displayName;
+  final String? industry;
+  final String? companySize;
+  final String? website;
+  final String? phone;
+  final String? addressLine1;
+  final String? addressLine2;
+  final String? city;
+  final String? state;
+  final String? postalCode;
+  final String? country;
+  final String? taxId;
+  final bool isActive;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final int memberCount;
+
+  /// Create from Supabase row
+  factory AdminOrgDetail.fromJson(Map<String, dynamic> json) {
+    return AdminOrgDetail(
+      id: json['id'] as String,
+      name: json['name'] as String? ?? '',
+      displayName: json['display_name'] as String?,
+      industry: json['industry'] as String?,
+      companySize: json['company_size'] as String?,
+      website: json['website'] as String?,
+      phone: json['phone'] as String?,
+      addressLine1: json['address_line1'] as String?,
+      addressLine2: json['address_line2'] as String?,
+      city: json['city'] as String?,
+      state: json['state'] as String?,
+      postalCode: json['postal_code'] as String?,
+      country: json['country'] as String?,
+      taxId: json['tax_id'] as String?,
+      isActive: json['is_active'] as bool? ?? true,
+      createdAt: DateTime.parse(json['created_at'] as String? ?? DateTime.now().toIso8601String()),
+      updatedAt: DateTime.parse(json['updated_at'] as String? ?? DateTime.now().toIso8601String()),
+      memberCount: json['member_count'] as int? ?? 0,
+    );
+  }
+
+  /// Create from edge function response
+  factory AdminOrgDetail.fromEdgeResponse(Map<String, dynamic> json) {
+    return AdminOrgDetail(
+      id: json['id'] as String,
+      name: json['name'] as String? ?? '',
+      displayName: json['displayName'] as String?,
+      industry: json['industry'] as String?,
+      companySize: json['companySize'] as String?,
+      website: json['website'] as String?,
+      phone: json['phone'] as String?,
+      addressLine1: json['addressLine1'] as String?,
+      addressLine2: json['addressLine2'] as String?,
+      city: json['city'] as String?,
+      state: json['state'] as String?,
+      postalCode: json['postalCode'] as String?,
+      country: json['country'] as String?,
+      taxId: json['taxId'] as String?,
+      isActive: json['isActive'] as bool? ?? true,
+      createdAt: DateTime.parse(json['createdAt'] as String? ?? DateTime.now().toIso8601String()),
+      updatedAt: DateTime.parse(json['updatedAt'] as String? ?? DateTime.now().toIso8601String()),
+    );
+  }
+
+  /// Get formatted address string
+  String get formattedAddress {
+    final parts = <String>[];
+    if (addressLine1?.isNotEmpty ?? false) parts.add(addressLine1!);
+    if (addressLine2?.isNotEmpty ?? false) parts.add(addressLine2!);
+    final cityStateZip = [
+      city,
+      state,
+      postalCode,
+    ].where((s) => s?.isNotEmpty ?? false).join(', ');
+    if (cityStateZip.isNotEmpty) parts.add(cityStateZip);
+    if (country?.isNotEmpty ?? false) parts.add(country!);
+    return parts.join('\n');
+  }
+
+  /// Copy with modified fields
+  AdminOrgDetail copyWith({
+    String? name,
+    String? displayName,
+    String? industry,
+    String? companySize,
+    String? website,
+    String? phone,
+    String? addressLine1,
+    String? addressLine2,
+    String? city,
+    String? state,
+    String? postalCode,
+    String? country,
+    String? taxId,
+    bool? isActive,
+  }) {
+    return AdminOrgDetail(
+      id: id,
+      name: name ?? this.name,
+      displayName: displayName ?? this.displayName,
+      industry: industry ?? this.industry,
+      companySize: companySize ?? this.companySize,
+      website: website ?? this.website,
+      phone: phone ?? this.phone,
+      addressLine1: addressLine1 ?? this.addressLine1,
+      addressLine2: addressLine2 ?? this.addressLine2,
+      city: city ?? this.city,
+      state: state ?? this.state,
+      postalCode: postalCode ?? this.postalCode,
+      country: country ?? this.country,
+      taxId: taxId ?? this.taxId,
+      isActive: isActive ?? this.isActive,
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+      memberCount: memberCount,
+    );
+  }
+}
+
 class AdminUserSummary {
   const AdminUserSummary({
     required this.id,
