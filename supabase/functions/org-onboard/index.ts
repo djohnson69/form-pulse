@@ -116,6 +116,9 @@ const TEMPLATE_FORMS = [
   },
 ];
 
+// Default trial period in days
+const TRIAL_DAYS = 14;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -158,6 +161,43 @@ serve(async (req) => {
     return jsonResponse({ error: "orgName is required." }, 400);
   }
 
+  // Enhanced organization fields
+  const displayName = payload.displayName?.toString().trim() ?? null;
+  const industry = payload.industry?.toString().trim() ?? null;
+  const companySize = payload.companySize?.toString().trim() ?? null;
+  const website = payload.website?.toString().trim() ?? null;
+  const phone = payload.phone?.toString().trim() ?? null;
+  const addressLine1 = payload.addressLine1?.toString().trim() ?? null;
+  const addressLine2 = payload.addressLine2?.toString().trim() ?? null;
+  const city = payload.city?.toString().trim() ?? null;
+  const state = payload.state?.toString().trim() ?? null;
+  const postalCode = payload.postalCode?.toString().trim() ?? null;
+  const country = payload.country?.toString().trim() ?? "US";
+  const taxId = payload.taxId?.toString().trim() ?? null;
+
+  // Subscription fields
+  const planName = payload.planName?.toString().trim() ?? "pro";
+  const billingCycle = payload.billingCycle?.toString().trim() ?? "monthly";
+
+  // Billing info fields
+  const billingEmail = payload.billingEmail?.toString().trim() ?? null;
+  const billingName = payload.billingName?.toString().trim() ?? null;
+  const billingAddressLine1 = payload.billingAddressLine1?.toString().trim() ?? null;
+  const billingAddressLine2 = payload.billingAddressLine2?.toString().trim() ?? null;
+  const billingCity = payload.billingCity?.toString().trim() ?? null;
+  const billingState = payload.billingState?.toString().trim() ?? null;
+  const billingPostalCode = payload.billingPostalCode?.toString().trim() ?? null;
+  const billingCountry = payload.billingCountry?.toString().trim() ?? "US";
+  const billingTaxId = payload.billingTaxId?.toString().trim() ?? null;
+  const poRequired = payload.poRequired === true;
+
+  // Stripe payment info (from signup flow)
+  const stripeCustomerId = payload.stripeCustomerId?.toString().trim() ?? null;
+  const stripePaymentMethodId = payload.stripePaymentMethodId?.toString().trim() ?? null;
+
+  // Team invites
+  const teamInvites = Array.isArray(payload.teamInvites) ? payload.teamInvites : [];
+
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
@@ -170,6 +210,7 @@ serve(async (req) => {
     return jsonResponse({ error: "Unauthorized." }, 401);
   }
 
+  // Check if user already has an org
   const { data: existingMembership } = await supabase
     .from("org_members")
     .select("org_id, role")
@@ -184,15 +225,40 @@ serve(async (req) => {
     });
   }
 
+  const now = new Date().toISOString();
+
+  // Create organization with enhanced fields
+  const orgPayload: Record<string, unknown> = {
+    name: orgName,
+    display_name: displayName,
+    industry,
+    company_size: companySize,
+    website,
+    phone,
+    address_line1: addressLine1,
+    address_line2: addressLine2,
+    city,
+    state,
+    postal_code: postalCode,
+    country,
+    tax_id: taxId,
+    onboarding_completed: true,
+    onboarding_step: 6, // All steps completed
+    settings: {},
+    metadata: {},
+    updated_at: now,
+  };
+
   const { data: org, error: orgError } = await supabase
     .from("orgs")
-    .insert({ name: orgName })
+    .insert(orgPayload)
     .select("id,name,created_at")
     .single();
   if (orgError || !org) {
     return jsonResponse({ error: orgError?.message ?? "Org create failed." }, 500);
   }
 
+  // Create membership for the org creator as owner
   const membershipInsert = await supabase.from("org_members").insert({
     org_id: org.id,
     user_id: user.id,
@@ -202,6 +268,7 @@ serve(async (req) => {
     return jsonResponse({ error: membershipInsert.error.message }, 500);
   }
 
+  // Create profile for the user
   const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
   const firstName = meta.firstName?.toString().trim() ??
     meta.first_name?.toString().trim() ??
@@ -209,16 +276,15 @@ serve(async (req) => {
   const lastName = meta.lastName?.toString().trim() ??
     meta.last_name?.toString().trim() ??
     "";
-  const phone = meta.phone?.toString().trim() ?? "";
+  const userPhone = meta.phone?.toString().trim() ?? "";
 
-  const now = new Date().toISOString();
   const profilePayload: Record<string, unknown> = {
     id: user.id,
     org_id: org.id,
     email: user.email,
     first_name: firstName || null,
     last_name: lastName || null,
-    phone: phone || null,
+    phone: userPhone || null,
     role: "superadmin",
     updated_at: now,
   };
@@ -231,6 +297,66 @@ serve(async (req) => {
     return jsonResponse({ error: profileUpsert.error.message }, 500);
   }
 
+  // Get the selected plan
+  const { data: plan, error: planError } = await supabase
+    .from("subscription_plans")
+    .select("*")
+    .eq("name", planName)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  // Create subscription with trial
+  const trialStart = new Date();
+  const trialEnd = new Date(trialStart.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+
+  const subscriptionPayload: Record<string, unknown> = {
+    org_id: org.id,
+    plan_id: plan?.id ?? null,
+    status: "trialing",
+    billing_cycle: billingCycle,
+    trial_start: trialStart.toISOString(),
+    trial_end: trialEnd.toISOString(),
+    current_period_start: trialStart.toISOString(),
+    current_period_end: trialEnd.toISOString(),
+    created_at: now,
+    updated_at: now,
+  };
+
+  const subscriptionInsert = await supabase.from("subscriptions").insert(subscriptionPayload);
+  if (subscriptionInsert.error) {
+    console.error("Subscription insert error:", subscriptionInsert.error);
+    // Non-fatal - continue without subscription if table doesn't exist
+  }
+
+  // Create billing info if email provided
+  if (billingEmail) {
+    const billingInfoPayload: Record<string, unknown> = {
+      org_id: org.id,
+      billing_email: billingEmail,
+      billing_name: billingName ?? orgName,
+      address_line1: billingAddressLine1 ?? addressLine1,
+      address_line2: billingAddressLine2 ?? addressLine2,
+      city: billingCity ?? city,
+      state: billingState ?? state,
+      postal_code: billingPostalCode ?? postalCode,
+      country: billingCountry,
+      tax_id: billingTaxId ?? taxId,
+      po_required: poRequired,
+      // Stripe payment method info (collected during signup)
+      stripe_customer_id: stripeCustomerId,
+      stripe_payment_method_id: stripePaymentMethodId,
+      created_at: now,
+      updated_at: now,
+    };
+
+    const billingInfoInsert = await supabase.from("billing_info").insert(billingInfoPayload);
+    if (billingInfoInsert.error) {
+      console.error("Billing info insert error:", billingInfoInsert.error);
+      // Non-fatal - continue without billing info if table doesn't exist
+    }
+  }
+
+  // Create template forms
   const formRows = TEMPLATE_FORMS.map((form) => ({
     id: `${org.id}-${form.idSuffix}`,
     org_id: org.id,
@@ -252,6 +378,75 @@ serve(async (req) => {
     return jsonResponse({ error: formsInsert.error.message }, 500);
   }
 
+  // Process team invitations
+  const invitationResults: Array<{ email: string; success: boolean; error?: string }> = [];
+
+  for (const invite of teamInvites) {
+    const email = invite.email?.toString().trim();
+    const role = invite.role?.toString().trim() ?? "employee";
+
+    if (!email || !email.includes("@")) continue;
+
+    try {
+      // Invite user via Supabase Auth
+      const inviteRes = await supabase.auth.admin.inviteUserByEmail(email, {
+        data: {
+          org_id: org.id,
+          role,
+        },
+      });
+
+      if (inviteRes.error) {
+        invitationResults.push({ email, success: false, error: inviteRes.error.message });
+        continue;
+      }
+
+      const invitedUserId = inviteRes.data?.user?.id;
+      if (!invitedUserId) {
+        invitationResults.push({ email, success: false, error: "No user ID returned" });
+        continue;
+      }
+
+      // Create org membership for invited user
+      const memberRole = role === "admin" ? "admin" : "member";
+      await supabase.from("org_members").upsert(
+        {
+          org_id: org.id,
+          user_id: invitedUserId,
+          role: memberRole,
+        },
+        { onConflict: "org_id,user_id" },
+      );
+
+      // Create profile for invited user
+      await supabase.from("profiles").upsert(
+        {
+          id: invitedUserId,
+          org_id: org.id,
+          email,
+          role,
+          updated_at: now,
+        },
+        { onConflict: "id" },
+      );
+
+      // Record invitation
+      await supabase.from("user_invitations").insert({
+        org_id: org.id,
+        email,
+        role,
+        invited_by: user.id,
+        invited_at: now,
+        status: "pending",
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+
+      invitationResults.push({ email, success: true });
+    } catch (err) {
+      invitationResults.push({ email, success: false, error: String(err) });
+    }
+  }
+
   return jsonResponse({
     ok: true,
     org: {
@@ -259,7 +454,13 @@ serve(async (req) => {
       name: org.name,
       createdAt: org.created_at,
     },
+    subscription: {
+      status: "trialing",
+      plan: planName,
+      trialEnd: trialEnd.toISOString(),
+    },
     seededForms: formRows.length,
+    invitations: invitationResults,
   });
 });
 
@@ -272,4 +473,3 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
     },
   });
 }
-
