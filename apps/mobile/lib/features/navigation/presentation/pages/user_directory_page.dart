@@ -1756,7 +1756,7 @@ class _AddUserDialogState extends State<_AddUserDialog> {
                           value: _role,
                           decoration: _inputDecoration(colors, hintText: ''),
                           items: [
-                            for (final role in _roleOptions)
+                            for (final role in _getAssignableRolesForUser(widget.currentUserRole))
                               DropdownMenuItem(value: role, child: Text(role)),
                           ],
                           onChanged: (value) {
@@ -2392,15 +2392,44 @@ class _UserEntry {
   final int certifications;
 }
 
+/// Platform-level roles that can only be assigned by platform roles (Developer, Tech Support)
+const List<String> _platformRoleOptions = [
+  'Developer',
+  'Tech Support',
+];
+
+/// Organization-level roles that can be assigned by any admin
+const List<String> _orgRoleOptions = [
+  'Super Admin',
+  'Admin',
+  'Manager',
+  'Supervisor',
+  'Employee',
+  'Maintenance',
+];
+
+/// All roles for display and filtering purposes
 const List<String> _roleOptions = [
   'Super Admin',
   'Admin',
   'Manager',
   'Supervisor',
   'Employee',
+  'Developer',
   'Tech Support',
   'Maintenance',
 ];
+
+/// Returns the appropriate role options based on whether the current user is a platform role
+/// Used specifically for the Add User dialog role assignment
+List<String> _getAssignableRolesForUser(UserRole currentUserRole) {
+  if (currentUserRole.canViewAcrossOrgs) {
+    // Platform roles can assign all roles including other platform roles
+    return [..._orgRoleOptions, ..._platformRoleOptions];
+  }
+  // Non-platform roles can only assign org-level roles
+  return _orgRoleOptions;
+}
 
 _UserEntry _mapAdminUser(AdminUserSummary user) {
   final roleLabel = _roleLabel(user.role);

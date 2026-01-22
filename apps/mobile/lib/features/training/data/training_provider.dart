@@ -14,6 +14,13 @@ final employeesProvider = FutureProvider.autoDispose<List<Employee>>((ref) async
   return repo.fetchEmployees();
 });
 
+/// Role-aware employee provider for messaging - platform roles see all employees
+final employeesForRoleProvider =
+    FutureProvider.autoDispose.family<List<Employee>, UserRole?>((ref, role) async {
+  final repo = ref.read(trainingRepositoryProvider);
+  return repo.fetchEmployees(role: role);
+});
+
 final currentEmployeeIdProvider =
     FutureProvider.autoDispose<String?>((ref) async {
   final client = ref.read(supabaseClientProvider);

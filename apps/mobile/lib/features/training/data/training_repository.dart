@@ -5,7 +5,7 @@ import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 abstract class TrainingRepositoryBase {
-  Future<List<Employee>> fetchEmployees();
+  Future<List<Employee>> fetchEmployees({UserRole? role});
   Future<Employee> createEmployee({
     required String firstName,
     required String lastName,
@@ -91,15 +91,23 @@ class SupabaseTrainingRepository implements TrainingRepositoryBase {
   final SupabaseClient _client;
 
   @override
-  Future<List<Employee>> fetchEmployees() async {
+  Future<List<Employee>> fetchEmployees({UserRole? role}) async {
+    // Platform roles (Developer, Tech Support) can see all employees across orgs
+    final isGlobalView = role?.canViewAcrossOrgs ?? false;
     final orgId = await _getOrgId();
-    if (orgId == null) return const [];
+
+    // Non-platform roles need an org; platform roles can proceed without one
+    if (!isGlobalView && orgId == null) return const [];
+
     try {
-      final res = await _client
-          .from('employees')
-          .select()
-          .eq('org_id', orgId)
-          .order('last_name', ascending: true);
+      dynamic query = _client.from('employees').select();
+
+      // Only filter by org for non-platform roles
+      if (!isGlobalView && orgId != null) {
+        query = query.eq('org_id', orgId);
+      }
+
+      final res = await query.order('last_name', ascending: true);
       return (res as List<dynamic>)
           .map((row) => _mapEmployee(Map<String, dynamic>.from(row as Map)))
           .toList();

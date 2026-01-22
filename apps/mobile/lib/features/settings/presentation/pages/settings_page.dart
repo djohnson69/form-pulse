@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/theme_mode_provider.dart';
 import '../../../dashboard/data/active_role_provider.dart';
+import '../../../dashboard/data/dashboard_provider.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -376,6 +377,44 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 24),
+                  _SettingsCard(
+                    background: colors.cardBackground,
+                    border: colors.border,
+                    icon: Icons.logout,
+                    iconColor: colors.dangerText,
+                    title: 'Account',
+                    titleColor: colors.title,
+                    padding: cardPadding,
+                    shadowColor: colors.cardShadow,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: colors.dangerText,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 4,
+                              shadowColor: colors.dangerText.withValues(alpha: 0.3),
+                              textStyle: buttonTextStyle,
+                            ),
+                            onPressed: () => _confirmSignOut(context, ref),
+                            icon: const Icon(Icons.logout, size: 18),
+                            label: const Text('Sign Out'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -387,6 +426,40 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign Out'),
+        content: const Text('Are you sure you want to sign out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        final client = ref.read(supabaseClientProvider);
+        await client.auth.signOut();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error signing out: $e')),
+          );
+        }
+      }
+    }
   }
 
   InputDecoration _inputDecoration(_SettingsColors colors) {

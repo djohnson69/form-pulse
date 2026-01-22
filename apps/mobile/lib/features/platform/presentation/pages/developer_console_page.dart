@@ -473,66 +473,91 @@ class _SystemHealthSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isDark
-              ? [const Color(0xFF064E3B).withValues(alpha: 0.4), const Color(0xFF065F46).withValues(alpha: 0.4)]
-              : const [Color(0xFFF0FDF4), Color(0xFFDCFCE7)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? const Color(0xFF047857) : const Color(0xFFBBF7D0),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? const Color(0xFF10B981).withValues(alpha: 0.2)
-                  : const Color(0xFF10B981).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 500;
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isDark
+                  ? [const Color(0xFF064E3B).withValues(alpha: 0.4), const Color(0xFF065F46).withValues(alpha: 0.4)]
+                  : const [Color(0xFFF0FDF4), Color(0xFFDCFCE7)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-            child: Icon(
-              Icons.check_circle,
-              color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
-              size: 28,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? const Color(0xFF047857) : const Color(0xFFBBF7D0),
             ),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'System Status: Operational',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                          : const Color(0xFF10B981).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.check_circle,
+                      color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
+                      size: 28,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'All services running normally • Last check: ${DateFormat('h:mm a').format(DateTime.now())}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF047857),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'System Status: Operational',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'All services running normally • Last check: ${DateFormat('h:mm a').format(DateTime.now())}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF047857),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  if (!isCompact) ...[
+                    _HealthIndicator(label: 'API', status: 'ok', isDark: isDark),
+                    const SizedBox(width: 12),
+                    _HealthIndicator(label: 'DB', status: 'ok', isDark: isDark),
+                    const SizedBox(width: 12),
+                    _HealthIndicator(label: 'Storage', status: 'ok', isDark: isDark),
+                  ],
+                ],
+              ),
+              if (isCompact) ...[
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    _HealthIndicator(label: 'API', status: 'ok', isDark: isDark),
+                    const SizedBox(width: 12),
+                    _HealthIndicator(label: 'DB', status: 'ok', isDark: isDark),
+                    const SizedBox(width: 12),
+                    _HealthIndicator(label: 'Storage', status: 'ok', isDark: isDark),
+                  ],
                 ),
               ],
-            ),
+            ],
           ),
-          _HealthIndicator(label: 'API', status: 'ok', isDark: isDark),
-          const SizedBox(width: 12),
-          _HealthIndicator(label: 'DB', status: 'ok', isDark: isDark),
-          const SizedBox(width: 12),
-          _HealthIndicator(label: 'Storage', status: 'ok', isDark: isDark),
-        ],
-      ),
+        );
+      },
     );
   }
 }

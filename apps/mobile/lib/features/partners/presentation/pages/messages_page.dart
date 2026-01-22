@@ -15,6 +15,7 @@ import '../../data/partners_provider.dart';
 import '../../data/partners_repository.dart';
 import '../../data/message_models.dart';
 import '../../../training/data/training_provider.dart';
+import '../../../dashboard/data/active_role_provider.dart';
 import '../../../../core/utils/storage_utils.dart';
 
 class MessagesPage extends ConsumerStatefulWidget {
@@ -825,7 +826,9 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
               builder: (context, ref, _) {
                 final participantsAsync =
                     ref.watch(threadParticipantsProvider(threadId));
-                final employeesAsync = ref.watch(employeesProvider);
+                // Use role-aware provider so platform roles can add any employee
+                final currentRole = ref.watch(activeRoleProvider);
+                final employeesAsync = ref.watch(employeesForRoleProvider(currentRole));
                 return SafeArea(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -1522,7 +1525,9 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
               builder: (context, ref, _) {
                 final vendorsAsync = ref.watch(vendorsProvider);
                 final vendors = vendorsAsync.asData?.value ?? const <Vendor>[];
-                final employeesAsync = ref.watch(employeesProvider);
+                // Use role-aware provider so platform roles can see all employees
+                final currentRole = ref.watch(activeRoleProvider);
+                final employeesAsync = ref.watch(employeesForRoleProvider(currentRole));
                 final employees = employeesAsync.asData?.value ?? const <Employee>[];
                 final currentUserId =
                     Supabase.instance.client.auth.currentUser?.id;
