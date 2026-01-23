@@ -373,8 +373,9 @@ class _ProjectDetailPageState extends ConsumerState<ProjectDetailPage> {
     final tags = <String>{};
 
     for (final update in updates) {
-      if (update.parentId != null && update.parentId!.isNotEmpty) {
-        comments.putIfAbsent(update.parentId!, () => []).add(update);
+      final parentId = update.parentId;
+      if (parentId != null && parentId.isNotEmpty) {
+        comments.putIfAbsent(parentId, () => []).add(update);
       } else {
         mainUpdates.add(update);
         tags.addAll(update.tags);

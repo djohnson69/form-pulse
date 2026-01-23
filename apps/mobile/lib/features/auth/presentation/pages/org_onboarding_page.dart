@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -71,7 +73,10 @@ class _OrgOnboardingPageState extends State<OrgOnboardingPage> {
   Future<void> _signOut() async {
     try {
       await Supabase.instance.client.auth.signOut();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('OrgOnboardingPage sign out failed',
+          error: e, stackTrace: st, name: 'OrgOnboardingPage._signOut');
+    }
   }
 
   @override

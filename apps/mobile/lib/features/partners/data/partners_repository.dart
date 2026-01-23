@@ -774,7 +774,9 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
       if (metadata is Map && metadata['muted'] == true) {
         return true;
       }
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('Failed to check thread muted status', error: e, stackTrace: st);
+    }
     return false;
   }
 
@@ -1039,7 +1041,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           })
           .eq('thread_id', threadId)
           .eq('user_id', userId);
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('markDelivered failed for thread $threadId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
   }
 
   @override
@@ -1056,7 +1061,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           })
           .eq('thread_id', threadId)
           .eq('user_id', userId);
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('markThreadRead failed for thread $threadId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
   }
 
   @override
@@ -1073,7 +1081,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           })
           .eq('user_id', userId)
           .eq('is_active', true);
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('markAllThreadsRead failed',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
   }
 
   @override
@@ -1092,7 +1103,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
         'is_typing': isTyping,
         'updated_at': DateTime.now().toIso8601String(),
       }, onConflict: 'thread_id,user_id');
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('updateTypingStatus failed for thread $threadId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
   }
 
   @override
@@ -1282,7 +1296,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
     }
     try {
       await _client.from('message_participants').insert(participants);
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('Failed to insert message participants for thread ${thread.id}',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
   }
 
   MessageParticipantEntry _mapParticipant(Map<String, dynamic> row) {
@@ -1331,7 +1348,9 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           .map((row) => row['message_id']?.toString())
           .whereType<String>()
           .toSet();
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_fetchDeletedMessageIds failed for thread $threadId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
       return <String>{};
     }
   }
@@ -1354,7 +1373,9 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
         'body': preview,
         'attachments': attachmentCount,
       };
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_buildReplyPreview failed for message $messageId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
       return null;
     }
   }
@@ -1376,7 +1397,9 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
         }
       }
       return mentions.toList();
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_extractMentions failed for thread $threadId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
       return const [];
     }
   }
@@ -1473,7 +1496,9 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
         }
       }
       return profiles;
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_profilesById failed for ${userIds.length} users',
+          error: e, stackTrace: st, name: 'PartnersRepository');
       return {};
     }
   }
@@ -1509,7 +1534,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           role: res['role']?.toString(),
         );
       }
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_currentSender profile lookup failed',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
     return _SenderInfo(name: user.email ?? 'User', role: null);
   }
 
@@ -1521,7 +1549,9 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           .eq('id', clientId)
           .maybeSingle();
       return res?['company_name']?.toString();
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_clientName failed for client $clientId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
       return null;
     }
   }
@@ -1534,7 +1564,9 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           .eq('id', vendorId)
           .maybeSingle();
       return res?['company_name']?.toString();
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_vendorName failed for vendor $vendorId',
+          error: e, stackTrace: st, name: 'PartnersRepository');
       return null;
     }
   }
@@ -1550,7 +1582,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId org_members lookup failed',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -1559,7 +1594,10 @@ class SupabasePartnersRepository implements PartnersRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId profiles lookup failed',
+          error: e, stackTrace: st, name: 'PartnersRepository');
+    }
     return null;
   }
 

@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -19,16 +21,20 @@ final systemHealthProvider = FutureProvider<_SystemHealth>((ref) async {
     await client.from('orgs').select('id').limit(1);
     dbHealthy = true;
     apiHealthy = true;
-  } catch (_) {
+  } catch (e, st) {
     // DB or API is down
+    developer.log('SystemOverviewPage database health check failed',
+        error: e, stackTrace: st, name: 'SystemOverviewPage.systemHealthProvider');
   }
 
   try {
     // Test storage connection
     await client.storage.listBuckets();
     storageHealthy = true;
-  } catch (_) {
+  } catch (e, st) {
     // Storage might not be configured
+    developer.log('SystemOverviewPage storage health check failed',
+        error: e, stackTrace: st, name: 'SystemOverviewPage.systemHealthProvider');
     storageHealthy = true; // Assume OK if not configured
   }
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -887,7 +888,9 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           files: [file],
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('AssetsPage shareXFiles failed, falling back',
+          error: e, stackTrace: st, name: 'AssetsPage._exportCsv');
       await SharePlus.instance.share(ShareParams(text: csv));
     }
   }

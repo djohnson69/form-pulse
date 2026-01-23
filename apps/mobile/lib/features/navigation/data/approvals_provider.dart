@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/utils/error_logger.dart';
 import '../../dashboard/data/dashboard_provider.dart';
 import '../../dashboard/data/active_role_provider.dart';
 
@@ -123,7 +124,13 @@ class SupabaseApprovalsRepository implements ApprovalsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log(
+        'ApprovalsRepository: org_members lookup failed, trying profiles',
+        error: e,
+        stackTrace: st,
+      );
+    }
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return null;
     try {
@@ -134,7 +141,14 @@ class SupabaseApprovalsRepository implements ApprovalsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      ErrorLogger.warn(
+        'Could not resolve org_id from org_members or profiles',
+        context: 'ApprovalsRepository._resolveOrgId',
+        error: e,
+        stackTrace: st,
+      );
+    }
     return null;
   }
 

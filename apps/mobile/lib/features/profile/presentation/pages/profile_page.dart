@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
@@ -171,10 +173,15 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             _loading = false;
           });
           return;
-        } catch (_) {}
+        } catch (e, st) {
+          developer.log('ProfilePage load profile inner failed',
+              error: e, stackTrace: st, name: 'ProfilePage._loadProfile');
+        }
       }
       setState(() => _loading = false);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('ProfilePage load profile failed',
+          error: e, stackTrace: st, name: 'ProfilePage._loadProfile');
       setState(() => _loading = false);
     }
   }

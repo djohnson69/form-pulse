@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -153,7 +154,9 @@ class _UserDirectoryPageState extends ConsumerState<UserDirectoryPage> {
           files: [file],
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('UserDirectoryPage shareXFiles failed, falling back',
+          error: e, stackTrace: st, name: 'UserDirectoryPage._exportCsv');
       await SharePlus.instance.share(ShareParams(text: csv));
     }
   }

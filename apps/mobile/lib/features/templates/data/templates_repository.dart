@@ -117,7 +117,9 @@ class SupabaseTemplatesRepository implements TemplatesRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('org_members lookup failed, trying profiles', error: e, stackTrace: st);
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -126,7 +128,9 @@ class SupabaseTemplatesRepository implements TemplatesRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('profiles lookup also failed for user $userId', error: e, stackTrace: st);
+    }
     return null;
   }
 }

@@ -1,11 +1,11 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import {
+  checkRateLimit,
+  rateLimitKey,
+  rateLimitResponse,
+} from "../_shared/rate_limiter.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 const TEMPLATE_FORMS = [
   {
@@ -119,9 +119,26 @@ const TEMPLATE_FORMS = [
 // Default trial period in days
 const TRIAL_DAYS = 14;
 
+// Timeout for individual team invite operations (5 seconds)
+const INVITE_TIMEOUT_MS = 5000;
+
+// Internal roles get employee records (for Org Chart, HR, Training)
+// External roles (client, vendor, viewer) do NOT get employee records
+const INTERNAL_ROLES = new Set([
+  "superadmin",
+  "admin",
+  "manager",
+  "supervisor",
+  "employee",
+  "maintenance",
+  "techsupport",
+]);
+
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", {
@@ -210,6 +227,17 @@ serve(async (req) => {
     return jsonResponse({ error: "Unauthorized." }, 401);
   }
 
+  // Rate limiting: 5 org creations per hour per user
+  const rateLimitResult = await checkRateLimit(
+    supabase,
+    rateLimitKey("org-onboard", user.id),
+    5,    // max requests
+    3600, // window in seconds (1 hour)
+  );
+  if (!rateLimitResult.allowed) {
+    return rateLimitResponse(rateLimitResult, corsHeaders);
+  }
+
   // Check if user already has an org
   const { data: existingMembership } = await supabase
     .from("org_members")
@@ -227,48 +255,7 @@ serve(async (req) => {
 
   const now = new Date().toISOString();
 
-  // Create organization with enhanced fields
-  const orgPayload: Record<string, unknown> = {
-    name: orgName,
-    display_name: displayName,
-    industry,
-    company_size: companySize,
-    website,
-    phone,
-    address_line1: addressLine1,
-    address_line2: addressLine2,
-    city,
-    state,
-    postal_code: postalCode,
-    country,
-    tax_id: taxId,
-    onboarding_completed: true,
-    onboarding_step: 6, // All steps completed
-    settings: {},
-    metadata: {},
-    updated_at: now,
-  };
-
-  const { data: org, error: orgError } = await supabase
-    .from("orgs")
-    .insert(orgPayload)
-    .select("id,name,created_at")
-    .single();
-  if (orgError || !org) {
-    return jsonResponse({ error: orgError?.message ?? "Org create failed." }, 500);
-  }
-
-  // Create membership for the org creator as owner
-  const membershipInsert = await supabase.from("org_members").insert({
-    org_id: org.id,
-    user_id: user.id,
-    role: "owner",
-  });
-  if (membershipInsert.error) {
-    return jsonResponse({ error: membershipInsert.error.message }, 500);
-  }
-
-  // Create profile for the user
+  // Extract user metadata for profile
   const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
   const firstName = meta.firstName?.toString().trim() ??
     meta.first_name?.toString().trim() ??
@@ -278,88 +265,75 @@ serve(async (req) => {
     "";
   const userPhone = meta.phone?.toString().trim() ?? "";
 
-  const profilePayload: Record<string, unknown> = {
-    id: user.id,
-    org_id: org.id,
-    email: user.email,
-    first_name: firstName || null,
-    last_name: lastName || null,
-    phone: userPhone || null,
-    role: "superadmin",
-    updated_at: now,
-  };
+  // Use transactional RPC to create org, membership, profile, employee, and subscription atomically
+  // This prevents orphaned data if any step fails
+  const { data: txResult, error: txError } = await supabase.rpc("create_org_with_owner", {
+    p_org_name: orgName,
+    p_display_name: displayName,
+    p_industry: industry,
+    p_company_size: companySize,
+    p_website: website,
+    p_phone: phone,
+    p_address_line1: addressLine1,
+    p_address_line2: addressLine2,
+    p_city: city,
+    p_state: state,
+    p_postal_code: postalCode,
+    p_country: country,
+    p_tax_id: taxId,
+    p_user_id: user.id,
+    p_user_email: user.email ?? "",
+    p_first_name: firstName,
+    p_last_name: lastName,
+    p_user_phone: userPhone,
+    p_plan_name: planName,
+    p_billing_cycle: billingCycle,
+    p_trial_days: TRIAL_DAYS,
+  });
 
-  const profileUpsert = await supabase.from("profiles").upsert(
-    profilePayload,
-    { onConflict: "id" },
-  );
-  if (profileUpsert.error) {
-    return jsonResponse({ error: profileUpsert.error.message }, 500);
+  if (txError || !txResult?.success) {
+    const errorMsg = txError?.message ?? txResult?.error ?? "Org creation transaction failed.";
+    console.error("Org creation transaction error:", errorMsg);
+    return jsonResponse({ error: errorMsg }, 500);
   }
 
-  // Get the selected plan
-  const { data: plan, error: planError } = await supabase
-    .from("subscription_plans")
-    .select("*")
-    .eq("name", planName)
-    .eq("is_active", true)
-    .maybeSingle();
+  const orgId = txResult.org_id as string;
+  const trialEnd = new Date(txResult.trial_end as string);
 
-  // Create subscription with trial
-  const trialStart = new Date();
-  const trialEnd = new Date(trialStart.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-
-  const subscriptionPayload: Record<string, unknown> = {
-    org_id: org.id,
-    plan_id: plan?.id ?? null,
-    status: "trialing",
-    billing_cycle: billingCycle,
-    trial_start: trialStart.toISOString(),
-    trial_end: trialEnd.toISOString(),
-    current_period_start: trialStart.toISOString(),
-    current_period_end: trialEnd.toISOString(),
+  // Org object for response (minimal info needed)
+  const org = {
+    id: orgId,
+    name: orgName,
     created_at: now,
-    updated_at: now,
   };
 
-  const subscriptionInsert = await supabase.from("subscriptions").insert(subscriptionPayload);
-  if (subscriptionInsert.error) {
-    console.error("Subscription insert error:", subscriptionInsert.error);
-    // Non-fatal - continue without subscription if table doesn't exist
-  }
-
-  // Create billing info if email provided
+  // Create billing info if email provided (non-critical, uses separate RPC)
   if (billingEmail) {
-    const billingInfoPayload: Record<string, unknown> = {
-      org_id: org.id,
-      billing_email: billingEmail,
-      billing_name: billingName ?? orgName,
-      address_line1: billingAddressLine1 ?? addressLine1,
-      address_line2: billingAddressLine2 ?? addressLine2,
-      city: billingCity ?? city,
-      state: billingState ?? state,
-      postal_code: billingPostalCode ?? postalCode,
-      country: billingCountry,
-      tax_id: billingTaxId ?? taxId,
-      po_required: poRequired,
-      // Stripe payment method info (collected during signup)
-      stripe_customer_id: stripeCustomerId,
-      stripe_payment_method_id: stripePaymentMethodId,
-      created_at: now,
-      updated_at: now,
-    };
-
-    const billingInfoInsert = await supabase.from("billing_info").insert(billingInfoPayload);
-    if (billingInfoInsert.error) {
-      console.error("Billing info insert error:", billingInfoInsert.error);
-      // Non-fatal - continue without billing info if table doesn't exist
+    const { data: billingResult, error: billingError } = await supabase.rpc("add_org_billing_info", {
+      p_org_id: orgId,
+      p_billing_email: billingEmail,
+      p_billing_name: billingName ?? orgName,
+      p_address_line1: billingAddressLine1 ?? addressLine1,
+      p_address_line2: billingAddressLine2 ?? addressLine2,
+      p_city: billingCity ?? city,
+      p_state: billingState ?? state,
+      p_postal_code: billingPostalCode ?? postalCode,
+      p_country: billingCountry,
+      p_tax_id: billingTaxId ?? taxId,
+      p_po_required: poRequired,
+      p_stripe_customer_id: stripeCustomerId,
+      p_stripe_payment_method_id: stripePaymentMethodId,
+    });
+    if (billingError || !billingResult?.success) {
+      console.error("Billing info insert error:", billingError?.message ?? billingResult?.error);
+      // Non-fatal - continue without billing info
     }
   }
 
   // Create template forms
   const formRows = TEMPLATE_FORMS.map((form) => ({
-    id: `${org.id}-${form.idSuffix}`,
-    org_id: org.id,
+    id: `${orgId}-${form.idSuffix}`,
+    org_id: orgId,
     title: form.title,
     description: form.description,
     category: form.category,
@@ -378,8 +352,87 @@ serve(async (req) => {
     return jsonResponse({ error: formsInsert.error.message }, 500);
   }
 
-  // Process team invitations
+  // Process team invitations with timeout protection
   const invitationResults: Array<{ email: string; success: boolean; error?: string }> = [];
+
+  // Helper function to process a single invite with all its DB operations
+  async function processInvite(email: string, role: string): Promise<void> {
+    // Invite user via Supabase Auth
+    const inviteRes = await supabase.auth.admin.inviteUserByEmail(email, {
+      data: {
+        org_id: orgId,
+        role,
+      },
+    });
+
+    if (inviteRes.error) {
+      throw new Error(inviteRes.error.message);
+    }
+
+    const invitedUserId = inviteRes.data?.user?.id;
+    if (!invitedUserId) {
+      throw new Error("No user ID returned");
+    }
+
+    // Create org membership for invited user
+    const memberRole = role === "admin" ? "admin" : "member";
+    await supabase.from("org_members").upsert(
+      {
+        org_id: orgId,
+        user_id: invitedUserId,
+        role: memberRole,
+      },
+      { onConflict: "org_id,user_id" },
+    );
+
+    // Create profile for invited user
+    await supabase.from("profiles").upsert(
+      {
+        id: invitedUserId,
+        org_id: orgId,
+        email,
+        role,
+        updated_at: now,
+      },
+      { onConflict: "id" },
+    );
+
+    // Record invitation
+    await supabase.from("user_invitations").insert({
+      org_id: orgId,
+      email,
+      role,
+      invited_by: user!.id,
+      invited_at: now,
+      status: "pending",
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    // Create employee record for internal roles only
+    // External roles (client, vendor, viewer) don't appear in Org Chart
+    if (INTERNAL_ROLES.has(role)) {
+      await supabase.from("employees").upsert(
+        {
+          org_id: orgId,
+          user_id: invitedUserId,
+          first_name: null,
+          last_name: null,
+          email,
+          position: mapRoleToPosition(role),
+          department: mapRoleToDepartment(role),
+          hire_date: now,
+          is_active: true,
+          metadata: {
+            role,
+            invitedBy: user!.id,
+            isSupervisor: ["superadmin", "admin", "manager", "supervisor"].includes(role),
+            isManager: ["superadmin", "admin", "manager"].includes(role),
+          },
+        },
+        { onConflict: "org_id,user_id" },
+      );
+    }
+  }
 
   for (const invite of teamInvites) {
     const email = invite.email?.toString().trim();
@@ -388,59 +441,13 @@ serve(async (req) => {
     if (!email || !email.includes("@")) continue;
 
     try {
-      // Invite user via Supabase Auth
-      const inviteRes = await supabase.auth.admin.inviteUserByEmail(email, {
-        data: {
-          org_id: org.id,
-          role,
-        },
-      });
-
-      if (inviteRes.error) {
-        invitationResults.push({ email, success: false, error: inviteRes.error.message });
-        continue;
-      }
-
-      const invitedUserId = inviteRes.data?.user?.id;
-      if (!invitedUserId) {
-        invitationResults.push({ email, success: false, error: "No user ID returned" });
-        continue;
-      }
-
-      // Create org membership for invited user
-      const memberRole = role === "admin" ? "admin" : "member";
-      await supabase.from("org_members").upsert(
-        {
-          org_id: org.id,
-          user_id: invitedUserId,
-          role: memberRole,
-        },
-        { onConflict: "org_id,user_id" },
-      );
-
-      // Create profile for invited user
-      await supabase.from("profiles").upsert(
-        {
-          id: invitedUserId,
-          org_id: org.id,
-          email,
-          role,
-          updated_at: now,
-        },
-        { onConflict: "id" },
-      );
-
-      // Record invitation
-      await supabase.from("user_invitations").insert({
-        org_id: org.id,
-        email,
-        role,
-        invited_by: user.id,
-        invited_at: now,
-        status: "pending",
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      });
-
+      // Use Promise.race to enforce timeout on each invite
+      await Promise.race([
+        processInvite(email, role),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Invite timeout")), INVITE_TIMEOUT_MS)
+        ),
+      ]);
       invitationResults.push({ email, success: true });
     } catch (err) {
       invitationResults.push({ email, success: false, error: String(err) });
@@ -450,9 +457,9 @@ serve(async (req) => {
   return jsonResponse({
     ok: true,
     org: {
-      id: org.id,
-      name: org.name,
-      createdAt: org.created_at,
+      id: orgId,
+      name: orgName,
+      createdAt: now,
     },
     subscription: {
       status: "trialing",
@@ -472,4 +479,32 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
       "Content-Type": "application/json",
     },
   });
+}
+
+// Map app role to default position for employee record
+function mapRoleToPosition(role: string): string {
+  const positionMap: Record<string, string> = {
+    superadmin: "Owner / Executive",
+    admin: "Administrator",
+    manager: "Manager",
+    supervisor: "Supervisor",
+    employee: "Team Member",
+    maintenance: "Maintenance Technician",
+    techsupport: "Technical Support",
+  };
+  return positionMap[role] || "Team Member";
+}
+
+// Map app role to default department for employee record
+function mapRoleToDepartment(role: string): string {
+  const deptMap: Record<string, string> = {
+    superadmin: "Executive",
+    admin: "Administration",
+    manager: "Management",
+    supervisor: "Operations",
+    employee: "Operations",
+    maintenance: "Maintenance",
+    techsupport: "IT Support",
+  };
+  return deptMap[role] || "General";
 }

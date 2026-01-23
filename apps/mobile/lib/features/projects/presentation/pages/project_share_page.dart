@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:shared/shared.dart';
@@ -264,7 +265,10 @@ class _ProjectSharePageState extends State<ProjectSharePage> {
       try {
         final decoded = jsonDecode(data);
         if (decoded is Map<String, dynamic>) return decoded;
-      } catch (_) {}
+      } catch (e, st) {
+        developer.log('ProjectSharePage parse JSON metadata failed',
+            error: e, stackTrace: st, name: 'ProjectSharePage._parseJson');
+      }
     }
     return null;
   }

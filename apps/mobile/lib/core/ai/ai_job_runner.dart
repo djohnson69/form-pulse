@@ -84,11 +84,10 @@ class AiJobRunner {
         return ai.generateProgressRecap(text: combinedInput!);
       case 'translation':
         _ensureInput(combinedInput);
+        final lang = targetLanguage?.trim();
         return ai.translateText(
           text: combinedInput!,
-          targetLanguage: targetLanguage?.trim().isNotEmpty == true
-              ? targetLanguage!.trim()
-              : 'Spanish',
+          targetLanguage: (lang != null && lang.isNotEmpty) ? lang : 'Spanish',
         );
       case 'checklist_builder':
         _ensureInput(combinedInput);

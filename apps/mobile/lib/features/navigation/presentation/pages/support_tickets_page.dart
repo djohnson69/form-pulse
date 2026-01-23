@@ -142,11 +142,13 @@ class _SupportTicketsPageState extends ConsumerState<SupportTicketsPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 1000 ? 4 : 2;
+        // Use taller cards on narrow screens to avoid bottom overflow
+        final aspectRatio = constraints.maxWidth < 400 ? 1.2 : 1.4;
         return GridView.count(
           crossAxisCount: columns,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          childAspectRatio: 1.55,
+          childAspectRatio: aspectRatio,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           children: [

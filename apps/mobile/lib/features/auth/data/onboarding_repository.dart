@@ -99,6 +99,26 @@ class OnboardingRepository {
         .toList();
   }
 
+  /// Check if an email is already registered
+  /// Returns true if the email is available, false if already in use
+  Future<bool> isEmailAvailable(String email) async {
+    try {
+      // Check profiles table for existing email
+      final response = await _client
+          .from('profiles')
+          .select('id')
+          .eq('email', email.trim().toLowerCase())
+          .maybeSingle();
+
+      // If no profile found, email is available
+      return response == null;
+    } catch (e) {
+      // If query fails (e.g., RLS blocks it), allow signup
+      // Supabase auth will reject duplicates anyway
+      return true;
+    }
+  }
+
   /// Sign up a new user and complete onboarding in one operation
   /// This creates the account first, then sets up the organization
   Future<Map<String, dynamic>> signUpAndOnboard({

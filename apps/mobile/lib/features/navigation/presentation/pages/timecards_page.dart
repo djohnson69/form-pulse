@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -104,7 +105,9 @@ class _TimecardsPageState extends State<TimecardsPage> {
           .map(_mapEntry)
           .toList();
       setState(() => _entries = rows);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('TimecardsPage load entries failed',
+          error: e, stackTrace: st, name: 'TimecardsPage._loadEntries');
       setState(() => _entries = <_TimecardEntry>[]);
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -129,7 +132,9 @@ class _TimecardsPageState extends State<TimecardsPage> {
       }
       final position = await Geolocator.getCurrentPosition();
       return '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('TimecardsPage resolve location failed',
+          error: e, stackTrace: st, name: 'TimecardsPage._resolveLocation');
       return 'Location unavailable';
     }
   }
@@ -559,7 +564,9 @@ class _TimecardsPageState extends State<TimecardsPage> {
           await _supabase.from('timecards').insert(payload).select().single();
       final data = Map<String, dynamic>.from(res as Map);
       return _mapEntry(data);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('TimecardsPage update entry failed',
+          error: e, stackTrace: st, name: 'TimecardsPage._updateEntry');
       return entry;
     }
   }
@@ -583,7 +590,9 @@ class _TimecardsPageState extends State<TimecardsPage> {
           files: [file],
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('TimecardsPage shareXFiles failed, falling back',
+          error: e, stackTrace: st, name: 'TimecardsPage._exportCsv');
       await SharePlus.instance.share(ShareParams(text: csv));
     }
   }
@@ -647,7 +656,9 @@ class _TimecardsPageState extends State<TimecardsPage> {
         _entries =
             _entries.map((item) => item.id == id ? entry : item).toList();
       });
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('TimecardsPage approve entry failed',
+          error: e, stackTrace: st, name: 'TimecardsPage._approveEntry');
       _showSnackBar('Failed to update timecard.');
     }
   }
@@ -679,7 +690,10 @@ class _TimecardsPageState extends State<TimecardsPage> {
   Future<void> _deleteEntry(_TimecardEntry entry) async {
     try {
       await _supabase.from('timecards').delete().eq('id', entry.id);
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('TimecardsPage delete entry failed',
+          error: e, stackTrace: st, name: 'TimecardsPage._deleteEntry');
+    }
     if (!mounted) return;
     setState(() {
       _entries.removeWhere((item) => item.id == entry.id);
@@ -875,7 +889,10 @@ class _TimecardsPageState extends State<TimecardsPage> {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('TimecardsPage org_members lookup failed',
+          error: e, stackTrace: st, name: 'TimecardsPage._getOrgId');
+    }
     try {
       final res = await _supabase
           .from('profiles')
@@ -884,7 +901,10 @@ class _TimecardsPageState extends State<TimecardsPage> {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('TimecardsPage profiles lookup failed',
+          error: e, stackTrace: st, name: 'TimecardsPage._getOrgId');
+    }
     return null;
   }
 

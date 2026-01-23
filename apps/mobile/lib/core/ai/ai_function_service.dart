@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -69,7 +70,10 @@ class AiFunctionService {
       try {
         final decoded = jsonDecode(data);
         if (decoded is Map<String, dynamic>) return decoded;
-      } catch (_) {}
+      } catch (e, st) {
+        developer.log('AiFunctionService normalize data JSON decode failed',
+            error: e, stackTrace: st, name: 'AiFunctionService._normalizeData');
+      }
     }
     return <String, dynamic>{};
   }

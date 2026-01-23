@@ -303,7 +303,7 @@ class _UserActivityPageState extends ConsumerState<UserActivityPage> {
                         firstName: selectedUser.firstName,
                         lastName: selectedUser.lastName,
                       );
-                      ref.read(emulatedUserProvider.notifier).state = emulated;
+                      startEmulation(ref, emulated);
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('Now emulating ${selectedUser.firstName} ${selectedUser.lastName}'),

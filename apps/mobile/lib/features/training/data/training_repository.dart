@@ -107,6 +107,9 @@ class SupabaseTrainingRepository implements TrainingRepositoryBase {
         query = query.eq('org_id', orgId);
       }
 
+      // Only show active employees
+      query = query.eq('is_active', true);
+
       final res = await query.order('last_name', ascending: true);
       return (res as List<dynamic>)
           .map((row) => _mapEmployee(Map<String, dynamic>.from(row as Map)))
@@ -538,7 +541,9 @@ class SupabaseTrainingRepository implements TrainingRepositoryBase {
           .maybeSingle();
       final userId = res?['user_id'];
       return userId?.toString();
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_resolveEmployeeUserId failed for employee $employeeId',
+          error: e, stackTrace: st, name: 'TrainingRepository');
       return null;
     }
   }
@@ -570,7 +575,9 @@ class SupabaseTrainingRepository implements TrainingRepositoryBase {
           .eq('email', email.trim())
           .maybeSingle();
       return res?['id']?.toString();
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_resolveUserIdByEmail failed for email $email',
+          error: e, stackTrace: st, name: 'TrainingRepository');
       return null;
     }
   }
@@ -586,7 +593,10 @@ class SupabaseTrainingRepository implements TrainingRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId org_members lookup failed',
+          error: e, stackTrace: st, name: 'TrainingRepository');
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -595,7 +605,10 @@ class SupabaseTrainingRepository implements TrainingRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId profiles lookup failed',
+          error: e, stackTrace: st, name: 'TrainingRepository');
+    }
     developer.log('No org_id found for user $userId in org_members or profiles');
     return null;
   }

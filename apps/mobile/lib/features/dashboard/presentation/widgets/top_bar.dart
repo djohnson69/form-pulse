@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
@@ -27,7 +26,7 @@ class TopBar extends ConsumerWidget {
     final border = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
     final iconColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF4B5563);
     final themeMode = ref.watch(themeModeProvider);
-    final allowRoleOverride = role == UserRole.developer || !kReleaseMode;
+    final allowRoleOverride = role.isPlatformRole;
     final override =
         allowRoleOverride ? ref.watch(roleOverrideProvider) : null;
     final activeRole = override ?? role;

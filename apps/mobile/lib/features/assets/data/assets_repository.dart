@@ -534,7 +534,9 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
         location: attachment.location,
         metadata: attachment.metadata,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_applySignedUrl failed for attachment ${attachment.id}',
+          error: e, stackTrace: st, name: 'AssetsRepository');
       return attachment;
     }
   }
@@ -550,7 +552,10 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId org_members lookup failed',
+          error: e, stackTrace: st, name: 'AssetsRepository');
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -559,7 +564,10 @@ class SupabaseAssetsRepository implements AssetsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId profiles lookup failed',
+          error: e, stackTrace: st, name: 'AssetsRepository');
+    }
     return null;
   }
 

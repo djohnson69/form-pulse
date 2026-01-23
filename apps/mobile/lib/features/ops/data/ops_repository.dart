@@ -1533,12 +1533,16 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
             }
           }
           return matches;
-        } catch (_) {
+        } catch (err, stack) {
+          developer.log('OpsRepository mention targets fallback failed',
+              error: err, stackTrace: stack, name: 'OpsRepository._resolveMentionTargets');
           return const [];
         }
       }
       return const [];
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('OpsRepository resolve mention targets failed',
+          error: e, stackTrace: st, name: 'OpsRepository._resolveMentionTargets');
       return const [];
     }
   }
@@ -2299,7 +2303,9 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
         }
       }
       return count;
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('OpsRepository count pending SOP acknowledgements failed',
+          error: e, stackTrace: st, name: 'OpsRepository._countPendingSopAcknowledgements');
       return 0;
     }
   }
@@ -2336,7 +2342,9 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
         defaultBucket: _bucketName,
         expiresInSeconds: kSignedUrlExpirySeconds,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('OpsRepository sign URL failed',
+          error: e, stackTrace: st, name: 'OpsRepository._signUrlIfNeeded');
       return url;
     }
   }
@@ -2362,7 +2370,10 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('OpsRepository org_members lookup failed',
+          error: e, stackTrace: st, name: 'OpsRepository._getOrgId');
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -2371,7 +2382,10 @@ class SupabaseOpsRepository implements OpsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('OpsRepository profiles lookup failed',
+          error: e, stackTrace: st, name: 'OpsRepository._getOrgId');
+    }
     return null;
   }
 

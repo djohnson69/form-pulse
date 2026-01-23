@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -105,8 +106,10 @@ class PendingSubmissionQueue {
           location: pending.location,
           metadata: pending.metadata,
         );
-      } catch (_) {
+      } catch (e, st) {
         // Keep in queue on failure.
+        developer.log('PendingQueue flush failed for item',
+            error: e, stackTrace: st, name: 'PendingSubmissionQueue.flush');
         remaining.add(item);
       }
     }
@@ -171,7 +174,9 @@ Future<List<Map<String, dynamic>>> _readQueue() async {
     return List<Map<String, dynamic>>.from(
       list.map((e) => Map<String, dynamic>.from(e as Map)),
     );
-  } catch (_) {
+  } catch (e, st) {
+    developer.log('PendingQueue read queue failed',
+        error: e, stackTrace: st, name: 'PendingSubmissionQueue._readQueue');
     return <Map<String, dynamic>>[];
   }
 }
@@ -203,7 +208,9 @@ Future<String?> _decryptQueue(String payload) async {
     final key = await _loadKey();
     final encrypter = Encrypter(AES(key, mode: AESMode.gcm));
     return encrypter.decrypt(cipher, iv: iv);
-  } catch (_) {
+  } catch (e, st) {
+    developer.log('PendingQueue decrypt failed',
+        error: e, stackTrace: st, name: 'PendingSubmissionQueue._decryptQueue');
     return null;
   }
 }

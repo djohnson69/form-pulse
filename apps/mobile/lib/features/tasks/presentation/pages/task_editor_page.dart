@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
@@ -33,7 +35,9 @@ final _teamMemberCountsProvider =
       counts[key] = (counts[key] ?? 0) + 1;
     }
     return counts;
-  } catch (_) {
+  } catch (e, st) {
+    developer.log('TaskEditorPage team member counts failed',
+        error: e, stackTrace: st, name: 'TaskEditorPage._teamMemberCountsProvider');
     return const {};
   }
 });

@@ -206,7 +206,9 @@ class DashboardRepository implements DashboardRepositoryBase {
         '${ApiConstants.notifications}/$id',
         data: {'isRead': true, 'readAt': DateTime.now().toIso8601String()},
       );
-    } on DioException catch (_) {
+    } on DioException catch (e, st) {
+      developer.log('DashboardRepository markNotificationRead PATCH failed, retrying',
+          error: e, stackTrace: st, name: 'DashboardRepository.markNotificationRead');
       await _client.raw.post('${ApiConstants.notifications}/$id/read');
     }
   }
@@ -305,13 +307,27 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
               .limit(50)
           : Future.value(<dynamic>[]);
 
-      final results = await Future.wait([
-        formsFuture,
-        submissionsFuture,
-        notificationsFuture,
-      ]);
+      // Use eagerError: false to allow partial dashboard load even if one query fails
+      // This prevents a single failing query (e.g., notifications) from breaking the entire dashboard
+      final results = await Future.wait(
+        [
+          formsFuture.catchError((e) {
+            developer.log('Forms query failed: $e', error: e);
+            return <dynamic>[];
+          }),
+          submissionsFuture.catchError((e) {
+            developer.log('Submissions query failed: $e', error: e);
+            return <dynamic>[];
+          }),
+          notificationsFuture.catchError((e) {
+            developer.log('Notifications query failed: $e', error: e);
+            return <dynamic>[];
+          }),
+        ],
+        eagerError: false,
+      );
 
-      developer.log('Supabase queries completed successfully');
+      developer.log('Supabase queries completed');
       final formsResult = results[0];
       final submissionsResult = results[1];
       final notificationsResult = results[2];
@@ -666,7 +682,13 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log(
+        'org_members lookup failed for user $userId, trying profiles fallback',
+        error: e,
+        stackTrace: st,
+      );
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -675,7 +697,13 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log(
+        'profiles lookup also failed for user $userId',
+        error: e,
+        stackTrace: st,
+      );
+    }
     developer.log('No org_id found for user $userId in org_members or profiles');
     return null;
   }
@@ -742,7 +770,10 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       if (raw != null) {
         return UserRole.fromRaw(raw);
       }
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('DashboardRepository profiles role lookup failed',
+          error: e, stackTrace: st, name: 'DashboardRepository._getUserRole');
+    }
     try {
       final res = await _client
           .from('org_members')
@@ -753,7 +784,10 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
       if (raw != null) {
         return UserRole.fromRaw(raw);
       }
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('DashboardRepository org_members role lookup failed',
+          error: e, stackTrace: st, name: 'DashboardRepository._getUserRole');
+    }
     return UserRole.viewer;
   }
 
@@ -781,7 +815,9 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
         for (final row in (rows as List))
           row['id'].toString(): row['title']?.toString() ?? '',
       };
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('DashboardRepository form title index lookup failed',
+          error: e, stackTrace: st, name: 'DashboardRepository._formTitleIndex');
       return {};
     }
   }
@@ -905,7 +941,9 @@ class SupabaseDashboardRepository implements DashboardRepositoryBase {
         location: attachment.location,
         metadata: attachment.metadata,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('DashboardRepository sign attachment failed',
+          error: e, stackTrace: st, name: 'DashboardRepository._signAttachment');
       return attachment;
     }
   }

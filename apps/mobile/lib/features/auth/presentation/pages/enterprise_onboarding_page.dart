@@ -137,7 +137,10 @@ class _EnterpriseOnboardingPageState
     if (_stripeInitialized) return;
     try {
       Stripe.publishableKey = _stripePublishableKey;
-      if (!kIsWeb) {
+      if (kIsWeb) {
+        // Web requires calling initialise() to load Stripe.js and create the Stripe instance
+        await Stripe.instance.initialise(publishableKey: _stripePublishableKey);
+      } else {
         await Stripe.instance.applySettings();
       }
       setState(() => _stripeInitialized = true);
@@ -1559,6 +1562,8 @@ class _EnterpriseOnboardingPageState
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: CardField(
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: Colors.white,
                   onCardChanged: (card) {
                     setState(() {
                       _cardComplete = card?.complete ?? false;

@@ -1170,7 +1170,12 @@ _ApprovalStatusStyle _statusStyleFor(
 ) {
   final normalized = _normalizeStatus(status);
   return colors.statusStyles[normalized] ??
-      colors.statusStyles['pending']!;
+      colors.statusStyles['pending'] ??
+      const _ApprovalStatusStyle(
+        background: Color(0xFFF5F5F5),
+        foreground: Color(0xFF616161),
+        label: 'Pending',
+      );
 }
 
 String _statusMessage(String status) {

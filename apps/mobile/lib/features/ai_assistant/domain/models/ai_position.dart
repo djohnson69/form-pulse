@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/painting.dart';
 
@@ -49,7 +50,9 @@ class AiPosition {
         ),
         isExpanded: json['isExpanded'] as bool? ?? false,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('AiPosition fromJson failed',
+          error: e, stackTrace: st, name: 'AiPosition.fromJson');
       return AiPosition.defaultPosition();
     }
   }

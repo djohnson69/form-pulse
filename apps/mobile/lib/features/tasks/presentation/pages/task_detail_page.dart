@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -235,7 +237,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
           .maybeSingle();
       final raw = res?['role']?.toString() ?? UserRole.viewer.name;
       return UserRole.fromRaw(raw);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('TaskDetailPage get user role failed',
+          error: e, stackTrace: st, name: 'TaskDetailPage._getUserRole');
       return UserRole.viewer;
     }
   }

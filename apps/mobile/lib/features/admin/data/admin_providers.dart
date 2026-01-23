@@ -97,6 +97,22 @@ final adminUsersProvider =
   );
 });
 
+/// Role-aware user provider for messaging - platform roles see all users
+final messagingUsersForRoleProvider =
+    FutureProvider.autoDispose.family<List<AdminUserSummary>, UserRole?>((ref, role) async {
+  final repo = ref.read(adminRepositoryProvider);
+  final isGlobalView = role?.canViewAcrossOrgs ?? false;
+
+  if (isGlobalView) {
+    // Platform roles see all active users
+    return repo.fetchUsers();
+  } else {
+    // Org roles see users in their org
+    final orgId = ref.watch(adminActiveOrgIdProvider);
+    return repo.fetchUsers(orgId: orgId);
+  }
+});
+
 final adminAuditProvider =
     FutureProvider.autoDispose<List<AdminAuditEvent>>((ref) async {
   final repo = ref.read(adminRepositoryProvider);

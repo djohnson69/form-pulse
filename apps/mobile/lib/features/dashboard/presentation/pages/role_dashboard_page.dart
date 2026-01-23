@@ -1,5 +1,7 @@
 // ignore_for_file: unused_element, unused_element_parameter
 
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -231,7 +233,9 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
       }
       final position = await Geolocator.getCurrentPosition();
       return '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('RoleDashboardPage resolve location failed',
+          error: e, stackTrace: st, name: 'RoleDashboardPage._resolveLocation');
       return 'Location unavailable';
     }
   }
@@ -286,7 +290,9 @@ class _EmployeeDashboardPageState extends ConsumerState<EmployeeDashboardPage> {
       await repo.markNotificationRead(item.id);
       if (!mounted) return;
       ref.invalidate(dashboardDataProvider);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('RoleDashboardPage dismiss notification failed',
+          error: e, stackTrace: st, name: 'RoleDashboardPage._dismissNotification');
       if (!mounted) return;
       setState(() => _dismissedNotificationIds.remove(item.id));
       ScaffoldMessenger.of(context).showSnackBar(
@@ -986,7 +992,9 @@ class _SupervisorDashboardPageState
       }
       final position = await Geolocator.getCurrentPosition();
       return '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('RoleDashboardPage resolve location failed',
+          error: e, stackTrace: st, name: 'RoleDashboardPage._resolveLocation');
       return 'Location unavailable';
     }
   }
@@ -1372,7 +1380,9 @@ class _ManagerDashboardPageState extends ConsumerState<ManagerDashboardPage> {
       }
       final position = await Geolocator.getCurrentPosition();
       return '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('RoleDashboardPage resolve location failed',
+          error: e, stackTrace: st, name: 'RoleDashboardPage._resolveLocation');
       return 'Location unavailable';
     }
   }
@@ -1882,7 +1892,9 @@ class _MaintenanceDashboardPageState
       }
       final position = await Geolocator.getCurrentPosition();
       return '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('RoleDashboardPage resolve location failed',
+          error: e, stackTrace: st, name: 'RoleDashboardPage._resolveLocation');
       return 'Location unavailable';
     }
   }

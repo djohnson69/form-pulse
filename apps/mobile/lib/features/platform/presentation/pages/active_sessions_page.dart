@@ -294,7 +294,7 @@ class _ActiveSessionsPageState extends ConsumerState<ActiveSessionsPage> {
       lastName: session.userName.split(' ').length > 1 ? session.userName.split(' ').last : null,
       orgName: session.orgName,
     );
-    ref.read(emulatedUserProvider.notifier).state = emulated;
+    startEmulation(ref, emulated);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Now emulating ${session.userName}'),

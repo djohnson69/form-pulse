@@ -302,7 +302,7 @@ class _DeveloperDashboardBody extends ConsumerWidget {
           onPressed: () async {
             final user = await EmulateUserDialog.show(context);
             if (user != null) {
-              ref.read(emulatedUserProvider.notifier).state = user;
+              startEmulation(ref, user);
             }
           },
         ),
@@ -447,7 +447,7 @@ class _EmulationCard extends StatelessWidget {
           ),
           TextButton.icon(
             onPressed: () {
-              ref.read(emulatedUserProvider.notifier).state = null;
+              stopEmulation(ref);
             },
             style: TextButton.styleFrom(
               backgroundColor: const Color(0xFF7C3AED),

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -657,7 +658,9 @@ class _AiToolsPageState extends ConsumerState<AiToolsPage> {
   AiJobRunner? _resolveAiService(WidgetRef ref) {
     try {
       return ref.read(aiJobRunnerProvider);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('AiToolsPage get AI runner failed',
+          error: e, stackTrace: st, name: 'AiToolsPage._getAiRunner');
       return null;
     }
   }

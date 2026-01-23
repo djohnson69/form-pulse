@@ -1,15 +1,17 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import {
+  checkRateLimit,
+  rateLimitKey,
+  rateLimitResponse,
+} from "../_shared/rate_limiter.ts";
+import { getCorsHeaders, corsResponse } from "../_shared/cors.ts";
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return corsResponse(req);
   }
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", {
@@ -35,6 +37,36 @@ serve(async (req) => {
       { error: "Stripe env vars missing." },
       500,
     );
+  }
+
+  const supabase = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
+
+  // Extract and verify auth token
+  const authHeader = req.headers.get("authorization") ?? "";
+  const token = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7)
+    : "";
+  if (!token) {
+    return jsonResponse({ error: "Missing Authorization bearer token." }, 401);
+  }
+
+  const { data: userInfo, error: userError } = await supabase.auth.getUser(token);
+  const caller = userInfo?.user;
+  if (userError || !caller) {
+    return jsonResponse({ error: "Unauthorized." }, 401);
+  }
+
+  // Rate limiting: 20 payment requests per minute per user
+  const rateLimitResult = await checkRateLimit(
+    supabase,
+    rateLimitKey("payments", caller.id),
+    20, // max requests
+    60, // window in seconds
+  );
+  if (!rateLimitResult.allowed) {
+    return rateLimitResponse(rateLimitResult, corsHeaders);
   }
 
   let payload: Record<string, unknown>;
@@ -98,10 +130,6 @@ serve(async (req) => {
   const session = await response.json();
   const checkoutUrl = session.url?.toString();
   const sessionId = session.id?.toString();
-
-  const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false },
-  });
 
   const { data: existing } = await supabase
     .from("payment_requests")

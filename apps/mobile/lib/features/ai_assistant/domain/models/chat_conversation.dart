@@ -31,7 +31,8 @@ class ChatConversation {
 
   /// Generate a title from the first user message
   String get displayTitle {
-    if (title != null && title!.isNotEmpty) return title!;
+    final t = title;
+    if (t != null && t.isNotEmpty) return t;
     final firstUserMessage = messages.where((m) => m.role == ChatRole.user).firstOrNull;
     if (firstUserMessage != null) {
       final content = firstUserMessage.content;

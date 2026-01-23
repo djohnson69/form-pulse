@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:ai_service/ai_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -43,7 +45,9 @@ final aiJobRunnerProvider = Provider<AiJobRunner>((ref) {
   if (allowFallback) {
     try {
       directService = ref.read(aiServiceProvider);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('AI direct service fallback failed',
+          error: e, stackTrace: st, name: 'aiJobRunnerProvider');
       directService = null;
     }
   }

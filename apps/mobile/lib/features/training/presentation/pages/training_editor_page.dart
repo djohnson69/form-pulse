@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
@@ -502,8 +504,10 @@ class _TrainingEditorPageState extends ConsumerState<TrainingEditorPage> {
                 'checklistCount': result.checklistCount,
             },
           );
-    } catch (_) {
+    } catch (e, st) {
       // Ignore AI logging failures for training assist.
+      developer.log('TrainingEditorPage AI assist logging failed',
+          error: e, stackTrace: st, name: 'TrainingEditorPage._logAiUsage');
     }
   }
 

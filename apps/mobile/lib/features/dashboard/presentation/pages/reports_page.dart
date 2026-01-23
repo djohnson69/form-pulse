@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -414,8 +415,10 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       }
       if (!mounted) return;
       setState(() => _submitterRoles = roles);
-    } catch (_) {
+    } catch (e, st) {
       // Ignore role lookup failures; filter will be unavailable.
+      developer.log('ReportsPage load submitter roles failed',
+          error: e, stackTrace: st, name: 'ReportsPage._loadSubmitterRoles');
     }
   }
 
@@ -524,7 +527,9 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
           files: [file],
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('ReportsPage shareXFiles failed, falling back',
+          error: e, stackTrace: st, name: 'ReportsPage._exportCsv');
       await SharePlus.instance.share(ShareParams(text: csv));
     }
   }

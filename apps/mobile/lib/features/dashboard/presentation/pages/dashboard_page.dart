@@ -2635,7 +2635,6 @@ class _StatCardData {
   final String value;
   final Color color;
   final String? subtitle;
-  final VoidCallback? onTap;
 
   _StatCardData({
     required this.icon,
@@ -2643,7 +2642,6 @@ class _StatCardData {
     required this.value,
     required this.color,
     this.subtitle,
-    this.onTap,
   });
 }
 
@@ -2663,7 +2661,6 @@ class _StatisticsGrid extends StatelessWidget {
                 title: card.title,
                 value: card.value,
                 color: card.color,
-                onTap: card.onTap,
               ))
           .toList(),
     );
@@ -2675,14 +2672,12 @@ class _StatRow extends StatelessWidget {
   final String title;
   final String value;
   final Color color;
-  final VoidCallback? onTap;
 
   const _StatRow({
     required this.icon,
     required this.title,
     required this.value,
     required this.color,
-    this.onTap,
   });
 
   @override
@@ -2691,7 +2686,6 @@ class _StatRow extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),

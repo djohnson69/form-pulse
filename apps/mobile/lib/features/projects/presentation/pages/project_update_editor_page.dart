@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -556,7 +557,9 @@ class _ProjectUpdateEditorPageState
         accuracy: position.accuracy,
         timestamp: position.timestamp,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('ProjectUpdateEditorPage capture location failed',
+          error: e, stackTrace: st, name: 'ProjectUpdateEditorPage._captureLocation');
       return null;
     }
   }
@@ -572,7 +575,10 @@ class _ProjectUpdateEditorPageState
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('ProjectUpdateEditorPage org_members lookup failed',
+          error: e, stackTrace: st, name: 'ProjectUpdateEditorPage._getOrgId');
+    }
     try {
       final res = await client
           .from('profiles')
@@ -581,7 +587,10 @@ class _ProjectUpdateEditorPageState
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('ProjectUpdateEditorPage profiles lookup failed',
+          error: e, stackTrace: st, name: 'ProjectUpdateEditorPage._getOrgId');
+    }
     return null;
   }
 

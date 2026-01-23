@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -178,7 +179,9 @@ class _SubmissionDetailPageState
           files: [file],
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('SubmissionDetailPage shareXFiles failed, falling back',
+          error: e, stackTrace: st, name: 'SubmissionDetailPage._exportCsv');
       await SharePlus.instance.share(ShareParams(text: csv));
     }
   }

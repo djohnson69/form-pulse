@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
@@ -1749,7 +1750,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           text: 'FormBridge analytics dashboard\n$link',
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('AnalyticsPage export report failed',
+          error: e, stackTrace: st, name: 'AnalyticsPage._exportReport');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to share right now.')),

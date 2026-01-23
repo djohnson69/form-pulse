@@ -688,8 +688,9 @@ class _IncidentViewModel {
         '';
     if (location.isNotEmpty) return location;
     final equipmentId = incident.equipmentId;
-    if (equipmentId != null && equipmentNames.containsKey(equipmentId)) {
-      return equipmentNames[equipmentId]!;
+    if (equipmentId != null) {
+      final name = equipmentNames[equipmentId];
+      if (name != null) return name;
     }
     return 'Location not set';
   }

@@ -1,11 +1,11 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import {
+  checkRateLimit,
+  rateLimitKey,
+  rateLimitResponse,
+} from "../_shared/rate_limiter.ts";
+import { getCorsHeaders, corsResponse } from "../_shared/cors.ts";
 
 /**
  * org-manage: Edge function for platform roles (Developer, Tech Support) to manage organizations.
@@ -19,8 +19,10 @@ const corsHeaders = {
  */
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return corsResponse(req);
   }
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method Not Allowed" }, 405);
@@ -82,6 +84,17 @@ serve(async (req) => {
     return jsonResponse({ error: "Forbidden. Only developer and techsupport roles can manage organizations." }, 403);
   }
 
+  // Rate limiting: 20 operations per minute per user
+  const rateLimitResult = await checkRateLimit(
+    supabase,
+    rateLimitKey("org-manage", caller.id),
+    20, // max requests
+    60, // window in seconds
+  );
+  if (!rateLimitResult.allowed) {
+    return rateLimitResponse(rateLimitResult, corsHeaders);
+  }
+
   const now = new Date().toISOString();
 
   // Handle actions
@@ -96,8 +109,9 @@ serve(async (req) => {
   return jsonResponse({ error: "Unknown action." }, 400);
 });
 
+// deno-lint-ignore no-explicit-any
 async function handleCreate(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   payload: Record<string, unknown>,
   now: string,
 ) {
@@ -164,8 +178,9 @@ async function handleCreate(
   });
 }
 
+// deno-lint-ignore no-explicit-any
 async function handleUpdate(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   payload: Record<string, unknown>,
   now: string,
 ) {
@@ -265,8 +280,9 @@ async function handleUpdate(
   });
 }
 
+// deno-lint-ignore no-explicit-any
 async function handleDelete(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   payload: Record<string, unknown>,
   now: string,
 ) {
@@ -291,10 +307,40 @@ async function handleDelete(
     return jsonResponse({ error: "Organization not found." }, 404);
   }
 
+  // Invalidate all member sessions after org deactivation
+  // This forces all users in the org to re-authenticate
+  const { data: members } = await supabase
+    .from("org_members")
+    .select("user_id")
+    .eq("org_id", orgId);
+
+  let sessionsRevoked = 0;
+  const sessionErrors: string[] = [];
+
+  for (const member of members || []) {
+    try {
+      // Sign out user globally (revoke all refresh tokens)
+      const { error: signOutError } = await supabase.auth.admin.signOut(
+        member.user_id,
+        "global",
+      );
+      if (signOutError) {
+        sessionErrors.push(`${member.user_id}: ${signOutError.message}`);
+      } else {
+        sessionsRevoked++;
+      }
+    } catch (err) {
+      sessionErrors.push(`${member.user_id}: ${String(err)}`);
+    }
+  }
+
   return jsonResponse({
     ok: true,
     message: `Organization '${org.name}' has been deactivated.`,
     orgId: org.id,
+    sessionsRevoked,
+    totalMembers: members?.length ?? 0,
+    sessionErrors: sessionErrors.length > 0 ? sessionErrors : undefined,
   });
 }
 

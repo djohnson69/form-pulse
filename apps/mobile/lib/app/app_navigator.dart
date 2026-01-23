@@ -7,6 +7,10 @@ import 'package:mobile/features/auth/presentation/pages/login_page.dart';
 import 'package:mobile/features/auth/presentation/pages/enterprise_onboarding_page.dart';
 import 'package:shared/shared.dart';
 
+import '../core/services/session_monitor.dart';
+import '../core/utils/error_logger.dart';
+import 'app_lifecycle_observer.dart';
+
 /// Main app navigator and entry point with admin routing
 class AppNavigator extends ConsumerStatefulWidget {
   const AppNavigator({super.key});
@@ -38,7 +42,13 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
               .eq('user_id', user.id)
               .maybeSingle();
           rawRole = member?['role']?.toString();
-        } catch (_) {}
+        } catch (e, st) {
+          ErrorLogger.log(
+            e,
+            stackTrace: st,
+            context: 'AppNavigator._fetchUserAccess - org_members fallback',
+          );
+        }
       }
 
       if (rawRole == null || rawRole.isEmpty) {
@@ -98,7 +108,13 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      ErrorLogger.log(
+        e,
+        stackTrace: st,
+        context: 'AppNavigator._resolveOrgId - org_members lookup',
+      );
+    }
     try {
       final res = await client
           .from('profiles')
@@ -107,7 +123,13 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      ErrorLogger.log(
+        e,
+        stackTrace: st,
+        context: 'AppNavigator._resolveOrgId - profiles fallback',
+      );
+    }
     return null;
   }
 
@@ -124,6 +146,9 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
           );
         }
         if (session == null) {
+          // Stop session monitoring and lifecycle observer when logged out
+          ref.read(sessionMonitorProvider).stop();
+          ref.read(appLifecycleObserverProvider).unregister();
           return const LoginPage();
         }
         // Fetch user role and route accordingly
@@ -158,6 +183,10 @@ class _AppNavigatorState extends ConsumerState<AppNavigator> {
                 onCompleted: () => setState(() {}),
               );
             }
+
+            // Start session monitoring and lifecycle observer for authenticated users
+            ref.read(sessionMonitorProvider).start();
+            ref.read(appLifecycleObserverProvider).register();
 
             return RoleDashboardPage(role: access.role);
           },

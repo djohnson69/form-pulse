@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/utils/error_logger.dart';
+
 class UserProfile {
   const UserProfile({
     required this.id,
@@ -42,7 +44,14 @@ final userProfileProvider = FutureProvider<UserProfile>((ref) async {
         isActive: res['is_active'] as bool? ?? true,
       );
     }
-  } catch (_) {}
+  } catch (e, st) {
+    ErrorLogger.warn(
+      'Failed to fetch profile from database, using auth fallback',
+      context: 'userProfileProvider',
+      error: e,
+      stackTrace: st,
+    );
+  }
 
   return UserProfile(id: user.id, orgId: null, email: user.email);
 });

@@ -1,6 +1,9 @@
+import 'dart:developer' as developer;
+
 import 'package:shared/shared.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/utils/error_logger.dart';
 import 'admin_models.dart';
 
 class AdminRepository {
@@ -252,7 +255,13 @@ class AdminRepository {
       if (rawRole != null && rawRole.isNotEmpty) {
         return UserRole.fromRaw(rawRole);
       }
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log(
+        'AdminRepository: profiles role lookup failed, trying org_members',
+        error: e,
+        stackTrace: st,
+      );
+    }
     try {
       final member = await _client
           .from('org_members')
@@ -263,7 +272,14 @@ class AdminRepository {
       if (rawRole != null && rawRole.isNotEmpty) {
         return UserRole.fromRaw(rawRole);
       }
-    } catch (_) {}
+    } catch (e, st) {
+      ErrorLogger.warn(
+        'Could not resolve user role from profiles or org_members',
+        context: 'AdminRepository._resolveCurrentUserRole',
+        error: e,
+        stackTrace: st,
+      );
+    }
     return null;
   }
 

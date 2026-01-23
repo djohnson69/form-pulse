@@ -1039,12 +1039,18 @@ class _AdminReactStatsGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = constraints.maxWidth >= 1100 ? 5 : 2;
+        // Use taller cards on narrow screens to avoid bottom overflow
+        final aspectRatio = crossAxisCount > 2
+            ? 2.25
+            : constraints.maxWidth < 400
+                ? 1.1
+                : 1.4;
         return GridView.count(
           crossAxisCount: crossAxisCount,
           shrinkWrap: true,
           mainAxisSpacing: 16,
           crossAxisSpacing: 16,
-          childAspectRatio: crossAxisCount > 2 ? 2.25 : 1.4,
+          childAspectRatio: aspectRatio,
           physics: const NeverScrollableScrollPhysics(),
           children: stats
               .map((stat) => _AdminReactStatCard(stat: stat))

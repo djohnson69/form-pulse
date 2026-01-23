@@ -114,6 +114,10 @@ dependency_overrides:
   # Override freezed_annotation to resolve conflict between riverpod_generator (^3.0.0)
   # and flutter_stripe (^2.4.1). Using ^2.4.1 which is compatible with both at runtime.
   freezed_annotation: ^2.4.1
+  # Patched flutter_stripe_web to fix colorToCssString bug (text color not working on web)
+  # See: https://github.com/flutter-stripe/flutter_stripe/issues/1567
+  flutter_stripe_web:
+    path: ../../packages/flutter_stripe_web
 
 dev_dependencies:
   flutter_test:

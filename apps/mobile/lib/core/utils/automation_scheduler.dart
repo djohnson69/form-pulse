@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/ops/data/ops_repository.dart';
@@ -23,7 +25,9 @@ class AutomationScheduler {
       await ops.runDueAutomations();
       await prefs.setString(_lastRunKey, now.toIso8601String());
       return true;
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('AutomationScheduler run due automations failed',
+          error: e, stackTrace: st, name: 'AutomationScheduler.runIfDue');
       return false;
     }
   }

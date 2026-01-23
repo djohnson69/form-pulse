@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -14,7 +15,8 @@ import 'package:uuid/uuid.dart';
 import '../../data/partners_provider.dart';
 import '../../data/partners_repository.dart';
 import '../../data/message_models.dart';
-import '../../../training/data/training_provider.dart';
+import '../../../admin/data/admin_models.dart';
+import '../../../admin/data/admin_providers.dart';
 import '../../../dashboard/data/active_role_provider.dart';
 import '../../../../core/utils/storage_utils.dart';
 
@@ -144,7 +146,10 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
           .from('profiles')
           .update({'last_seen_at': DateTime.now().toIso8601String()})
           .eq('id', userId);
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('MessagesPage update presence failed',
+          error: e, stackTrace: st, name: 'MessagesPage._updatePresence');
+    }
   }
 
   void _handleTypingPayload(PostgresChangePayload payload) {
@@ -194,7 +199,10 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
       }
       if (!mounted) return;
       setState(() => _lastSeenByUserId.addAll(updates));
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('MessagesPage fetch presence failed',
+          error: e, stackTrace: st, name: 'MessagesPage._fetchPresence');
+    }
   }
 
   @override
@@ -811,6 +819,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
   Future<void> _showParticipantManager({required String threadId}) async {
     final colors = _MessagingColors.fromTheme(Theme.of(context));
     final selectedToAdd = <String>{};
+    // Capture role before showing sheet - modal is outside the ProviderScope override
+    final currentRole = ref.read(activeRoleProvider);
 
     await showModalBottomSheet<void>(
       context: context,
@@ -826,9 +836,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
               builder: (context, ref, _) {
                 final participantsAsync =
                     ref.watch(threadParticipantsProvider(threadId));
-                // Use role-aware provider so platform roles can add any employee
-                final currentRole = ref.watch(activeRoleProvider);
-                final employeesAsync = ref.watch(employeesForRoleProvider(currentRole));
+                // Use captured role since modal context is outside ProviderScope override
+                final usersAsync = ref.watch(messagingUsersForRoleProvider(currentRole));
                 return SafeArea(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -865,20 +874,19 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                                 .map((p) => p.userId)
                                 .whereType<String>()
                                 .toSet();
-                            final availableEmployees = employeesAsync
+                            final availableUsers = usersAsync
                                 .asData
                                 ?.value
-                                .where((employee) => employee.isActive)
-                                .where((employee) => employee.userId.isNotEmpty)
-                                .where((employee) =>
-                                    !activeIds.contains(employee.userId))
+                                .where((user) => user.isActive)
+                                .where((user) =>
+                                    !activeIds.contains(user.id))
                                 .toList();
 
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (availableEmployees != null &&
-                                    availableEmployees.isNotEmpty) ...[
+                                if (availableUsers != null &&
+                                    availableUsers.isNotEmpty) ...[
                                   Text(
                                     'Add people',
                                     style: TextStyle(
@@ -890,20 +898,20 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                                   Wrap(
                                     spacing: 8,
                                     runSpacing: 6,
-                                    children: availableEmployees.map((employee) {
+                                    children: availableUsers.map((user) {
                                       final selected = selectedToAdd
-                                          .contains(employee.userId);
+                                          .contains(user.id);
                                       return FilterChip(
-                                        label: Text(employee.fullName),
+                                        label: Text(user.displayName),
                                         selected: selected,
                                         onSelected: (value) {
                                           setState(() {
                                             if (value) {
                                               selectedToAdd
-                                                  .add(employee.userId);
+                                                  .add(user.id);
                                             } else {
                                               selectedToAdd
-                                                  .remove(employee.userId);
+                                                  .remove(user.id);
                                             }
                                           });
                                         },
@@ -1515,6 +1523,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     String? selectedEmployeeId;
     final selectedEmployeeIds = <String>{};
     bool saving = false;
+    // Capture role before showing dialog - dialogs are outside the ProviderScope override
+    final currentRole = ref.read(activeRoleProvider);
 
     final thread = await showDialog<MessageThread>(
       context: context,
@@ -1525,18 +1535,16 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
               builder: (context, ref, _) {
                 final vendorsAsync = ref.watch(vendorsProvider);
                 final vendors = vendorsAsync.asData?.value ?? const <Vendor>[];
-                // Use role-aware provider so platform roles can see all employees
-                final currentRole = ref.watch(activeRoleProvider);
-                final employeesAsync = ref.watch(employeesForRoleProvider(currentRole));
-                final employees = employeesAsync.asData?.value ?? const <Employee>[];
+                // Use captured role since dialog context is outside ProviderScope override
+                final usersAsync = ref.watch(messagingUsersForRoleProvider(currentRole));
+                final users = usersAsync.asData?.value ?? const <AdminUserSummary>[];
                 final currentUserId =
                     Supabase.instance.client.auth.currentUser?.id;
-                final selectableEmployees = employees
-                    .where((employee) => employee.isActive)
-                    .where((employee) => employee.userId.isNotEmpty)
-                    .where((employee) => employee.userId != currentUserId)
+                final selectableUsers = users
+                    .where((user) => user.isActive)
+                    .where((user) => user.id != currentUserId)
                     .toList()
-                  ..sort((a, b) => a.fullName.compareTo(b.fullName));
+                  ..sort((a, b) => a.displayName.compareTo(b.displayName));
                 final hasName = titleController.text.trim().isNotEmpty;
                 final requiresName = composeType == _ComposeTarget.group;
                 final requiresRecipient = composeType == _ComposeTarget.direct ||
@@ -1670,7 +1678,7 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                 }
 
                 Widget buildRecipientField() {
-                  return employeesAsync.when(
+                  return usersAsync.when(
                     loading: () => Row(
                       children: [
                         SizedBox(
@@ -1693,15 +1701,15 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                       style: TextStyle(color: colors.muted),
                     ),
                     data: (_) {
-                      if (selectableEmployees.isEmpty) {
+                      if (selectableUsers.isEmpty) {
                         return Text(
                           'No team members available.',
                           style: TextStyle(color: colors.muted),
                         );
                       }
                       if (composeType == _ComposeTarget.direct) {
-                        final availableIds = selectableEmployees
-                            .map((employee) => employee.userId)
+                        final availableIds = selectableUsers
+                            .map((user) => user.id)
                             .toSet();
                         final dropdownValue = availableIds.contains(
                           selectedEmployeeId,
@@ -1710,12 +1718,12 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                             : null;
                         return DropdownButtonFormField<String>(
                           value: dropdownValue,
-                          items: selectableEmployees
+                          items: selectableUsers
                               .map(
-                                (employee) => DropdownMenuItem(
-                                  value: employee.userId,
+                                (user) => DropdownMenuItem(
+                                  value: user.id,
                                   child: Text(
-                                    '${employee.fullName} • ${employee.email}',
+                                    '${user.displayName} • ${user.email}',
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
@@ -1726,10 +1734,10 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                               selectedEmployeeId = value;
                               if (value != null &&
                                   titleController.text.trim().isEmpty) {
-                                final employee = selectableEmployees.firstWhere(
-                                  (item) => item.userId == value,
+                                final user = selectableUsers.firstWhere(
+                                  (item) => item.id == value,
                                 );
-                                titleController.text = employee.fullName;
+                                titleController.text = user.displayName;
                               }
                             });
                           },
@@ -1747,18 +1755,18 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                       return Wrap(
                         spacing: 8,
                         runSpacing: 6,
-                        children: selectableEmployees.map((employee) {
+                        children: selectableUsers.map((user) {
                           final selected =
-                              selectedEmployeeIds.contains(employee.userId);
+                              selectedEmployeeIds.contains(user.id);
                           return FilterChip(
-                            label: Text(employee.fullName),
+                            label: Text(user.displayName),
                             selected: selected,
                             onSelected: (value) {
                               setState(() {
                                 if (value) {
-                                  selectedEmployeeIds.add(employee.userId);
+                                  selectedEmployeeIds.add(user.id);
                                 } else {
-                                  selectedEmployeeIds.remove(employee.userId);
+                                  selectedEmployeeIds.remove(user.id);
                                 }
                               });
                             },
@@ -1795,29 +1803,26 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          requiresName
-                              ? 'Group name'
-                              : 'Conversation name (optional)',
-                          style:
-                              TextStyle(color: colors.muted, fontSize: 12),
-                        ),
-                        const SizedBox(height: 6),
-                        TextField(
-                          controller: titleController,
-                          onChanged: (_) => setState(() {}),
-                          decoration: _inputDecoration(
-                            colors,
-                            hintText: requiresName
-                                ? 'Enter a group name'
-                                : 'Add a name if you want',
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
+                        // Only show group name field for group chats
+                        if (requiresName) ...[
+                          Text(
+                            'Group name',
+                            style:
+                                TextStyle(color: colors.muted, fontSize: 12),
+                          ),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: titleController,
+                            onChanged: (_) => setState(() {}),
+                            decoration: _inputDecoration(
+                              colors,
+                              hintText: 'Enter a group name',
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
                             ),
                           ),
-                        ),
-                        if (requiresName) ...[
                           const SizedBox(height: 6),
                           Text(
                             'Group messages require a name.',
@@ -1826,17 +1831,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                               fontSize: 12,
                             ),
                           ),
-                        ] else ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            'Leave this blank to use the recipient name.',
-                            style: TextStyle(
-                              color: colors.muted,
-                              fontSize: 12,
-                            ),
-                          ),
+                          const SizedBox(height: 12),
                         ],
-                        const SizedBox(height: 12),
                         Text(
                           'Type',
                           style:
@@ -1910,12 +1906,12 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                                         (item) => item.id == vendorId,
                                       )
                                       .companyName;
-                              Employee? directRecipient;
+                              AdminUserSummary? directRecipient;
                               if (composeType == _ComposeTarget.direct &&
                                   selectedEmployeeId != null) {
-                                for (final employee in selectableEmployees) {
-                                  if (employee.userId == selectedEmployeeId) {
-                                    directRecipient = employee;
+                                for (final user in selectableUsers) {
+                                  if (user.id == selectedEmployeeId) {
+                                    directRecipient = user;
                                     break;
                                   }
                                 }
@@ -1927,7 +1923,7 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
                                       ? vendorName
                                       : composeType == _ComposeTarget.direct &&
                                               directRecipient != null
-                                          ? directRecipient.fullName
+                                          ? directRecipient.displayName
                                       : composeType == _ComposeTarget.group
                                           ? 'Group chat'
                                           : 'Direct message';

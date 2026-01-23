@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 
 import '../../../admin/data/admin_models.dart';
 import '../../../admin/data/admin_providers.dart';
-import '../../../admin/data/admin_repository.dart';
 import '../../data/platform_providers.dart';
 
 /// Page showing all organizations across the platform
@@ -40,9 +39,11 @@ class _AllOrganizationsPageState extends ConsumerState<AllOrganizationsPage> {
         // Header
         Padding(
           padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              Container(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 600;
+
+              final iconWidget = Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: const Color(0xFF3B82F6).withValues(alpha: isDark ? 0.2 : 0.1),
@@ -53,40 +54,38 @@ class _AllOrganizationsPageState extends ConsumerState<AllOrganizationsPage> {
                   color: isDark ? const Color(0xFF60A5FA) : const Color(0xFF3B82F6),
                   size: 24,
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'All Organizations',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : const Color(0xFF111827),
+              );
+
+              final titleColumn = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'All Organizations',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  orgsAsync.when(
+                    data: (orgs) => Text(
+                      '${orgs.length} organizations on the platform',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    orgsAsync.when(
-                      data: (orgs) => Text(
-                        '${orgs.length} organizations on the platform',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
-                        ),
+                    loading: () => Text(
+                      'Loading...',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
                       ),
-                      loading: () => Text(
-                        'Loading...',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
-                        ),
-                      ),
-                      error: (_, __) => const SizedBox.shrink(),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
+                    error: (_, __) => const SizedBox.shrink(),
+                  ),
+                ],
+              );
+
+              final addButton = ElevatedButton.icon(
                 onPressed: () => _showAddOrgDialog(context),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF10B981),
@@ -96,9 +95,9 @@ class _AllOrganizationsPageState extends ConsumerState<AllOrganizationsPage> {
                 ),
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('Add Organization'),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton.icon(
+              );
+
+              final refreshButton = ElevatedButton.icon(
                 onPressed: () => ref.invalidate(platformOrganizationsProvider),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF3B82F6),
@@ -108,52 +107,86 @@ class _AllOrganizationsPageState extends ConsumerState<AllOrganizationsPage> {
                 ),
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('Refresh'),
-              ),
-            ],
+              );
+
+              if (isCompact) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        iconWidget,
+                        const SizedBox(width: 16),
+                        Expanded(child: titleColumn),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(child: addButton),
+                        const SizedBox(width: 8),
+                        refreshButton,
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  iconWidget,
+                  const SizedBox(width: 16),
+                  Expanded(child: titleColumn),
+                  const SizedBox(width: 12),
+                  addButton,
+                  const SizedBox(width: 8),
+                  refreshButton,
+                ],
+              );
+            },
           ),
         ),
 
         // Search and filters
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (value) => setState(() => _searchQuery = value.trim().toLowerCase()),
-                  decoration: InputDecoration(
-                    hintText: 'Search organizations...',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _searchQuery = '');
-                            },
-                            icon: const Icon(Icons.clear),
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: isDark ? const Color(0xFF374151) : const Color(0xFFF9FAFB),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(
-                        color: isDark ? const Color(0xFF4B5563) : const Color(0xFFE5E7EB),
-                      ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 500;
+
+              final searchField = TextField(
+                controller: _searchController,
+                onChanged: (value) => setState(() => _searchQuery = value.trim().toLowerCase()),
+                decoration: InputDecoration(
+                  hintText: 'Search organizations...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                          icon: const Icon(Icons.clear),
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: isDark ? const Color(0xFF374151) : const Color(0xFFF9FAFB),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: isDark ? const Color(0xFF4B5563) : const Color(0xFFE5E7EB),
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(
-                        color: isDark ? const Color(0xFF4B5563) : const Color(0xFFE5E7EB),
-                      ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: isDark ? const Color(0xFF4B5563) : const Color(0xFFE5E7EB),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Container(
+              );
+
+              final sortDropdown = Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
                   color: isDark ? const Color(0xFF374151) : const Color(0xFFF9FAFB),
@@ -177,16 +210,42 @@ class _AllOrganizationsPageState extends ConsumerState<AllOrganizationsPage> {
                     },
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
+              );
+
+              final sortButton = IconButton(
                 onPressed: () => setState(() => _sortAsc = !_sortAsc),
                 icon: Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward),
                 style: IconButton.styleFrom(
                   backgroundColor: isDark ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
                 ),
-              ),
-            ],
+              );
+
+              if (isCompact) {
+                return Column(
+                  children: [
+                    searchField,
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: sortDropdown),
+                        const SizedBox(width: 8),
+                        sortButton,
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(flex: 2, child: searchField),
+                  const SizedBox(width: 12),
+                  sortDropdown,
+                  const SizedBox(width: 8),
+                  sortButton,
+                ],
+              );
+            },
           ),
         ),
 

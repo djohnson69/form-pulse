@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -885,7 +886,9 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
           .from(bucket)
           .download(path);
       return bytes;
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('DocumentsPage download document failed',
+          error: e, stackTrace: st, name: 'DocumentsPage._downloadDocument');
       return null;
     }
   }
@@ -5075,7 +5078,9 @@ class _DocumentAnnotationSheetState extends State<_DocumentAnnotationSheet> {
         _image = image;
         _loadingImage = false;
       });
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('DocumentsPage load image failed',
+          error: e, stackTrace: st, name: 'DocumentsPage._loadImage');
       if (!mounted) return;
       setState(() => _loadingImage = false);
     }
@@ -6573,7 +6578,9 @@ class _SignatureCollectionSheetState
         'lng': position.longitude,
         'address': 'Location captured',
       };
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('DocumentsPage capture location failed',
+          error: e, stackTrace: st, name: 'DocumentsPage._captureLocation');
       return null;
     }
   }
@@ -6627,7 +6634,9 @@ class _SignatureCollectionSheetState
         completer.complete,
       );
       return completer.future;
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('DocumentsPage decode image failed',
+          error: e, stackTrace: st, name: 'DocumentsPage._decodeImage');
       return null;
     }
   }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -385,7 +386,9 @@ class _TasksPageState extends ConsumerState<TasksPage> {
           files: [file],
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('TasksPage shareXFiles failed, falling back',
+          error: e, stackTrace: st, name: 'TasksPage._exportCsv');
       await SharePlus.instance.share(ShareParams(text: csv));
     }
   }
@@ -1718,7 +1721,8 @@ class _TaskStatsGrid extends StatelessWidget {
         } else if (width >= 768) {
           columns = 3;
         }
-        final aspectRatio = columns >= 6 ? 1.4 : (columns == 3 ? 1.6 : 1.6);
+        // Adjust aspect ratio based on screen width to avoid overflow
+        final aspectRatio = columns >= 6 ? 1.4 : (columns == 3 ? 1.6 : (width < 400 ? 1.3 : 1.5));
         return GridView.count(
           crossAxisCount: columns,
           crossAxisSpacing: 16,
@@ -1797,62 +1801,48 @@ class _TaskStatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final iconTint =
-        iconColor ?? (isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF));
+    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+    final baseColor = iconColor ?? (isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF));
+
+    // Create gradient from icon color (matching System Logs / Support Tickets style)
+    final gradient = LinearGradient(
+      colors: [baseColor, Color.lerp(baseColor, Colors.black, 0.15)!],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1F2937) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color:
-                        isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563),
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  softWrap: false,
-                ),
-              ),
-              Icon(icon, color: iconTint, size: 20),
-            ],
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              gradient: gradient,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             value,
-            style: theme.textTheme.titleLarge?.copyWith(
+            style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w700,
-              fontSize: 24,
+              color: isDark ? Colors.white : const Color(0xFF111827),
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            subtitle,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: subtitleColor ??
-                  (isDark ? const Color(0xFF6B7280) : const Color(0xFF6B7280)),
-              fontSize: 12,
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
         ],

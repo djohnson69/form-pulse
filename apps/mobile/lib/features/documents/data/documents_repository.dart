@@ -534,7 +534,9 @@ class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
         companyId: document.companyId,
         metadata: document.metadata,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_signDocument failed for document ${document.id}',
+          error: e, stackTrace: st, name: 'DocumentsRepository');
       return document;
     }
   }
@@ -561,7 +563,9 @@ class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
         createdAt: version.createdAt,
         metadata: version.metadata,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('_signVersion failed for version ${version.id}',
+          error: e, stackTrace: st, name: 'DocumentsRepository');
       return version;
     }
   }
@@ -666,7 +670,10 @@ class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId org_members lookup failed',
+          error: e, stackTrace: st, name: 'DocumentsRepository');
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -675,7 +682,10 @@ class SupabaseDocumentsRepository implements DocumentsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_getOrgId profiles lookup failed',
+          error: e, stackTrace: st, name: 'DocumentsRepository');
+    }
     developer.log('No org_id found for user $userId in org_members or profiles');
     return null;
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' as legacy;
@@ -41,8 +42,10 @@ class AiPositionNotifier extends legacy.StateNotifier<AiPosition> {
       if (json != null && mounted) {
         state = AiPosition.fromJson(json);
       }
-    } catch (_) {
+    } catch (e, st) {
       // Use default position on error
+      developer.log('AiPositionNotifier load position failed',
+          error: e, stackTrace: st, name: 'AiPositionNotifier._loadPosition');
     }
   }
 
@@ -54,8 +57,10 @@ class AiPositionNotifier extends legacy.StateNotifier<AiPosition> {
       try {
         final prefs = await _ensurePrefs();
         await prefs.setString(_prefsKey, state.toJson());
-      } catch (_) {
+      } catch (e, st) {
         // Ignore save errors
+        developer.log('AiPositionNotifier save position debounced failed',
+            error: e, stackTrace: st, name: 'AiPositionNotifier.updatePosition');
       }
     });
   }
@@ -77,8 +82,10 @@ class AiPositionNotifier extends legacy.StateNotifier<AiPosition> {
     try {
       final prefs = await _ensurePrefs();
       await prefs.setString(_prefsKey, state.toJson());
-    } catch (_) {
+    } catch (e, st) {
       // Ignore save errors
+      developer.log('AiPositionNotifier save position now failed',
+          error: e, stackTrace: st, name: 'AiPositionNotifier._savePositionNow');
     }
   }
 

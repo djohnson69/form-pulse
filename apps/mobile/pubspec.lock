@@ -752,10 +752,9 @@ packages:
   flutter_stripe_web:
     dependency: "direct main"
     description:
-      name: flutter_stripe_web
-      sha256: f248952994cf91b1b08672e86aa635f698892d594e33d6a9e0f512657ad8aa40
-      url: "https://pub.dev"
-    source: hosted
+      path: "../../packages/flutter_stripe_web"
+      relative: true
+    source: path
     version: "6.5.1"
   flutter_svg:
     dependency: "direct main"

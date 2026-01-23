@@ -65,7 +65,10 @@ class PushNotificationsService {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_resolveOrgId org_members lookup failed',
+          error: e, stackTrace: st, name: 'PushNotificationsService');
+    }
     try {
       final res = await client
           .from('profiles')
@@ -74,7 +77,10 @@ class PushNotificationsService {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('_resolveOrgId profiles lookup failed',
+          error: e, stackTrace: st, name: 'PushNotificationsService');
+    }
     return null;
   }
 

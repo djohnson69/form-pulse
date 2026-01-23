@@ -256,7 +256,7 @@ class _TechSupportDashboardBody extends ConsumerWidget {
           onPressed: () async {
             final user = await EmulateUserDialog.show(context);
             if (user != null) {
-              ref.read(emulatedUserProvider.notifier).state = user;
+              startEmulation(ref, user);
             }
           },
         ),
@@ -396,7 +396,7 @@ class _EmulationCard extends StatelessWidget {
           ),
           TextButton.icon(
             onPressed: () {
-              ref.read(emulatedUserProvider.notifier).state = null;
+              stopEmulation(ref);
             },
             style: TextButton.styleFrom(
               backgroundColor: const Color(0xFF0EA5E9),
@@ -609,7 +609,7 @@ class _TechSupportQuickActions extends StatelessWidget {
                 onTap: () async {
                   final user = await EmulateUserDialog.show(context);
                   if (user != null) {
-                    ref.read(emulatedUserProvider.notifier).state = user;
+                    startEmulation(ref, user);
                   }
                 },
               ),
@@ -989,14 +989,14 @@ class _RecentUsersSection extends StatelessWidget {
                   return _UserTile(
                     user: user,
                     onEmulate: () {
-                      ref.read(emulatedUserProvider.notifier).state = EmulatedUser(
+                      startEmulation(ref, EmulatedUser(
                         id: user.id,
                         email: user.email,
                         role: user.role,
                         orgId: user.orgId,
                         firstName: user.firstName,
                         lastName: user.lastName,
-                      );
+                      ));
                     },
                   );
                 },

@@ -524,7 +524,10 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('TasksRepository org_members lookup failed',
+          error: e, stackTrace: st, name: 'TasksRepository._getOrgId');
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -533,7 +536,10 @@ class SupabaseTasksRepository implements TasksRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('TasksRepository profiles lookup failed',
+          error: e, stackTrace: st, name: 'TasksRepository._getOrgId');
+    }
     developer.log('No org_id found for user $userId in org_members or profiles');
     return null;
   }

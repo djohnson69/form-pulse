@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
@@ -302,8 +304,10 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
                 'checklistCount': result.checklistCount,
             },
           );
-    } catch (_) {
+    } catch (e, st) {
       // Ignore AI logging failures for checklist generation.
+      developer.log('TemplateEditorPage AI assist logging failed',
+          error: e, stackTrace: st, name: 'TemplateEditorPage._logAiUsage');
     }
   }
 

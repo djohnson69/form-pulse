@@ -1,17 +1,19 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import {
+  checkRateLimit,
+  rateLimitKey,
+  rateLimitResponse,
+} from "../_shared/rate_limiter.ts";
+import { getCorsHeaders, corsResponse } from "../_shared/cors.ts";
 
 const FCM_URL = "https://fcm.googleapis.com/fcm/send";
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return corsResponse(req);
   }
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", {
@@ -33,6 +35,36 @@ serve(async (req) => {
     );
   }
 
+  const supabase = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
+
+  // Extract and verify auth token
+  const authHeader = req.headers.get("authorization") ?? "";
+  const token = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7)
+    : "";
+  if (!token) {
+    return jsonResponse({ error: "Missing Authorization bearer token." }, 401);
+  }
+
+  const { data: userInfo, error: userError } = await supabase.auth.getUser(token);
+  const caller = userInfo?.user;
+  if (userError || !caller) {
+    return jsonResponse({ error: "Unauthorized." }, 401);
+  }
+
+  // Rate limiting: 100 notifications per minute per user
+  const rateLimitResult = await checkRateLimit(
+    supabase,
+    rateLimitKey("push", caller.id),
+    100, // max requests
+    60,  // window in seconds
+  );
+  if (!rateLimitResult.allowed) {
+    return rateLimitResponse(rateLimitResult, corsHeaders);
+  }
+
   const payload = await req.json();
   const title = payload.title?.toString() ?? "Form Bridge";
   const body = payload.body?.toString() ?? "";
@@ -44,9 +76,41 @@ serve(async (req) => {
     return jsonResponse({ error: "orgId or userId is required." }, 400);
   }
 
-  const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false },
-  });
+  // Verify caller has permission to send to this org/user
+  if (orgId) {
+    const { data: membership } = await supabase
+      .from("org_members")
+      .select("role")
+      .eq("org_id", orgId)
+      .eq("user_id", caller.id)
+      .maybeSingle();
+
+    if (!membership) {
+      return jsonResponse({ error: "Not authorized to send notifications to this organization." }, 403);
+    }
+  }
+
+  if (userId && userId !== caller.id) {
+    // Allow sending to self, or check if caller is admin/superadmin in same org
+    const { data: callerProfile } = await supabase
+      .from("profiles")
+      .select("org_id, role")
+      .eq("id", caller.id)
+      .maybeSingle();
+
+    const { data: targetProfile } = await supabase
+      .from("profiles")
+      .select("org_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const isAdmin = callerProfile?.role === "superadmin" || callerProfile?.role === "admin";
+    const sameOrg = callerProfile?.org_id && callerProfile.org_id === targetProfile?.org_id;
+
+    if (!isAdmin || !sameOrg) {
+      return jsonResponse({ error: "Not authorized to send notifications to this user." }, 403);
+    }
+  }
 
   let query = supabase
     .from("device_tokens")

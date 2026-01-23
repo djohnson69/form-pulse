@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -102,7 +103,9 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
           .map(_mapOrder)
           .toList();
       setState(() => _orders = rows);
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('WorkOrdersPage load orders failed',
+          error: e, stackTrace: st, name: 'WorkOrdersPage._loadOrders');
       setState(() => _orders = const []);
     }
   }
@@ -837,7 +840,9 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
       if (!mounted) return;
       setState(() => _orders = [created, ..._orders]);
       _showSnackBar(context, 'Work order created: ${data.title}');
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('WorkOrdersPage create work order failed',
+          error: e, stackTrace: st, name: 'WorkOrdersPage._createWorkOrder');
       _showSnackBar(context, 'Failed to create work order.');
     }
   }
@@ -872,7 +877,9 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
             .toList();
       });
       _showSnackBar(context, 'Work order updated: ${data.title}');
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('WorkOrdersPage update work order failed',
+          error: e, stackTrace: st, name: 'WorkOrdersPage._updateWorkOrder');
       _showSnackBar(context, 'Failed to update work order.');
     }
   }
@@ -892,7 +899,9 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
     );
     try {
       await Share.shareXFiles([file], text: 'Work orders export');
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('WorkOrdersPage shareXFiles failed, falling back',
+          error: e, stackTrace: st, name: 'WorkOrdersPage._exportOrders');
       await Share.share(csv);
     }
   }
@@ -948,7 +957,9 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
       setState(() {
         _orders = _orders.where((o) => o.id != id).toList();
       });
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('WorkOrdersPage delete work order failed',
+          error: e, stackTrace: st, name: 'WorkOrdersPage._deleteWorkOrder');
       _showSnackBar(context, 'Failed to delete work order.');
     }
   }
@@ -989,7 +1000,10 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('WorkOrdersPage org_members lookup failed',
+          error: e, stackTrace: st, name: 'WorkOrdersPage._getOrgId');
+    }
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return null;
     try {
@@ -1000,7 +1014,10 @@ class _WorkOrdersPageState extends ConsumerState<WorkOrdersPage> {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('WorkOrdersPage profiles lookup failed',
+          error: e, stackTrace: st, name: 'WorkOrdersPage._getOrgId');
+    }
     return null;
   }
 
@@ -3325,7 +3342,9 @@ Future<List<String>> _resolveTeamMembers(String? orgId) async {
         .map((row) => (row as Map)['user_id']?.toString() ?? '')
         .where((id) => id.isNotEmpty)
         .toList();
-  } catch (_) {
+  } catch (e, st) {
+    developer.log('WorkOrdersPage resolve team members failed',
+        error: e, stackTrace: st, name: 'WorkOrdersPage._resolveTeamMembers');
     return const [];
   }
 }

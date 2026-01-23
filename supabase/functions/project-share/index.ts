@@ -1,15 +1,17 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import {
+  checkRateLimit,
+  rateLimitKey,
+  rateLimitResponse,
+} from "../_shared/rate_limiter.ts";
+import { getCorsHeaders, corsResponse } from "../_shared/cors.ts";
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return corsResponse(req);
   }
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", {
@@ -27,6 +29,23 @@ serve(async (req) => {
     );
   }
 
+  const supabase = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
+
+  // Rate limiting by IP: 30 requests per minute to prevent enumeration attacks
+  // Use x-forwarded-for header or fallback to a constant for local dev
+  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const rateLimitResult = await checkRateLimit(
+    supabase,
+    rateLimitKey("project-share", clientIp),
+    30, // max requests
+    60, // window in seconds
+  );
+  if (!rateLimitResult.allowed) {
+    return rateLimitResponse(rateLimitResult, corsHeaders);
+  }
+
   let payload: Record<string, unknown> = {};
   try {
     payload = await req.json();
@@ -37,10 +56,6 @@ serve(async (req) => {
   if (!token) {
     return jsonResponse({ error: "token is required" }, 400);
   }
-
-  const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false },
-  });
 
   const { data: project } = await supabase
     .from("projects")

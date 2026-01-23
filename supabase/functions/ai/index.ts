@@ -1,14 +1,17 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  checkRateLimit,
+  rateLimitKey,
+  rateLimitResponse,
+} from "../_shared/rate_limiter.ts";
+import { getCorsHeaders, corsResponse } from "../_shared/cors.ts";
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return corsResponse(req);
   }
 
   if (req.method !== "POST") {
@@ -19,8 +22,43 @@ serve(async (req) => {
   }
 
   const apiKey = Deno.env.get("OPENAI_API_KEY");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!apiKey) {
     return jsonResponse({ error: "OPENAI_API_KEY is missing." }, 500);
+  }
+  if (!supabaseUrl || !serviceKey) {
+    return jsonResponse({ error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing." }, 500);
+  }
+
+  const supabase = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
+
+  // Extract and verify auth token
+  const authHeader = req.headers.get("authorization") ?? "";
+  const token = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7)
+    : "";
+  if (!token) {
+    return jsonResponse({ error: "Missing Authorization bearer token." }, 401);
+  }
+
+  const { data: userInfo, error: userError } = await supabase.auth.getUser(token);
+  const caller = userInfo?.user;
+  if (userError || !caller) {
+    return jsonResponse({ error: "Unauthorized." }, 401);
+  }
+
+  // Rate limiting: 10 AI requests per minute per user (expensive API)
+  const rateLimitResult = await checkRateLimit(
+    supabase,
+    rateLimitKey("ai", caller.id),
+    10, // max requests
+    60, // window in seconds
+  );
+  if (!rateLimitResult.allowed) {
+    return rateLimitResponse(rateLimitResult, corsHeaders);
   }
 
   let payload: Record<string, unknown>;
@@ -98,8 +136,9 @@ serve(async (req) => {
 
     if (!response.ok) {
       const text = await response.text();
+      console.error(`OpenAI request failed (${response.status}): ${text}`);
       return jsonResponse(
-        { error: `OpenAI request failed (${response.status}): ${text}` },
+        { error: "AI service temporarily unavailable. Please try again." },
         500,
       );
     }
@@ -110,7 +149,8 @@ serve(async (req) => {
 
     return jsonResponse({ outputText, model, type, transcript });
   } catch (error) {
-    return jsonResponse({ error: `${error}` }, 500);
+    console.error("AI function error:", error);
+    return jsonResponse({ error: "Request failed. Please try again." }, 500);
   }
 });
 

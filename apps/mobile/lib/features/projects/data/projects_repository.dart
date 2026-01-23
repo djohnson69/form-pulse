@@ -227,7 +227,9 @@ class SupabaseProjectsRepository implements ProjectsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('org_members lookup failed, trying profiles', error: e, stackTrace: st);
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -236,7 +238,9 @@ class SupabaseProjectsRepository implements ProjectsRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('profiles lookup also failed for user $userId', error: e, stackTrace: st);
+    }
     developer.log('No org_id found for user $userId in org_members or profiles');
     return null;
   }
@@ -333,7 +337,9 @@ class SupabaseProjectsRepository implements ProjectsRepositoryBase {
         location: attachment.location,
         metadata: attachment.metadata,
       );
-    } catch (_) {
+    } catch (e, st) {
+      developer.log('ProjectsRepository sign attachment failed',
+          error: e, stackTrace: st, name: 'ProjectsRepository._signAttachment');
       return attachment;
     }
   }

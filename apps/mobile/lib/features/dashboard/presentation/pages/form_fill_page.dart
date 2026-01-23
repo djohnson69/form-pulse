@@ -1217,11 +1217,11 @@ class _FormFillPageState extends ConsumerState<FormFillPage> {
                 child: Text('Signer: $signerName'),
               ),
             ),
-          if (attachment?.bytes != null)
+          if (attachment?.bytes case final bytes?)
             Padding(
               padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
               child: Image.memory(
-                attachment!.bytes!,
+                bytes,
                 height: 120,
                 fit: BoxFit.contain,
               ),

@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared/shared.dart';
@@ -285,7 +287,10 @@ class _NewsPostsPageState extends ConsumerState<NewsPostsPage> {
   Future<void> _openCreateSheet(BuildContext context, WidgetRef ref) async {
     final projects = await ref
         .read(projectsProvider.future)
-        .catchError((_) => const <Project>[]);
+        .catchError((e, st) {
+          developer.log('Failed to load projects for announcement sheet', error: e, stackTrace: st);
+          return const <Project>[];
+        });
     if (!context.mounted) return;
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -851,30 +856,32 @@ class _NewsFeed extends StatelessWidget {
                     ),
               ),
               const Spacer(),
-              SizedBox(
-                width: 180,
-                child: DropdownButtonFormField<String>(
-                  value: selectedCategory,
-                  isExpanded: true,
-                  decoration: _selectDecoration(colors),
-                  style: TextStyle(color: colors.body, fontSize: 13),
-                  dropdownColor: colors.surface,
-                  iconEnabledColor: colors.muted,
-                  items: categories
-                      .map(
-                        (category) => DropdownMenuItem(
-                          value: category,
-                          child: Text(
-                            category,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 180),
+                  child: DropdownButtonFormField<String>(
+                    value: selectedCategory,
+                    isExpanded: true,
+                    decoration: _selectDecoration(colors),
+                    style: TextStyle(color: colors.body, fontSize: 13),
+                    dropdownColor: colors.surface,
+                    iconEnabledColor: colors.muted,
+                    items: categories
+                        .map(
+                          (category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(
+                              category,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) onCategoryChanged(value);
-                  },
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) onCategoryChanged(value);
+                    },
+                  ),
                 ),
               ),
               const SizedBox(width: 8),

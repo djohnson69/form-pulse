@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -237,8 +239,10 @@ class _DailyLogsPageState extends ConsumerState<DailyLogsPage> {
             inputMedia: attachments,
             metadata: const {'source': 'daily_log_editor'},
           );
-    } catch (_) {
+    } catch (e, st) {
       // Ignore failures; AI output is already in the editor.
+      developer.log('DailyLogsPage AI assist logging failed',
+          error: e, stackTrace: st, name: 'DailyLogsPage._logAiUsage');
     }
   }
 

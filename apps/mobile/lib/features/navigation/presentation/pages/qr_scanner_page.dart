@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:barcode_scan2/barcode_scan2.dart';
 import 'package:flutter/material.dart';
@@ -308,7 +309,10 @@ class _QrScannerPageState extends ConsumerState<QrScannerPage>
             data['rfidTag']?.toString() ??
             data['serialNumber']?.toString() ??
             trimmed;
-      } catch (_) {}
+      } catch (e, st) {
+        developer.log('QrScannerPage parse JSON failed',
+            error: e, stackTrace: st, name: 'QrScannerPage._extractSerialNumber');
+      }
     }
     return trimmed;
   }

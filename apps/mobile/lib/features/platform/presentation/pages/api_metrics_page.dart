@@ -102,7 +102,10 @@ class _ApiMetricsPageState extends ConsumerState<ApiMetricsPage> {
         // Filters
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -131,7 +134,6 @@ class _ApiMetricsPageState extends ConsumerState<ApiMetricsPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
@@ -157,7 +159,6 @@ class _ApiMetricsPageState extends ConsumerState<ApiMetricsPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
               IconButton(
                 onPressed: () => setState(() => _sortAsc = !_sortAsc),
                 icon: Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward),
@@ -245,58 +246,63 @@ class _ApiMetricsPageState extends ConsumerState<ApiMetricsPage> {
   Widget _buildOverviewStats(ApiOverviewStats stats, bool isDark) {
     final numberFormat = NumberFormat('#,###');
 
-    return Row(
-      children: [
-        Expanded(
-          child: _StatCard(
-            label: 'Total Requests',
-            value: numberFormat.format(stats.totalRequests),
-            icon: Icons.call_made,
-            color: const Color(0xFF3B82F6),
-            isDark: isDark,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            label: 'Avg Latency',
-            value: '${stats.avgLatencyMs.toStringAsFixed(1)}ms',
-            icon: Icons.timer,
-            color: stats.avgLatencyMs < 200 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
-            isDark: isDark,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            label: 'Error Rate',
-            value: '${(stats.errorRate * 100).toStringAsFixed(2)}%',
-            icon: Icons.error_outline,
-            color: stats.errorRate < 0.01 ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-            isDark: isDark,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            label: 'Active Connections',
-            value: stats.activeConnections.toString(),
-            icon: Icons.cable,
-            color: const Color(0xFF8B5CF6),
-            isDark: isDark,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatCard(
-            label: 'Requests/min',
-            value: stats.requestsPerMinute.toStringAsFixed(0),
-            icon: Icons.trending_up,
-            color: const Color(0xFF14B8A6),
-            isDark: isDark,
-          ),
-        ),
-      ],
+    final cards = [
+      _StatCard(
+        label: 'Total Requests',
+        value: numberFormat.format(stats.totalRequests),
+        icon: Icons.call_made,
+        color: const Color(0xFF3B82F6),
+        isDark: isDark,
+      ),
+      _StatCard(
+        label: 'Avg Latency',
+        value: '${stats.avgLatencyMs.toStringAsFixed(1)}ms',
+        icon: Icons.timer,
+        color: stats.avgLatencyMs < 200 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+        isDark: isDark,
+      ),
+      _StatCard(
+        label: 'Error Rate',
+        value: '${(stats.errorRate * 100).toStringAsFixed(2)}%',
+        icon: Icons.error_outline,
+        color: stats.errorRate < 0.01 ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+        isDark: isDark,
+      ),
+      _StatCard(
+        label: 'Active Connections',
+        value: stats.activeConnections.toString(),
+        icon: Icons.cable,
+        color: const Color(0xFF8B5CF6),
+        isDark: isDark,
+      ),
+      _StatCard(
+        label: 'Requests/min',
+        value: stats.requestsPerMinute.toStringAsFixed(0),
+        icon: Icons.trending_up,
+        color: const Color(0xFF14B8A6),
+        isDark: isDark,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Mobile: 2 columns, Tablet: 3 columns, Desktop: 5 columns
+        final crossAxisCount = constraints.maxWidth < 500
+            ? 2
+            : constraints.maxWidth < 900
+                ? 3
+                : 5;
+
+        return GridView.count(
+          crossAxisCount: crossAxisCount,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: constraints.maxWidth < 500 ? 1.5 : 1.8,
+          children: cards,
+        );
+      },
     );
   }
 }
@@ -319,37 +325,47 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final borderColor = isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB);
+
+    // Create gradient from color (darken for end color)
+    final gradient = LinearGradient(
+      colors: [color, Color.lerp(color, Colors.black, 0.15)!],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1F2937) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
-                ),
-              ),
-            ],
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              gradient: gradient,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             value,
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w700,
               color: isDark ? Colors.white : const Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
         ],

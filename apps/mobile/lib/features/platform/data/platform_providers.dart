@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,9 +8,27 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../admin/data/admin_models.dart';
 import '../../admin/data/admin_providers.dart';
+import '../../dashboard/data/role_override_provider.dart';
 
 /// Provider for the user being emulated (null = no emulation active)
 final emulatedUserProvider = legacy.StateProvider<EmulatedUser?>((ref) => null);
+
+/// Starts emulating a user - sets both emulatedUserProvider AND roleOverrideProvider.
+///
+/// This ensures the app actually uses the emulated user's permissions, not just
+/// displays the emulation banner.
+void startEmulation(WidgetRef ref, EmulatedUser user) {
+  // Set the emulated user info (for display in banner)
+  ref.read(emulatedUserProvider.notifier).state = user;
+  // Set the role override (for actual permission checks)
+  ref.read(roleOverrideProvider.notifier).state = user.role;
+}
+
+/// Stops emulating a user - clears both emulatedUserProvider AND roleOverrideProvider.
+void stopEmulation(WidgetRef ref) {
+  ref.read(emulatedUserProvider.notifier).state = null;
+  ref.read(roleOverrideProvider.notifier).state = null;
+}
 
 /// Model for an emulated user session
 class EmulatedUser {
@@ -110,8 +129,10 @@ final platformStatsProvider = FutureProvider<PlatformStats>((ref) async {
         avgLatency = latencies.reduce((a, b) => a + b) / latencies.length;
       }
     }
-  } catch (_) {
+  } catch (e, st) {
     // Table may not exist
+    developer.log('api_latency_metrics query failed (table may not exist)',
+        error: e, stackTrace: st, name: 'PlatformProviders');
   }
 
   return PlatformStats(
@@ -142,7 +163,9 @@ Future<int> _safeCount(
     }
     final response = await query.count(CountOption.exact);
     return response.count;
-  } catch (_) {
+  } catch (e, st) {
+    developer.log('_safeCount for $table failed',
+        error: e, stackTrace: st, name: 'PlatformProviders');
     return 0;
   }
 }
@@ -207,8 +230,10 @@ final platformSupportTicketsProvider = FutureProvider<List<SupportTicket>>((ref)
         updatedAt: DateTime.tryParse(row['updated_at'] as String? ?? ''),
       );
     }).toList();
-  } catch (_) {
+  } catch (e, st) {
     // Table might not exist or have different structure
+    developer.log('support_tickets query failed (table may not exist)',
+        error: e, stackTrace: st, name: 'PlatformProviders');
     return [];
   }
 });
@@ -493,8 +518,9 @@ Future<void> logImpersonationEnd(String logId) async {
         .from('impersonation_log')
         .update({'ended_at': DateTime.now().toIso8601String()})
         .eq('id', logId);
-  } catch (_) {
-    // Ignore errors
+  } catch (e, st) {
+    developer.log('logImpersonationEnd failed',
+        error: e, stackTrace: st, name: 'PlatformProviders');
   }
 }
 
@@ -884,7 +910,9 @@ Future<void> reportError({
       'p_route': route,
       'p_device_info': deviceInfo,
     });
-  } catch (_) {
-    // Ignore errors when reporting errors
+  } catch (e, st) {
+    // Still log locally when reporting errors fails
+    developer.log('reportError RPC failed',
+        error: e, stackTrace: st, name: 'PlatformProviders');
   }
 }

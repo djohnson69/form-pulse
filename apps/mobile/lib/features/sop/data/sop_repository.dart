@@ -506,7 +506,10 @@ class SupabaseSopRepository implements SopRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('SopRepository org_members lookup failed',
+          error: e, stackTrace: st, name: 'SopRepository._getOrgId');
+    }
     try {
       final res = await _client
           .from('profiles')
@@ -515,7 +518,10 @@ class SupabaseSopRepository implements SopRepositoryBase {
           .maybeSingle();
       final orgId = res?['org_id'];
       if (orgId != null) return orgId.toString();
-    } catch (_) {}
+    } catch (e, st) {
+      developer.log('SopRepository profiles lookup failed',
+          error: e, stackTrace: st, name: 'SopRepository._getOrgId');
+    }
     return null;
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 import 'dart:typed_data';
@@ -17,7 +18,9 @@ Future<Uint8List?> loadFileBytes(String path) async {
     if (buffer is ByteBuffer) {
       return Uint8List.view(buffer);
     }
-  } catch (_) {
+  } catch (e, st) {
+    developer.log('loadFileBytes failed for web',
+        error: e, stackTrace: st, name: 'file_bytes_loader_web');
     return null;
   }
   return null;

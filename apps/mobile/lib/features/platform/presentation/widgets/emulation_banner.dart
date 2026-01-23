@@ -80,7 +80,7 @@ class EmulationBanner extends ConsumerWidget {
             ),
             TextButton.icon(
               onPressed: () {
-                ref.read(emulatedUserProvider.notifier).state = null;
+                stopEmulation(ref);
               },
               style: TextButton.styleFrom(
                 foregroundColor: Colors.white,
